@@ -45,8 +45,8 @@
     "vehicle_group": "Veicolo",
     "about_group": "Info",
     "telegram": "Telegram",
-    "dashboard": "Cruscotto",
-    "brand_home": "OverDrive — apri Cruscotto"
+    "dashboard": "Dashboard",
+    "brand_home": "OverDrive — apri Dashboard"
   },
   "status": {
     "device": "Dispositivo",
