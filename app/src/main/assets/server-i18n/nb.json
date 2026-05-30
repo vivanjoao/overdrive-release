@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT ikke initialisert",
     "max_connections_reached": "Max tilkobling nådd ({0})",
     "missing_connection_id": "Fraværende tilkoblings-ID",
-    "connection_not_found": "Forbindelse ikke funnet: {0}"
+    "connection_not_found": "Forbindelse ikke funnet: {0}",
+    "models_invalid_drive_side": "Ugyldig bilkonfigurasjon (forventet «lhd» eller «rhd»)"
   },
   "notifications": {
     "charging_started": "Lading startet.",

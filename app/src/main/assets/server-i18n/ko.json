@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT 초기화되지 않은",
     "max_connections_reached": "최대 연결 ({0})",
     "missing_connection_id": "결실된 연결 ID",
-    "connection_not_found": "연결이 발견되지 않았습니다: {0}"
+    "connection_not_found": "연결이 발견되지 않았습니다: {0}",
+    "models_invalid_drive_side": "차량 레이아웃이 잘못되었습니다(\"lhd\" 또는 \"rhd\" 필요)"
   },
   "notifications": {
     "charging_started": "충전 시작",

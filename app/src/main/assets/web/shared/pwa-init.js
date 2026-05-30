@@ -67,20 +67,74 @@
         return r.json();
     }
 
+    // Compare two byte sequences. Inputs may be ArrayBuffer (which is what
+    // PushSubscription.options.applicationServerKey returns per spec),
+    // Uint8Array (what urlBase64ToUint8Array produces), or null. Returns
+    // true only if both are present and byte-identical.
+    function bytesEqual(a, b) {
+        if (!a || !b) return false;
+        var ua = a instanceof Uint8Array ? a : new Uint8Array(a);
+        var ub = b instanceof Uint8Array ? b : new Uint8Array(b);
+        if (ua.length !== ub.length) return false;
+        for (var i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
+        return true;
+    }
+
     async function ensureSubscription(reg, vapidPublicKey) {
+        var wantKey = urlBase64ToUint8Array(vapidPublicKey);
         var existing = await reg.pushManager.getSubscription();
         if (existing) {
-            try {
-                var keys = existing.options && existing.options.applicationServerKey;
-                // No clean way to compare a Uint8Array vs a base64url; accept the
-                // existing subscription as-is, the server will re-key it via subscribe.
+            // Verify the existing sub is bound to the SERVER'S CURRENT
+            // VAPID key. If the daemon was reinstalled (key file lost) or
+            // a different OverDrive install ever ran on this origin, the
+            // browser is holding a sub bound to a stale key. Calling
+            // subscribe() again with a new key while a sub with a
+            // different key exists is the canonical cause of "AbortError:
+            // Registration failed - push service error" on Samsung
+            // Internet, desktop Brave, and Edge — Chrome transparently
+            // re-keys but stricter browsers reject. Unsubscribe first,
+            // then proceed to a fresh subscribe.
+            //
+            // On older Samsung Internet (~v14 and below) PushSubscription
+            // doesn't expose `.options`, so we can't compare. Treat the
+            // missing-options case as "potentially stale" and unsubscribe
+            // defensively — losing one good subscription is cheap (we
+            // immediately re-subscribe) but skipping unsubscribe on a
+            // stale sub is what's been blocking these browsers.
+            var existingKey = existing.options && existing.options.applicationServerKey;
+            if (existingKey && bytesEqual(existingKey, wantKey)) {
                 return existing;
-            } catch (e) { /* fall through to resubscribe */ }
+            }
+            log(existingKey
+                ? 'existing subscription bound to a different VAPID key — unsubscribing before re-subscribe'
+                : 'existing subscription has no inspectable key (older browser) — unsubscribing defensively');
+            try { await existing.unsubscribe(); } catch (e) { /* best-effort */ }
         }
-        return reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-        });
+        try {
+            return await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: wantKey
+            });
+        } catch (e) {
+            // AbortError on a clean origin usually means the browser's
+            // push service connection is wedged from a prior failure.
+            // Some browsers (Samsung Internet 23+, Edge) recover after
+            // an explicit clean-slate: drop ANY lingering sub on this
+            // registration and retry once. If the retry also fails, the
+            // browser genuinely can't reach its push service — bubble up.
+            if (e && (e.name === 'AbortError' || e.name === 'InvalidStateError')) {
+                log('subscribe ' + e.name + ' — retrying after explicit unsubscribe');
+                try {
+                    var stale = await reg.pushManager.getSubscription();
+                    if (stale) await stale.unsubscribe();
+                } catch (_) { /* ignore */ }
+                return reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: wantKey
+                });
+            }
+            throw e;
+        }
     }
 
     async function postSubscription(sub) {
@@ -197,21 +251,20 @@
             log('permission granted but no active subscription — attempting silent resubscribe');
             try {
                 await runSerial(async function () {
-                    // Re-check inside the serialized slot — if Enable
-                    // already ran first, a sub may now exist.
-                    var live = await reg.pushManager.getSubscription();
-                    if (live) { log('subscription appeared before silent slot ran'); return; }
                     var meta = await getCategoriesAndKey();
                     if (!meta || !meta.vapidPublicKey) {
                         log('silent resubscribe skipped: backend has no VAPID key yet');
                         return;
                     }
-                    var sub = await reg.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: urlBase64ToUint8Array(meta.vapidPublicKey)
-                    });
+                    // Route silent through ensureSubscription so it gets
+                    // the same VAPID-mismatch handling and AbortError
+                    // retry that Enable does. Without this, a stale-key
+                    // sub on Samsung Internet / Edge / desktop Brave
+                    // would throw AbortError silently and leave the user
+                    // in "permission granted, no sub" state forever.
+                    var sub = await ensureSubscription(reg, meta.vapidPublicKey);
                     await postSubscription(sub);
-                    log('silent resubscribe succeeded');
+                    log('silent resubscribe complete');
                 });
             } catch (e) {
                 // Don't escalate — the settings page will show the real

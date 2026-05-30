@@ -281,6 +281,61 @@
             margin-right: 6px;
             flex-shrink: 0;
         }
+
+        /* Material 3 radio dot used by the vehicle-layout picker. Larger
+           hit target than the toggle and pulls colours from theme tokens
+           so dark / light flip cleanly. The selected state lights up with
+           the same accent the page accent (notif-toggle.on) uses, so the
+           picker reads as a peer of the per-category toggles. */
+        .notif-radio {
+            position: relative;
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            border: 2px solid var(--border-default);
+            background: transparent;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .notif-radio:hover { border-color: #00E5FF; }
+        /* Pair :focus + :focus-visible — Chrome 58 (Android System WebView on
+           the BYD head unit) added :focus-visible only in v86, so a rule
+           targeting :focus-visible alone gets dropped at parse and the
+           keyboard ring never paints inside the WebView. Modern browsers
+           respect both, with :focus-visible's tighter "only on keyboard
+           focus" semantics taking precedence. */
+        .notif-radio:focus,
+        .notif-radio:focus-visible {
+            outline: 2px solid #00E5FF;
+            outline-offset: 3px;
+        }
+        .notif-radio.on {
+            border-color: #00E5FF;
+        }
+        .notif-radio.on::after {
+            content: '';
+            position: absolute;
+            top: 4px; left: 4px;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #00E5FF;
+            box-shadow: 0 0 6px rgba(0,229,255,0.55);
+        }
+        .notif-radio.disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        /* The whole row is the hit target for the picker. The row itself
+           gets a pointer cursor so users see the affordance, and a subtle
+           hover lift makes it feel like a peer of the notif-toggle rows.
+           The radio dot inside still receives the click via the delegated
+           handler walking up to the closest [data-side] ancestor. */
+        #driveSideCard .notif-row {
+            cursor: pointer;
+        }
+        #driveSideCard .notif-row:hover .notif-radio:not(.on) {
+            border-color: #00E5FF;
+        }
     </style>
 </head>
 <body>
@@ -314,6 +369,51 @@
                          status message (kept outside the tab system so it
                          can survive a tab switch during a save). -->
                     <div id="status" class="notif-status" style="display:none;"></div>
+
+                    <!-- ===== Vehicle layout (LHD / RHD) =====
+                         Cross-cuts every tab: door notifications fire from the
+                         camera daemon regardless of delivery channel, so the
+                         driver-side picker lives outside the tab grid. Saves
+                         to /api/models/selected (vehicle config section).
+                         The daemon force-reloads its config on every door
+                         edge so a flip here applies to the very next event
+                         without restart. -->
+                    <div class="notif-section" id="driveSideSection">
+                        <h2 id="driveSideHeading" data-i18n="notif.vehicle_layout">Vehicle layout</h2>
+                        <p class="notif-section-sub" data-i18n="notif.vehicle_layout_sub">Pick which side of the car the driver sits on. This decides whether door notifications label the front-axis doors as Front-left or Front-right. Saves immediately and applies to the next door event without restarting the daemon.</p>
+                        <!-- role=radiogroup wraps the two radio rows so screen
+                             readers announce the picker as one unit instead of
+                             two unrelated radios. aria-labelledby points at the
+                             section header. Initial radios both render OFF so
+                             LHD users don't see RHD checked for a beat before
+                             /api/models/selected resolves; DriveSidePicker.load
+                             paints the real state on first response, paint() is
+                             idempotent. -->
+                        <div class="notif-card" id="driveSideCard"
+                             role="radiogroup" aria-labelledby="driveSideHeading">
+                            <div class="notif-row" data-side="lhd">
+                                <div class="notif-row-text">
+                                    <div class="notif-row-label" data-i18n="notif.drive_lhd">Left-hand drive</div>
+                                    <div class="notif-row-note" data-i18n="notif.drive_lhd_sub">Driver sits on the left (most of Europe, North America, China).</div>
+                                </div>
+                                <!-- WAI-ARIA roving tabindex: exactly ONE radio
+                                     in the group is reachable via Tab. paint()
+                                     moves the 0 to the currently-selected
+                                     radio after the load() response, defaulting
+                                     to the first radio while the response is
+                                     still pending. Avoids a double Tab-stop. -->
+                                <div class="notif-radio" data-side="lhd" role="radio" aria-checked="false" tabindex="0"></div>
+                            </div>
+                            <div class="notif-row" data-side="rhd">
+                                <div class="notif-row-text">
+                                    <div class="notif-row-label" data-i18n="notif.drive_rhd">Right-hand drive</div>
+                                    <div class="notif-row-note" data-i18n="notif.drive_rhd_sub">Driver sits on the right (UK, Australia, India, Japan).</div>
+                                </div>
+                                <div class="notif-radio" data-side="rhd" role="radio" aria-checked="false" tabindex="-1"></div>
+                            </div>
+                        </div>
+                    </div>
+
 
                     <div class="notif-section" id="permissionSection" data-tab="push">
                         <h2 data-i18n="notif.push_delivery">Push delivery</h2>
@@ -540,6 +640,10 @@
                 // Telegram delivery preferences (critical / connectivity /
                 // motion text / videos) — persisted via /api/telegram/preferences.
                 if (window.TelegramPrefs) TelegramPrefs.load();
+                // Vehicle layout (LHD / RHD). Lives in the same vehicle
+                // config section as model + body color, so it goes through
+                // /api/models/selected.
+                if (window.DriveSidePicker) DriveSidePicker.load();
                 // Paint-drop guard for the toggle sliders is now done inside
                 // each save handler (TelegramPrefs.save and SurvSettings._
                 // persistTelegramFields), where the authoritative state is
@@ -638,6 +742,220 @@
                 });
             }
             return { load: load, save: save };
+        }());
+
+        // ===== Vehicle layout (LHD / RHD) =====
+        // Pure-JS radio control over /api/models/selected. The vehicle
+        // section already round-trips modelId + color; we piggy-back the
+        // driveSide field on the same endpoint so users have a single
+        // place to think about the car's persisted properties.
+        //
+        // Why a custom radio instead of <input type="radio"> — the page is
+        // ES5 + Chrome 58 in the WebView, where the native radio's
+        // appearance can't be themed reliably without a wrapper, and the
+        // existing notif-toggle vocabulary is binary. A two-pill picker
+        // matches "you'll only ever pick one" while still painting from
+        // theme tokens. The current selection is mirrored to aria-checked
+        // on every render.
+        window.DriveSidePicker = (function () {
+            'use strict';
+            // null until the first /api/models/selected response — keeps
+            // both radios visually unselected during the load window so a
+            // transient network failure can't paint RHD on top of an LHD-
+            // configured car. The server's getVehicle() backfills "rhd"
+            // for never-saved configs, so a successful GET always returns
+            // a concrete "lhd"/"rhd"; null on the client therefore means
+            // "we haven't talked to the server yet" rather than "no
+            // preference exists". paint() handles null by leaving both
+            // radios off + aria-checked=false (an indeterminate radiogroup,
+            // permitted by WAI-ARIA).
+            var current = null;
+            var inFlight = false;
+            // Set true the moment the user clicks a radio. Late /api/models/
+            // selected responses (slow tunnel, retry, etc.) will then NOT
+            // clobber the just-saved value — load() respects the user's
+            // intent. Cleared only when the picker is unmounted, which
+            // doesn't happen on this page.
+            var userActed = false;
+            function tr(k, fb) {
+                var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(k) : null;
+                return v || fb || k;
+            }
+            function toast(msg, kind) {
+                if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, kind || 'info');
+            }
+            function paint() {
+                var radios = document.querySelectorAll('#driveSideCard .notif-radio');
+                // Roving tabindex per WAI-ARIA radiogroup pattern: only ONE
+                // radio in the group is reachable via Tab. The 0 lives on
+                // the selected radio; if nothing is selected (current=null
+                // during load or after a failed load), it parks on the
+                // first radio so keyboard users can still reach the group.
+                var firstFocusableIdx = 0;
+                for (var k = 0; k < radios.length; k++) {
+                    if (radios[k].getAttribute('data-side') === current) {
+                        firstFocusableIdx = k;
+                        break;
+                    }
+                }
+                for (var i = 0; i < radios.length; i++) {
+                    var r = radios[i];
+                    var on = (current !== null) && (r.getAttribute('data-side') === current);
+                    r.classList.toggle('on', on);
+                    r.setAttribute('aria-checked', on ? 'true' : 'false');
+                    r.classList.toggle('disabled', inFlight);
+                    r.setAttribute('tabindex', i === firstFocusableIdx ? '0' : '-1');
+                }
+            }
+            function load() {
+                var url = '/api/models/selected';
+                var fetcher = (typeof BYDAuth !== 'undefined' && BYDAuth.fetch)
+                    ? BYDAuth.fetch.bind(BYDAuth) : fetch;
+                fetcher(url, { cache: 'no-store' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (j) {
+                        // Race guard: if the user clicked a radio while the
+                        // GET was in flight (or the GET completed after a
+                        // pick() POST already updated state), don't clobber
+                        // the user's value with the older server snapshot.
+                        if (userActed) { paint(); return; }
+                        if (j && (j.driveSide === 'lhd' || j.driveSide === 'rhd')) {
+                            current = j.driveSide;
+                        }
+                        // No else-branch for 200-without-driveSide:
+                        // handleGetSelected (ModelsApiHandler.java) always
+                        // emits driveSide via vehicle.optString(..,"rhd"),
+                        // so the only path here is the network error one
+                        // below.
+                        paint();
+                    })
+                    .catch(function () {
+                        if (userActed) { paint(); return; }
+                        // Surface the failure so the user knows the picker
+                        // isn't reflecting persisted state. Without this
+                        // the picker would render two unselected radios
+                        // with zero indication that anything went wrong.
+                        toast(tr('notif.drive_load_failed', 'Could not load vehicle layout'), 'error');
+                        paint();
+                    });
+            }
+            function pick(side) {
+                if (inFlight) return;
+                if (side !== 'lhd' && side !== 'rhd') return;
+                if (side === current) return;
+                var prev = current;
+                current = side;
+                inFlight = true;
+                // Latch BEFORE the network call so a concurrently-resolving
+                // load() can't clobber the in-flight optimistic paint.
+                userActed = true;
+                paint();
+                // Watchdog: if BYDAuth.fetch chains through auth-redirect logic
+                // that never resolves (rare, but possible with a half-dead
+                // tunnel), the picker would otherwise stay disabled forever.
+                // 10s is generous for the head unit's slow tunnel; matches
+                // the page's notif-status banners showing tunnel issues.
+                var settled = false;
+                var watchdog = setTimeout(function () {
+                    if (settled) return;
+                    settled = true;
+                    inFlight = false;
+                    current = prev;
+                    paint();
+                    toast(tr('notif.drive_save_failed', 'Could not save vehicle layout'), 'error');
+                }, 10000);
+                var fetcher = (typeof BYDAuth !== 'undefined' && BYDAuth.fetch)
+                    ? BYDAuth.fetch.bind(BYDAuth) : fetch;
+                fetcher('/api/models/selected', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ driveSide: side })
+                }).then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                }).then(function (data) {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(watchdog);
+                    inFlight = false;
+                    // Server uses two response shapes today: success returns
+                    // {"ok":true} (handleSetSelected line 343) and errors
+                    // return {"success":false,"error":...} (HttpResponse.
+                    // sendJsonError). Treat anything that's not an explicit
+                    // failure marker as success — survives a future server-
+                    // side envelope change without breaking the picker.
+                    var isFailure = !data || data.ok === false || data.success === false;
+                    if (!isFailure) {
+                        toast(tr('notif.drive_saved', 'Vehicle layout saved'), 'success');
+                    } else {
+                        current = prev;
+                        toast(tr('notif.drive_save_failed', 'Could not save vehicle layout'), 'error');
+                    }
+                    paint();
+                }).catch(function () {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(watchdog);
+                    inFlight = false;
+                    current = prev;
+                    paint();
+                    toast(tr('notif.drive_save_failed', 'Could not save vehicle layout'), 'error');
+                });
+            }
+            // Resolve any node inside the card to its side ("lhd" or "rhd").
+            // Walks up to the nearest ancestor carrying data-side so users
+            // can click anywhere on the row (label, sub-text, radio dot)
+            // and still trigger pick(). Returns null when the click landed
+            // on the section header or padding outside any row.
+            function sideFor(node, card) {
+                var el = node;
+                while (el && el !== card) {
+                    if (el.getAttribute && el.getAttribute('data-side')) {
+                        return el.getAttribute('data-side');
+                    }
+                    el = el.parentNode;
+                }
+                return null;
+            }
+            // Delegate from the card so we don't bind per-row listeners and
+            // race the i18n hydration (which may swap nodes' text content).
+            document.addEventListener('DOMContentLoaded', function () {
+                var card = document.getElementById('driveSideCard');
+                if (!card) return;
+                card.addEventListener('click', function (e) {
+                    var side = sideFor(e.target, card);
+                    if (side) pick(side);
+                });
+                // Keyboard support — space / enter on the focused radio.
+                // Arrow keys cycle the selection; that's the WAI-ARIA radio
+                // pattern and what users coming from native form radios
+                // expect. Tab moves out of the group as a whole.
+                card.addEventListener('keydown', function (e) {
+                    // All keyboard interactions require a radio to actually
+                    // hold focus — without that idx>=0 gate, a focused
+                    // descendant (impossible today since only the radios
+                    // carry tabindex, but defensive) could trigger pick()
+                    // on Space/Enter via sideFor's row-walk.
+                    var radios = card.querySelectorAll('.notif-radio');
+                    var focused = document.activeElement;
+                    var idx = -1;
+                    for (var i = 0; i < radios.length; i++) {
+                        if (radios[i] === focused) { idx = i; break; }
+                    }
+                    if (idx < 0) return;
+                    if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        pick(focused.getAttribute('data-side'));
+                    } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        radios[(idx + 1) % radios.length].focus();
+                    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                        e.preventDefault();
+                        radios[(idx - 1 + radios.length) % radios.length].focus();
+                    }
+                });
+            });
+            return { load: load, pick: pick };
         }());
 
         // ==================== ORIGIN GATE ====================

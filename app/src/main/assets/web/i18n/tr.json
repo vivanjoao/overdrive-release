@@ -196,6 +196,8 @@
     "enable_could_not": "{reason}'i etkinleştiremedim",
     "enable_success": "Bu cihazda iletme bildirimleri etkinleştirilmiştir.",
     "enable_failed": "etkinleştirme başarısız: {error}",
+    "subscribe_browser_error": "Tarayıcınız push aboneliğini reddetti: {error}. Başka bir tarayıcı deneyin — Google Play Hizmetleri olmadan Samsung Internet, Shields etkinleştirilmiş Brave ve hizmet kesintisi sırasında Edge — bunların hepsinin burada başarısız olduğu bilinmektedir.",
+    "tunnel_unreachable": "Head unit'e ulaşılamıyor. Zrok veya ters proxy URL'si artık çözümlenmiyor — tünelin çalıştığından emin olun ve sayfayı yeniden yükleyin.",
     "sev_critical": "Kritik: her şeyi bırakma uyarısı  yapışkan bayrak, daha uzun titreşme, sessiz saatleri görmezden gelmek.",
     "sev_warn": "Uyarı: kısa titreşim, standart pankart  yakında bakılacak bir şey.",
     "sev_auto": "Otomatik: olay başına şiddet verilerden belirlenir (yavaş sızıntı → uyarı, hızlı sızıntı → kritik).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram teslimatı",
     "telegram_sub": "İzleme olaylarını eşleştirilmiş Telegram sohbetine gönderin. Telegram daemon ayarlarında botu eşleştirin; aşağıdaki düğmeler sohbetin hangi ciddiyetlere ulaştığını belirler. Dış seviyeler hala kaydedilir  sadece mesaj bastırılır.",
     "telegram_delivery_sub": "Telegram hangi tür olayları alır.  yukarıdaki katmanlık filtreden bağımsız olarak tüm kategorileri açıp kapatabilir.",
-    "subscribe_browser_error": "Arşiviniz push aboneliğini reddetti: {error}. Başka bir tarayıcı deneyin — Google Play Hizmetleri olmadan Samsung İnternet, Kalkanları etkinleştirilen Brave ve kesinti sırasında Edge'in burada başarısız olduğu bilinmektedir.",
-    "tunnel_unreachable": "Zrok veya ters vekil URL çözmeyi durdurdu."
+    "vehicle_layout": "Araç düzeni",
+    "vehicle_layout_sub": "Sürücünün aracın hangi tarafında oturduğunu seçin. Bu, kapı bildirimlerinin ön kapıları «Ön sol» veya «Ön sağ» olarak etiketleyip etiketlemeyeceğini belirler. Anında kaydedilir ve daemon yeniden başlatılmadan bir sonraki kapı olayında uygulanır.",
+    "drive_lhd": "Soldan direksiyon",
+    "drive_lhd_sub": "Sürücü solda oturur (Avrupa'nın büyük bölümü, Kuzey Amerika, Çin).",
+    "drive_rhd": "Sağdan direksiyon",
+    "drive_rhd_sub": "Sürücü sağda oturur (Birleşik Krallık, Avustralya, Hindistan, Japonya).",
+    "drive_save_failed": "Araç düzeni kaydedilemedi",
+    "drive_saved": "Araç düzeni kaydedildi",
+    "drive_load_failed": "Araç düzeni yüklenemedi"
   },
   "trip": {
     "tab_trips": "Seyahatler",

@@ -196,6 +196,8 @@
     "enable_could_not": "Activation impossible : {reason}",
     "enable_success": "Les notifications push sont activées sur cet appareil.",
     "enable_failed": "Échec de l'activation: {error}",
+    "subscribe_browser_error": "Votre navigateur a refusé l'abonnement push: {error}. Essayez un autre navigateur — Samsung Internet sans Google Play Services, Brave avec des boucliers activés, et Edge pendant les pannes sont tous connus pour échouer ici.",
+    "tunnel_unreachable": "Impossible de joindre la tête de console. L'URL Zrok ou reverse-proxy ne se résout plus — vérifiez que le tunnel est actif et rechargez la page.",
     "sev_critical": "Critique: alerte prioritaire, bandeau permanent, vibrer plus longtemps, ignorer les heures de silence.",
     "sev_warn": "Avertissement: vibration courte, bannière standard - quelque chose à regarder bientôt.",
     "sev_auto": "Auto: la gravité est déterminée pour chaque évènement à partir des données (fuite lente → avertissement, fuite rapide → critique).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram livraison",
     "telegram_sub": "Envoyer des événements de surveillance à un chat Telegram en couple. Associer le bot dans les paramètres du daemon Telegram; les interrupteurs ci-dessous décident de la gravité atteignant le chat.",
     "telegram_delivery_sub": "Quel type d'événements Telegram reçoit. indépendamment du filtre par niveau ci-dessus  ces catégories complètes sont activées ou désactivées.",
-    "subscribe_browser_error": "Votre navigateur a refusé l'abonnement push: {error}. Essayez un autre navigateur — Samsung Internet sans Google Play Services, Brave avec des boucliers activés, et Edge pendant les pannes sont tous connus pour échouer ici.",
-    "tunnel_unreachable": "Le Zrok ou le URL reverse-proxy a cessé de résoudre — vérifier que le tunnel est en marche et recharger la page."
+    "vehicle_layout": "Configuration du véhicule",
+    "vehicle_layout_sub": "Indique de quel côté de la voiture le conducteur est assis. Cela décide si les notifications de porte étiquettent les portes avant comme « Avant gauche » ou « Avant droite ». Enregistré immédiatement et appliqué au prochain événement de porte, sans redémarrer le daemon.",
+    "drive_lhd": "Conduite à gauche",
+    "drive_lhd_sub": "Le conducteur est assis à gauche (la majorité de l'Europe, l'Amérique du Nord, la Chine).",
+    "drive_rhd": "Conduite à droite",
+    "drive_rhd_sub": "Le conducteur est assis à droite (Royaume-Uni, Australie, Inde, Japon).",
+    "drive_save_failed": "Impossible d'enregistrer la configuration du véhicule",
+    "drive_saved": "Configuration du véhicule enregistrée",
+    "drive_load_failed": "Impossible de charger la configuration du véhicule"
   },
   "trip": {
     "tab_trips": "Trajets",

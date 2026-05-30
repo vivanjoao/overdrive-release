@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT başlatılmamış",
     "max_connections_reached": "Maksimum bağlantılar ({0})",
     "missing_connection_id": "Kayıp bağlantı kimliği",
-    "connection_not_found": "Bağlantı bulunamadı: {0}"
+    "connection_not_found": "Bağlantı bulunamadı: {0}",
+    "models_invalid_drive_side": "Geçersiz araç düzeni («lhd» veya «rhd» bekleniyordu)"
   },
   "notifications": {
     "charging_started": "Şarj başladı .",

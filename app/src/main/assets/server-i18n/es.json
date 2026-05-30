@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT no iniciado",
     "max_connections_reached": "Las conexiones máximas alcanzadas ({0})",
     "missing_connection_id": "Identificación de conexión faltante",
-    "connection_not_found": "Conexión no encontrada: {0}"
+    "connection_not_found": "Conexión no encontrada: {0}",
+    "models_invalid_drive_side": "Disposición del vehículo no válida (se esperaba «lhd» o «rhd»)"
   },
   "notifications": {
     "charging_started": "Se ha iniciado la carga .",

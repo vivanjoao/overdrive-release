@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT は初期化されていない",
     "max_connections_reached": "最大接続が達成された ({0})",
     "missing_connection_id": "接続 ID 欠落",
-    "connection_not_found": "接続が見つかりませんでした: {0}"
+    "connection_not_found": "接続が見つかりませんでした: {0}",
+    "models_invalid_drive_side": "車両レイアウトが無効です(「lhd」または「rhd」が必要)"
   },
   "notifications": {
     "charging_started": "充電開始",

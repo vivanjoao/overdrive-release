@@ -35,6 +35,7 @@
     "models_invalid_json": "Invalid JSON",
     "models_unknown_id_with_id": "Unknown model id: {0}",
     "models_invalid_color": "Invalid color (expected #RRGGBB)",
+    "models_invalid_drive_side": "Invalid drive side (expected \"lhd\" or \"rhd\")",
     "models_nothing_to_update": "Nothing to update",
     "models_persist_failed": "Failed to persist",
     "models_id_required": "id is required",

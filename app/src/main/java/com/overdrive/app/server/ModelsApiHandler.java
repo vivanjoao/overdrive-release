@@ -270,6 +270,10 @@ public class ModelsApiHandler {
         JSONObject response = new JSONObject();
         response.put("modelId", modelId);
         response.put("color", vehicle.optString("color", "#E8E8EC"));
+        // driveSide controls which front-axis door each BYD HAL area code
+        // labels as "Front-left" vs "Front-right" in notifications. The
+        // notifications page reads this field to paint the LHD/RHD picker.
+        response.put("driveSide", vehicle.optString("driveSide", "rhd"));
         HttpResponse.sendJson(out, response.toString());
     }
 
@@ -305,6 +309,14 @@ public class ModelsApiHandler {
                 return;
             }
             patch.put("color", color);
+        }
+        if (incoming.has("driveSide")) {
+            String side = incoming.optString("driveSide", "").toLowerCase(java.util.Locale.ROOT);
+            if (!side.equals("lhd") && !side.equals("rhd")) {
+                HttpResponse.sendJsonError(out, Messages.get("errors.models_invalid_drive_side"));
+                return;
+            }
+            patch.put("driveSide", side);
         }
         if (patch.length() == 0) {
             HttpResponse.sendJsonError(out, Messages.get("errors.models_nothing_to_update"));

@@ -196,6 +196,8 @@
     "enable_could_not": "Kan ikke aktivere: {reason}",
     "enable_success": "Push-meldinger aktivert på denne enheten.",
     "enable_failed": "Aktiveringsfeil: {error}",
+    "subscribe_browser_error": "Din nettleser nektet push-abonnementet: {error}. Prøv en annen nettleser — Samsung Internet uten Google Play Services, Brave med Shields aktivert, og Edge under tjenestebrudd er alle kjent for å mislykkes her.",
+    "tunnel_unreachable": "Når ikke head unit. Zrok- eller reverse-proxy-URL-en lar seg ikke lenger slå opp — sjekk at tunnelen kjører og last siden på nytt.",
     "sev_critical": "Kritisk: Drop-all alert  klebrig banner, lenger vibrere, ignorerer stille timer.",
     "sev_warn": "Advarsel: kort vibrasjon, standard banner  noe å se på snart.",
     "sev_auto": "Auto: alvorlighetsgrad bestemmes per hendelse fra dataene (langsom lekkasje → advarsel, rask lekkasje → kritisk).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram levering",
     "telegram_sub": "Send overvåkings hendelser til en parert Telegram chat. Parer botten i Telegram daemon innstillingene; toggler nedenfor bestemmer hvilke alvorlighetsgradene som når chatten. Off-nivåer er fortsatt registrert  bare meldingen er undertrykt.",
     "telegram_delivery_sub": "Hva slags hendelser Telegram mottar. uavhengig av filter per nivå over  disse bytte hele kategorier på eller av.",
-    "subscribe_browser_error": "Din nettleser nektet push-abonnementet: {error}. Prøv en annen nettleser — Samsung Internet uten Google Play Services, Brave med skjold aktiveret, og Edge under avbrudd er alle kjent for å mislykkes her.",
-    "tunnel_unreachable": "Zrok eller reverse-proxy URL sluttet å løse — sjekk tunnelen er oppe og laste siden på nytt."
+    "vehicle_layout": "Bilkonfigurasjon",
+    "vehicle_layout_sub": "Velg hvilken side av bilen sjåføren sitter på. Dette avgjør om dørvarsler merker fordørene som «Foran venstre» eller «Foran høyre». Lagres med en gang og brukes på neste dørhendelse — uten å starte daemon på nytt.",
+    "drive_lhd": "Venstrestyrt",
+    "drive_lhd_sub": "Sjåføren sitter til venstre (det meste av Europa, Nord-Amerika, Kina).",
+    "drive_rhd": "Høyrestyrt",
+    "drive_rhd_sub": "Sjåføren sitter til høyre (Storbritannia, Australia, India, Japan).",
+    "drive_save_failed": "Kunne ikke lagre bilkonfigurasjonen",
+    "drive_saved": "Bilkonfigurasjon lagret",
+    "drive_load_failed": "Kunne ikke laste bilkonfigurasjonen"
   },
   "trip": {
     "tab_trips": "Turer",

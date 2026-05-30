@@ -196,6 +196,8 @@
     "enable_could_not": "Niet geactiveerd: {reason}",
     "enable_success": "Op dit apparaat zijn push-meldingen ingeschakeld.",
     "enable_failed": "Geïsoleerd: {error}",
+    "subscribe_browser_error": "Je browser weigerde het push-abonnement: {error}. Probeer een andere browser — Samsung Internet zonder Google Play Services, Brave met schilden ingeschakeld, en Edge tijdens uitvallen zijn hier allemaal bekend dat ze falen.",
+    "tunnel_unreachable": "Kan de head unit niet bereiken. De Zrok- of reverse-proxy-URL wordt niet meer opgelost — controleer of de tunnel actief is en herlaad de pagina.",
     "sev_critical": "Critisch: drop-everything alert  kleverige banner, langer trillen, negeert stille uren.",
     "sev_warn": "Waarschuwing: korte trillingen, standaardbanner  iets om snel te kijken.",
     "sev_auto": "Automatisch: de ernst wordt per gebeurtenis bepaald uit de gegevens (langzaam lek → waarschuwing, snel lek → kritisch).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram aflevering",
     "telegram_sub": "Stuur bewakingsgebeurtenissen naar een gepaardgaande Telegram chat. Doe de bot in de Telegram daemon-instellingen; de onderstaande omschakeling bepaalt welke ernst de chat bereikt.",
     "telegram_delivery_sub": "Telegram ontvangt welk soort gebeurtenissen. onafhankelijk van het filter per niveau boven  deze schakelen hele categorieën aan of uit.",
-    "subscribe_browser_error": "Je browser weigerde het push-abonnement: {error}. Probeer een andere browser — Samsung Internet zonder Google Play Services, Brave met schilden ingeschakeld, en Edge tijdens uitvallen zijn hier allemaal bekend dat ze falen.",
-    "tunnel_unreachable": "De Zrok of reverse-proxy URL stopte met oplossen."
+    "vehicle_layout": "Voertuigindeling",
+    "vehicle_layout_sub": "Kies aan welke kant van de auto de bestuurder zit. Dit bepaalt of deurmeldingen de voorste deuren labelen als «Voor links» of «Voor rechts». Wordt direct opgeslagen en geldt vanaf het volgende deurevent — zonder de daemon te herstarten.",
+    "drive_lhd": "Linksgestuurd",
+    "drive_lhd_sub": "De bestuurder zit links (groot deel van Europa, Noord-Amerika, China).",
+    "drive_rhd": "Rechtsgestuurd",
+    "drive_rhd_sub": "De bestuurder zit rechts (Verenigd Koninkrijk, Australië, India, Japan).",
+    "drive_save_failed": "Voertuigindeling kon niet worden opgeslagen",
+    "drive_saved": "Voertuigindeling opgeslagen",
+    "drive_load_failed": "Voertuigindeling kon niet worden geladen"
   },
   "trip": {
     "tab_trips": "Ritten",

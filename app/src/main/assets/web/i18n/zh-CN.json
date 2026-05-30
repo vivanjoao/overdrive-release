@@ -196,6 +196,8 @@
     "enable_could_not": "无法启用: {reason}",
     "enable_success": "在此设备上启用了推通知.",
     "enable_failed": "启动失败: {error}",
+    "subscribe_browser_error": "您的浏览器拒绝了推送订阅：{error}。请尝试其他浏览器 — 没有 Google Play 服务的 Samsung Internet、启用了 Shields 的 Brave 以及在服务中断期间的 Edge 都已知会在此失败。",
+    "tunnel_unreachable": "无法连接到主机。Zrok 或反向代理 URL 已停止解析 — 请检查隧道是否正常并重新加载页面。",
     "sev_critical": "关键:放弃一切警报 粘旗,更长的振动,忽略安静的时间.",
     "sev_warn": "警告:短振动,标准标志  很快要看看的东西.",
     "sev_auto": "自动:每次事件的严重性由数据决定 (缓慢泄漏 →警告,快速泄漏 →关键).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram 交货",
     "telegram_sub": "在 Telegram 聊天中发送监控事件. 在 Telegram 妖怪设置中对接机器人;下面的开关决定聊天达到哪些严重程度. 离线层仍然记录只有消息被压制.",
     "telegram_delivery_sub": "独立于上面的每个层次过器,这些则将整个类别开关或开关.",
-    "subscribe_browser_error": "您的浏览器拒绝了推送订阅:{error}。请尝试其他浏览器 — 没有 Google Play 服务的三星浏览器、启用了盾牌的 Brave 以及在故障期间的 Edge 都已知会在此失败。",
-    "tunnel_unreachable": "无法连接到主机。Zrok 或反向代理 URL 已停止解析 — 请检查隧道是否正常并重新加载页面。"
+    "vehicle_layout": "车辆布局",
+    "vehicle_layout_sub": "选择驾驶员位于车辆哪一侧。该设置决定门事件通知将前排车门标记为「左前」还是「右前」。即时保存,无需重启 daemon,在下一次门事件起生效。",
+    "drive_lhd": "左舵驾驶",
+    "drive_lhd_sub": "驾驶员位于左侧(欧洲大部分地区、北美、中国)。",
+    "drive_rhd": "右舵驾驶",
+    "drive_rhd_sub": "驾驶员位于右侧(英国、澳大利亚、印度、日本)。",
+    "drive_save_failed": "无法保存车辆布局",
+    "drive_saved": "车辆布局已保存",
+    "drive_load_failed": "无法加载车辆布局"
   },
   "trip": {
     "tab_trips": "行程",

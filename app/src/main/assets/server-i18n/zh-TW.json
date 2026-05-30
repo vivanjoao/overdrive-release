@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT沒有初始化",
     "max_connections_reached": "達到最大的連接 ({0})",
     "missing_connection_id": "缺失連接身份證",
-    "connection_not_found": "沒有找到連結: {0}"
+    "connection_not_found": "沒有找到連結: {0}",
+    "models_invalid_drive_side": "車輛配置無效(應為「lhd」或「rhd」)"
   },
   "notifications": {
     "charging_started": "開始充電",

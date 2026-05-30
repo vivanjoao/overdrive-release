@@ -18,12 +18,17 @@ public final class DoorEventNotifier {
     // BYD bodywork area constants. The SDK publishes
     // BODYWORK_CMD_DOOR_LEFT_FRONT=1 / RIGHT_FRONT=2 / LEFT_REAR=3 / RIGHT_REAR=4
     // but field-tested telemetry on Sealion/Atto/Seal swaps L↔R on the FRONT
-    // axis only — area 1 is the right front door in real life, area 2 is the
-    // left front. The REAR axis matches the SDK declaration as-is (LR=3,
-    // RR=4). We remap accordingly so notification copy matches the physical
-    // door the user sees.
-    private static final int AREA_RF = 1;
-    private static final int AREA_LF = 2;
+    // axis only — area 1 is the right front door in real life on RHD trims,
+    // area 2 is the left front. The REAR axis matches the SDK declaration
+    // as-is (LR=3, RR=4).
+    //
+    // The L↔R swap is also drive-side dependent: on LHD trims the front axis
+    // matches the SDK declaration (area 1 = LF, area 2 = RF). The user-set
+    // driveSide config field decides which mapping applies. Default "rhd"
+    // since the legacy hardcoded swap was calibrated against RHD vehicles.
+    // Rear-axis is symmetric and not affected by drive side.
+    private static final int AREA_1 = 1;
+    private static final int AREA_2 = 2;
     private static final int AREA_LR = 3;
     private static final int AREA_RR = 4;
     private static final int AREA_HOOD = 5;
@@ -107,14 +112,38 @@ public final class DoorEventNotifier {
 
     private static String areaLabel(int area) {
         switch (area) {
-            case AREA_LF: return Messages.get("notifications.area_front_left");
-            case AREA_RF: return Messages.get("notifications.area_front_right");
+            case AREA_1: return Messages.get(isRhd()
+                    ? "notifications.area_front_right"
+                    : "notifications.area_front_left");
+            case AREA_2: return Messages.get(isRhd()
+                    ? "notifications.area_front_left"
+                    : "notifications.area_front_right");
             case AREA_LR: return Messages.get("notifications.area_rear_left");
             case AREA_RR: return Messages.get("notifications.area_rear_right");
             case AREA_HOOD: return Messages.get("notifications.area_hood");
             case AREA_TRUNK: return Messages.get("notifications.area_trunk");
             case AREA_FUEL_CAP: return Messages.get("notifications.area_fuel_cap");
             default: return Messages.get("notifications.area_door_n", area);
+        }
+    }
+
+    /**
+     * Per-event read of the user's drive-side preference. The notifier runs
+     * inside the camera daemon process while the picker writes from the app
+     * UID; UnifiedConfigManager.forceReload() bypasses the per-process JSON
+     * cache so a flip on the web page takes effect on the very next door
+     * edge without a daemon restart. Default "rhd" matches getVehicle().
+     */
+    private static boolean isRhd() {
+        try {
+            com.overdrive.app.config.UnifiedConfigManager.forceReload();
+        } catch (Throwable ignored) {}
+        try {
+            String side = com.overdrive.app.config.UnifiedConfigManager
+                    .getVehicle().optString("driveSide", "rhd");
+            return !"lhd".equalsIgnoreCase(side);
+        } catch (Throwable t) {
+            return true;
         }
     }
 }

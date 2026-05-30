@@ -196,6 +196,8 @@
     "enable_could_not": "설정할 수 없습니다: {reason}",
     "enable_success": "이 장치에 푸시 알림이 활성화되어 있습니다.",
     "enable_failed": "활성화 실패: {error}",
+    "subscribe_browser_error": "귀하의 브라우저가 푸시 구독을 거부했습니다: {error}. 다른 브라우저를 시도해 보세요 — Google Play 서비스 없이 사용 중인 Samsung Internet, Shields가 활성화된 Brave, 그리고 장애가 발생한 Edge는 모두 여기에서 실패하는 것으로 알려져 있습니다.",
+    "tunnel_unreachable": "헤드 유닛에 연결할 수 없습니다. Zrok 또는 리버스 프록시 URL의 해석이 중단되었습니다 — 터널이 작동 중인지 확인하고 페이지를 다시 로드하세요.",
     "sev_critical": "비평적: 모든 것을 떨어뜨리는 경고  붙어있는 깃발, 더 긴 진동, 조용한 시간을 무시합니다.",
     "sev_warn": "경고: 짧은 진동, 표준 깃발",
     "sev_auto": "자동: 사건별로 심각성은 데이터에서 결정됩니다 ( 느린 누출 → 경고, 빠른 누출 → 중요).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram 배달",
     "telegram_sub": "Telegram 채팅에 감시 이벤트를 전송하십시오. Telegram 데이먼 설정에서 봇을 결합하십시오. 아래의 타그러는 채팅에 도달하는 심각성을 결정합니다. 외부 계층은 여전히 기록됩니다.",
     "telegram_delivery_sub": "Telegram는 어떤 종류의 이벤트를 수신합니다.  위의 각 계층 필터에 상관없이 이 모든 카테고리를 켜거나 꺼냅니다.",
-    "subscribe_browser_error": "귀하의 브라우저는 푸시 구독을 거부했습니다: {error}. 다른 브라우저를 시도하십시오.",
-    "tunnel_unreachable": "Zrok 또는 리버스 프록시 URL는 해결을 멈췄습니다 터널이 올라갔는지 확인하고 페이지를 다시 로드하세요"
+    "vehicle_layout": "차량 레이아웃",
+    "vehicle_layout_sub": "운전자가 차량의 어느 쪽에 앉는지 선택합니다. 이 설정은 도어 알림에서 앞쪽 도어를 「좌측 앞」 또는 「우측 앞」으로 표시할지를 결정합니다. 즉시 저장되며, daemon을 재시작하지 않아도 다음 도어 이벤트부터 적용됩니다.",
+    "drive_lhd": "좌측 핸들",
+    "drive_lhd_sub": "운전자가 왼쪽에 앉습니다(유럽 대부분, 북미, 중국).",
+    "drive_rhd": "우측 핸들",
+    "drive_rhd_sub": "운전자가 오른쪽에 앉습니다(영국, 호주, 인도, 일본).",
+    "drive_save_failed": "차량 레이아웃을 저장하지 못했습니다",
+    "drive_saved": "차량 레이아웃을 저장했습니다",
+    "drive_load_failed": "차량 레이아웃을 불러오지 못했습니다"
   },
   "trip": {
     "tab_trips": "주행 기록",

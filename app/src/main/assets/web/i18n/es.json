@@ -196,6 +196,8 @@
     "enable_could_not": "No pudo activar: {reason}",
     "enable_success": "Notificaciones push habilitadas en este dispositivo.",
     "enable_failed": "Habilitar fallido: {error}",
+    "subscribe_browser_error": "Su navegador rechazó la suscripción push: {error}. Prueba un navegador diferente — Samsung Internet sin Google Play Services, Brave con escudos habilitados y Edge durante apagones son todos conocidos por fallar aquí.",
+    "tunnel_unreachable": "No puedo llegar a la unidad principal. Zrok o reverso-proxy URL dejó de resolver — comprobar que el túnel está arriba y recargar la página.",
     "sev_critical": "Crítico: alerta de todo, bandera pegajosa, vibra más tiempo, ignora las horas tranquilas.",
     "sev_warn": "Advertencia: vibración corta, bandera estándar  algo para ver pronto.",
     "sev_auto": "Auto: la gravedad se decide por evento a partir de los datos (vacunación lenta → advertencia, vacunación rápida → crítica).",
@@ -206,8 +208,15 @@
     "telegram": "Entrega de Telegram",
     "telegram_sub": "Enviar eventos de vigilancia a un chat Telegram emparejado. emparejar el bot en la configuración de daemon Telegram; los interruptores a continuación deciden qué severidades alcanzan el chat.",
     "telegram_delivery_sub": "Independientemente del filtro por nivel de arriba, estas categorías enteras se activan o desconectan.",
-    "subscribe_browser_error": "Su navegador rechazó la suscripción push: {error}. Prueba un navegador diferente — Samsung Internet sin Google Play Services, Brave con escudos habilitados y Edge durante apagones son todos conocidos por fallar aquí.",
-    "tunnel_unreachable": "No puedo llegar a la unidad principal. Zrok o reverso-proxy URL dejó de resolver — comprobar que el túnel está arriba y recargar la página."
+    "vehicle_layout": "Disposición del vehículo",
+    "vehicle_layout_sub": "Elige en qué lado del coche se sienta el conductor. Esto decide si las notificaciones de puerta etiquetan las puertas delanteras como «Delantera izq.» o «Delantera der.». Se guarda al instante y se aplica al siguiente evento de puerta sin reiniciar el daemon.",
+    "drive_lhd": "Volante a la izquierda",
+    "drive_lhd_sub": "El conductor se sienta a la izquierda (casi toda Europa, Norteamérica, China).",
+    "drive_rhd": "Volante a la derecha",
+    "drive_rhd_sub": "El conductor se sienta a la derecha (Reino Unido, Australia, India, Japón).",
+    "drive_save_failed": "No se pudo guardar la disposición del vehículo",
+    "drive_saved": "Disposición del vehículo guardada",
+    "drive_load_failed": "No se pudo cargar la disposición del vehículo"
   },
   "trip": {
     "tab_trips": "Viajes",

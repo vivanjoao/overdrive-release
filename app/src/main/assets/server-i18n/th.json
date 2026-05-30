@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT ยังไม่เริ่มทำงาน",
     "max_connections_reached": "เชื่อมต่อเต็มจำนวนแล้ว ({0})",
     "missing_connection_id": "ขาด ID เชื่อมต่อ",
-    "connection_not_found": "ไม่พบการเชื่อมต่อ: {0}"
+    "connection_not_found": "ไม่พบการเชื่อมต่อ: {0}",
+    "models_invalid_drive_side": "เลย์เอาต์ของรถไม่ถูกต้อง (ต้องเป็น «lhd» หรือ «rhd»)"
   },
   "notifications": {
     "charging_started": "เริ่มชาร์จ",

@@ -569,13 +569,25 @@ object UnifiedConfigManager {
     }
 
     /**
-     * Get vehicle appearance config section (selected 3D model + body color).
+     * Get vehicle appearance config section (selected 3D model + body color +
+     * drive-side layout). `driveSide` is "lhd" or "rhd" and decides which
+     * physical front door each BYD HAL door-area code maps to in
+     * notifications. Default "rhd" because the field-tested L↔R swap in
+     * DoorEventNotifier was calibrated against RHD Sealion/Atto/Seal trims.
      */
     @JvmStatic
     fun getVehicle(): JSONObject {
-        return loadConfig().optJSONObject("vehicle") ?: JSONObject().apply {
+        val stored = loadConfig().optJSONObject("vehicle")
+        if (stored != null) {
+            // Backfill driveSide on configs written before this field existed
+            // so call sites can read it unconditionally without a default.
+            if (!stored.has("driveSide")) stored.put("driveSide", "rhd")
+            return stored
+        }
+        return JSONObject().apply {
             put("modelId", "seal")
             put("color", "#E8E8EC")
+            put("driveSide", "rhd")
         }
     }
 

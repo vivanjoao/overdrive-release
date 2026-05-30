@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT nicht initialisiert",
     "max_connections_reached": "Maximale Verbindungen erreicht ({0})",
     "missing_connection_id": "Fehlende Verbindungs-ID",
-    "connection_not_found": "Verbindung nicht gefunden: {0}"
+    "connection_not_found": "Verbindung nicht gefunden: {0}",
+    "models_invalid_drive_side": "Ungültige Fahrzeug-Anordnung (erwartet \"lhd\" oder \"rhd\")"
   },
   "notifications": {
     "charging_started": "Lade beginnt",

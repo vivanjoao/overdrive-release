@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT không khởi tạo",
     "max_connections_reached": "Max kết nối đạt được ({0})",
     "missing_connection_id": "ID kết nối bị mất",
-    "connection_not_found": "Kết nối không được tìm thấy: {0}"
+    "connection_not_found": "Kết nối không được tìm thấy: {0}",
+    "models_invalid_drive_side": "Bố trí xe không hợp lệ (mong đợi «lhd» hoặc «rhd»)"
   },
   "notifications": {
     "charging_started": "Sạc bắt đầu",

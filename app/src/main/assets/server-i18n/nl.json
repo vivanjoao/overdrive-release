@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT niet geïnitieerd",
     "max_connections_reached": "Maximaal bereikte verbindingen ({0})",
     "missing_connection_id": "Ontbrekende verbindings-ID",
-    "connection_not_found": "Verbinding niet gevonden: {0}"
+    "connection_not_found": "Verbinding niet gevonden: {0}",
+    "models_invalid_drive_side": "Ongeldige voertuigindeling (verwacht «lhd» of «rhd»)"
   },
   "notifications": {
     "charging_started": "Opladen is gestart .",

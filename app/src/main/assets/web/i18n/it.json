@@ -196,6 +196,8 @@
     "enable_could_not": "Non è stato possibile: {reason}",
     "enable_success": "Notifiche push attivate su questo dispositivo.",
     "enable_failed": "Attivazione non riuscita: {error}",
+    "subscribe_browser_error": "Il tuo browser ha rifiutato l'abbonamento push: {error}. Prova un browser diverso — Samsung Internet senza Google Play Services, Brave con scudi abilitati, ed Edge durante le interruzioni sono tutti noti per fallire qui.",
+    "tunnel_unreachable": "Impossibile raggiungere l'unità principale. L'URL Zrok o reverse-proxy non si risolve più — verifica che il tunnel sia attivo e ricarica la pagina.",
     "sev_critical": "Critico: avviso urgente — banner persistente, vibrazione più lunga, ignora le ore silenziose.",
     "sev_warn": "Avviso: vibrazione breve, banner standard — da controllare presto.",
     "sev_auto": "Auto: la gravità è decisa per evento in base ai dati.",
@@ -206,8 +208,15 @@
     "telegram": "Invio Telegram",
     "telegram_sub": "Invia eventi di sorveglianza a una chat Telegram associata. Associa il bot nelle impostazioni del daemon Telegram; i controlli qui decidono quali gravità arrivano in chat.",
     "telegram_delivery_sub": "Tipi di eventi ricevuti da Telegram. Sono indipendenti dal filtro per gravità sopra.",
-    "subscribe_browser_error": "Il tuo browser ha rifiutato l'abbonamento push: {error}. Prova un browser diverso — Samsung Internet senza Google Play Services, Brave con scudi abilitati, ed Edge durante le interruzioni sono tutti noti per fallire qui.",
-    "tunnel_unreachable": "Il Zrok o il reverse-proxy URL ha smesso di risolvere."
+    "vehicle_layout": "Disposizione del veicolo",
+    "vehicle_layout_sub": "Scegli da quale lato dell'auto siede il conducente. Decide se le notifiche delle porte etichettano le porte anteriori come «Anteriore sinistra» o «Anteriore destra». Si salva subito e si applica al prossimo evento porta, senza riavviare il daemon.",
+    "drive_lhd": "Guida a sinistra",
+    "drive_lhd_sub": "Il conducente siede a sinistra (gran parte dell'Europa, Nord America, Cina).",
+    "drive_rhd": "Guida a destra",
+    "drive_rhd_sub": "Il conducente siede a destra (Regno Unito, Australia, India, Giappone).",
+    "drive_save_failed": "Impossibile salvare la disposizione del veicolo",
+    "drive_saved": "Disposizione del veicolo salvata",
+    "drive_load_failed": "Impossibile caricare la disposizione del veicolo"
   },
   "trip": {
     "tab_trips": "Viaggi",

@@ -196,6 +196,8 @@
     "enable_could_not": "Não pôde habilitar: {reason}",
     "enable_success": "Notificações push habilitadas neste dispositivo.",
     "enable_failed": "Ativar falhado: {error}",
+    "subscribe_browser_error": "Seu navegador recusou a assinatura push: {error}. Tente um navegador diferente — Samsung Internet sem Google Play Services, Brave com escudos habilitados e Edge durante interrupções são todos conhecidos por falhar aqui.",
+    "tunnel_unreachable": "Não foi possível alcançar a head unit. A URL do Zrok ou do reverse-proxy parou de resolver — verifique se o túnel está ativo e recarregue a página.",
     "sev_critical": "Crítico: alerta de tudo, bandeira pegajosa, vibração mais longa, ignora horas de silêncio.",
     "sev_warn": "Aviso: vibração curta, bandeira padrão, algo para ver em breve.",
     "sev_auto": "Auto: a gravidade é decidida por evento a partir dos dados (vaga lenta → aviso, vazamento rápido → crítico).",
@@ -206,8 +208,15 @@
     "telegram": "Entrega Telegram",
     "telegram_sub": "Enviar eventos de vigilância para um bate-papo Telegram emparelhado. Aparar o bot nas configurações do daemon Telegram; os toggles abaixo decidem quais severidades atingem o bate-papo.",
     "telegram_delivery_sub": "Independentemente do filtro por nível acima, estas categorias inteiras são ligadas ou desligadas.",
-    "subscribe_browser_error": "Seu navegador recusou a assinatura push: {error}. Tente um navegador diferente — Samsung Internet sem Google Play Services, Brave com escudos habilitados e Edge durante interrupções são todos conhecidos por falhar aqui.",
-    "tunnel_unreachable": "O Zrok ou o URL reverso parou de resolver."
+    "vehicle_layout": "Layout do veículo",
+    "vehicle_layout_sub": "Escolha de que lado do carro o motorista se senta. Isso define se as notificações de porta rotulam as portas dianteiras como «Dianteira esq.» ou «Dianteira dir.». Salva imediatamente e vale a partir do próximo evento de porta, sem reiniciar o daemon.",
+    "drive_lhd": "Volante à esquerda",
+    "drive_lhd_sub": "O motorista senta-se à esquerda (boa parte da Europa, América do Norte, China).",
+    "drive_rhd": "Volante à direita",
+    "drive_rhd_sub": "O motorista senta-se à direita (Reino Unido, Austrália, Índia, Japão).",
+    "drive_save_failed": "Não foi possível salvar o layout do veículo",
+    "drive_saved": "Layout do veículo salvo",
+    "drive_load_failed": "Não foi possível carregar o layout do veículo"
   },
   "trip": {
     "tab_trips": "Viagens",

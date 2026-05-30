@@ -196,6 +196,8 @@
     "enable_could_not": "{reason} を有効にできない",
     "enable_success": "このデバイスで押す通知が有効です.",
     "enable_failed": "有効に失敗: {error}",
+    "subscribe_browser_error": "ブラウザがプッシュ通知の登録を拒否しました: {error}。別のブラウザをお試しください — Google Play サービスのない Samsung Internet、Shields を有効にした Brave、サービス障害中の Edge はいずれもここで失敗することが知られています。",
+    "tunnel_unreachable": "ヘッドユニットに接続できません。Zrok またはリバースプロキシ URL の解決が停止しました — トンネルが起動しているか確認してページを再読み込みしてください。",
     "sev_critical": "危急: 落とし式 粘着したバナー 長く振動し 静かな時間を無視する",
     "sev_warn": "警告: 短振動 標準のバナー すぐに見られるもの",
     "sev_auto": "自動: 事件ごとに重度はデータから決定されます (遅い漏れ →警告,高速漏れ →批判性).",
@@ -206,8 +208,15 @@
     "telegram": "Telegram 配達",
     "telegram_sub": "Telegram デイモン設定でボットをペアする.下のタグルは,チャットにどの重度に達するか決定する.オフレベルはまだ記録されます.",
     "telegram_delivery_sub": "Telegramが受け取るイベントの種類. 上の層別フィルターから独立して  上の層別フィルターから独立して  上の層別フィルターから独立して  上の層別を切り替える.",
-    "subscribe_browser_error": "ブラウザがプッシュ通知の登録を拒否しました: {error}。別のブラウザをお試しください — Google Play サービスのない Samsung Internet、Shields を有効にした Brave、サービス障害中の Edge はいずれもここで失敗することが知られています。",
-    "tunnel_unreachable": "ヘッドユニットに接続できません。Zrok またはリバースプロキシ URL の解決が停止しました — トンネルが起動しているか確認してページを再読み込みしてください。"
+    "vehicle_layout": "車両レイアウト",
+    "vehicle_layout_sub": "運転者が車のどちら側に座るかを選びます。これにより、ドア通知の前側ドアが「左前」か「右前」のどちらで表示されるかが決まります。すぐに保存され、daemon を再起動せずに次のドアイベントから反映されます。",
+    "drive_lhd": "左ハンドル",
+    "drive_lhd_sub": "運転者は左側に座ります(欧州の大半、北米、中国)。",
+    "drive_rhd": "右ハンドル",
+    "drive_rhd_sub": "運転者は右側に座ります(英国、オーストラリア、インド、日本)。",
+    "drive_save_failed": "車両レイアウトを保存できませんでした",
+    "drive_saved": "車両レイアウトを保存しました",
+    "drive_load_failed": "車両レイアウトを読み込めませんでした"
   },
   "trip": {
     "tab_trips": "走行履歴",

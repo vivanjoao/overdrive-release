@@ -99,7 +99,8 @@
     "mqtt_not_initialized": "MQTT не инициирован",
     "max_connections_reached": "Максимальные соединения достигнуты ({0})",
     "missing_connection_id": "Отсутствие идентификатора подключения",
-    "connection_not_found": "Соединение не найдено: {0}"
+    "connection_not_found": "Соединение не найдено: {0}",
+    "models_invalid_drive_side": "Недопустимая компоновка автомобиля (ожидается «lhd» или «rhd»)"
   },
   "notifications": {
     "charging_started": "Начало зарядки",

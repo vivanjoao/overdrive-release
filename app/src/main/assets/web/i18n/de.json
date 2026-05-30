@@ -196,6 +196,8 @@
     "enable_could_not": "Nicht aktiviert: {reason}",
     "enable_success": "Auf diesem Gerät sind Push-Benachrichtigungen aktiviert.",
     "enable_failed": "Aktivierung fehlgeschlagen: {error}",
+    "subscribe_browser_error": "Ihr Browser lehnte das Push-Abonnement ab: {error}. Versuchen Sie einen anderen Browser — Samsung Internet ohne Google Play Services, Brave mit Schilden aktiviert und Edge bei Ausfällen sind alle bekannt, hier zu versagen.",
+    "tunnel_unreachable": "Head-Unit nicht erreichbar. Die Zrok- oder Reverse-Proxy-URL wird nicht mehr aufgelöst — prüfen Sie, ob der Tunnel läuft, und laden Sie die Seite neu.",
     "sev_critical": "Kritisch: Drop-everything Alarm  Klebriges Banner, länger schwingend, ignoriert ruhige Stunden.",
     "sev_warn": "Warnung: kurze Schwingung, Standardbanner  etwas, das bald zu sehen ist.",
     "sev_auto": "Auto: Die Schwere wird je nach Ereignis aus den Daten (langsames Leck → Warnung, schnelles Leck → kritisch) entschieden.",
@@ -206,8 +208,15 @@
     "telegram": "Telegram Lieferung",
     "telegram_sub": "Senden Sie Überwachungsereignisse an einen gepaarten Telegram-Chat. Paare den Bot in den Telegram-Demon-Einstellungen; die unten stehenden Schalter entscheiden, welche Schwere den Chat erreichen. Off-Tiers werden immer noch aufgezeichnet  nur die Nachricht wird unterdrückt.",
     "telegram_delivery_sub": "Unabhängig vom Filter pro Stufe oben  diese schalten ganze Kategorien ein oder aus.",
-    "subscribe_browser_error": "Ihr Browser lehnte das Push-Abonnement ab: {error}. Versuchen Sie einen anderen Browser — Samsung Internet ohne Google Play Services, Brave mit Schilden aktiviert und Edge bei Ausfällen sind alle bekannt, hier zu versagen.",
-    "tunnel_unreachable": "Der Zrok oder Reverse-Proxy URL hat aufgehört zu lösen, überprüfen Sie, ob der Tunnel hoch ist und laden Sie die Seite neu."
+    "vehicle_layout": "Fahrzeug-Layout",
+    "vehicle_layout_sub": "Wähle, auf welcher Seite des Autos der Fahrer sitzt. Damit wird entschieden, ob Türbenachrichtigungen die vorderen Türen als „Vorne links“ oder „Vorne rechts“ kennzeichnen. Wird sofort gespeichert und gilt ab dem nächsten Türereignis — ohne den daemon neu zu starten.",
+    "drive_lhd": "Linkslenker",
+    "drive_lhd_sub": "Der Fahrer sitzt links (Großteil Europas, Nordamerika, China).",
+    "drive_rhd": "Rechtslenker",
+    "drive_rhd_sub": "Der Fahrer sitzt rechts (Vereinigtes Königreich, Australien, Indien, Japan).",
+    "drive_save_failed": "Fahrzeug-Layout konnte nicht gespeichert werden",
+    "drive_saved": "Fahrzeug-Layout gespeichert",
+    "drive_load_failed": "Fahrzeug-Layout konnte nicht geladen werden"
   },
   "trip": {
     "tab_trips": "Fahrten",

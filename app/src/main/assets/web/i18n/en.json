@@ -207,7 +207,16 @@
     "tab_devices": "Devices",
     "telegram": "Telegram delivery",
     "telegram_sub": "Send surveillance events to a paired Telegram chat. Pair the bot in the Telegram daemon settings; toggles below decide which severities reach the chat. Off tiers are still recorded — only the message is suppressed.",
-    "telegram_delivery_sub": "What kind of events Telegram receives. Independent from the per-tier filter above — these toggle entire categories on or off."
+    "telegram_delivery_sub": "What kind of events Telegram receives. Independent from the per-tier filter above — these toggle entire categories on or off.",
+    "vehicle_layout": "Vehicle layout",
+    "vehicle_layout_sub": "Pick which side of the car the driver sits on. This decides whether door notifications label the front-axis doors as Front-left or Front-right. Saves immediately and applies to the next door event without restarting the daemon.",
+    "drive_lhd": "Left-hand drive",
+    "drive_lhd_sub": "Driver sits on the left (most of Europe, North America, China).",
+    "drive_rhd": "Right-hand drive",
+    "drive_rhd_sub": "Driver sits on the right (UK, Australia, India, Japan).",
+    "drive_save_failed": "Could not save vehicle layout",
+    "drive_saved": "Vehicle layout saved",
+    "drive_load_failed": "Could not load vehicle layout"
   },
   "trip": {
     "tab_trips": "Trips",
