@@ -37,6 +37,7 @@
     <string name="action_select_all">Select all</string>
     <string name="action_select_all_short">All</string>
     <string name="action_delete">Delete</string>
+    <string name="action_share">Share</string>
     <string name="action_done">DONE</string>
     <string name="action_remind_me_later">REMIND ME LATER</string>
     <string name="action_retry">Retry</string>
@@ -66,7 +67,13 @@
     <string name="cd_player_maximize">Maximize player</string>
     <string name="cd_player_minimize">Exit fullscreen</string>
     <string name="cd_player_mute">Toggle audio</string>
+    <string name="cd_player_quadrant_all">Show all cameras</string>
+    <string name="cd_player_quadrant_front">Show front camera</string>
+    <string name="cd_player_quadrant_right">Show right camera</string>
+    <string name="cd_player_quadrant_rear">Show rear camera</string>
+    <string name="cd_player_quadrant_left">Show left camera</string>
     <string name="cd_delete">Delete</string>
+    <string name="cd_share">Share</string>
     <string name="cd_expand">Expand</string>
     <string name="cd_configure">Configure</string>
     <string name="cd_download_log">Download log</string>
@@ -116,13 +123,13 @@
     <string name="camera_mode_option_dilink4">DiLink 4 — newer Han / Tang variants</string>
     <string name="camera_mode_current_default">Current: Default</string>
     <string name="camera_mode_current_dilink4">Current: DiLink 4</string>
-    <string name="camera_mode_save">Apply mode</string>
+    <string name="camera_mode_save">Apply &amp; restart</string>
     <string name="camera_mode_hint">Changing the mode restarts the camera daemon. If video looks wrong (squished, missing quadrants, red overlay), try the other mode.</string>
 
     <!-- DiLink 4 quadrant tweaks (only effective when cameraMode = DiLink 4) -->
     <string name="camera_dilink4_tweaks_title">DiLink 4 Quadrant Tweaks</string>
     <string name="camera_dilink4_tweaks_subtitle">Per-vehicle adjustments for the DiLink 4 path. Only effective when DiLink 4 mode is selected above.</string>
-    <string name="camera_dilink4_save">Apply tweaks</string>
+    <string name="camera_dilink4_save">Apply</string>
     <string name="camera_dilink4_hint">Toggle these only if the HAL paints a red "calibration failed" chrome over the feed. Daemon restart applies the change.</string>
     <string name="camera_dilink4_red_mask_label">Suppress red calibration overlay (GL)</string>
     <string name="camera_dilink4_red_mask_subtitle">Adds a fragment-shader pass that detects bright-red HAL "calibration failed" pixels and replaces them with a neighbour sample (or luminance gray when the banner is too large to inpaint). Cosmetic only — does not affect the underlying calibration state.</string>
@@ -140,13 +147,29 @@
     <string name="camera_option_5">Camera 5</string>
     <string name="camera_selection_hint">Auto picks the right camera for your trim on every boot. Camera 1 = BYD Seal, Camera 0 = Atto trims. Restart the daemon after changing camera ID for the setting to take effect.</string>
 
+    <!-- OEM Dashcam camera ID picker (Phase 5: separate forward-sensor pipeline) -->
+    <string name="camera_oem_dashcam_title">OEM Dashcam Camera ID</string>
+    <string name="camera_oem_dashcam_hint">Pick the AVMCamera id that points at the forward dashcam sensor. Dashcam is the OPPOSITE of pano: Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Leave on Auto to let OverDrive pick.</string>
+    <string name="camera_oem_dashcam_auto_resolved">Auto — using id %1$d (pano is id %2$d)</string>
+    <string name="camera_oem_dashcam_auto_unavailable">Auto — pano id is %1$d, can\'t infer dashcam</string>
+    <string name="camera_oem_dashcam_save">Save</string>
+
+    <!-- Dashcam-side camera labels — REVERSE of the pano labels above. The
+         OEM dashcam id is the opposite of the pano id, so the helpful
+         "this is what your trim should pick" hint flips between the two
+         dialogs. Without these strings the dashcam picker re-used the pano
+         labels and told Seal owners to pick "Camera 1 — Seal" for their
+         dashcam, which is the pano camera, not the dashcam. -->
+    <string name="camera_oem_option_0">Camera 0 — Seal / Han (default)</string>
+    <string name="camera_oem_option_1">Camera 1 — Atto / Tang</string>
+
     <!-- Camera mapping dialog (multi-vehicle role-to-slice routing) -->
     <string name="camera_mapping_title">Camera Mapping</string>
     <string name="camera_role_label">Role mapping</string>
     <string name="camera_candidate_previous">Previous</string>
     <string name="camera_candidate_next">Next</string>
     <string name="camera_preview_unavailable">Preview unavailable yet. Try another candidate or refresh by reopening the dialog after the daemon restarts.</string>
-    <string name="camera_mapping_save">Save mapping</string>
+    <string name="camera_mapping_save">Save</string>
     <string name="camera_mapping_clear">Clear role</string>
     <string name="camera_mapping_saved">Camera mapping saved.</string>
     <string name="camera_mapping_cleared">Camera role mapping cleared.</string>
@@ -266,6 +289,7 @@
     <string name="recording_lib_filter_section_severity">Severity</string>
     <string name="recording_lib_filter_section_type">Type</string>
     <string name="recording_lib_filter_section_place">Place</string>
+    <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">Normal</string>
     <string name="recording_lib_chip_type_proximity">Proximity</string>
     <string name="recording_lib_date_today">Today</string>
@@ -283,6 +307,31 @@
     <string name="cd_next_day">Next day</string>
     <string name="cd_open_filters">Open filters</string>
     <string name="cd_clear_filter">Clear filter</string>
+
+    <!-- v5 redesign: SOTA empty state with CTA + tile type badges -->
+    <string name="recording_lib_empty_title">No recordings match</string>
+    <string name="recording_lib_empty_body">Try adjusting your date range or chip filters.</string>
+    <string name="recording_lib_empty_clear_filters">Clear filters</string>
+    <!-- Shown on the empty-state body when there are zero clips on disk
+         (no filter is active). Sets a friendlier tone than "No recordings match". -->
+    <string name="recording_lib_empty_disk_title">Nothing recorded yet</string>
+    <string name="recording_lib_empty_disk_body">Captures will appear here as soon as the dashcam or surveillance pipeline writes a clip.</string>
+    <!-- Shown while the daemon is warming the H2 recording index on cold
+         start. Includes a progress counter when the daemon reports done/total,
+         otherwise a static body. The library re-polls every 1.5s and
+         transitions out automatically once results land. -->
+    <string name="recording_lib_building_index_title">Building library index</string>
+    <string name="recording_lib_building_index_body">One moment while the daemon scans your recordings.</string>
+    <string name="recording_lib_building_index_progress">Indexed %1$d of %2$d clips…</string>
+    <!-- Tile type badge labels — short, glanceable, mirrors the on-disk
+         filename prefix (cam_/event_/dvr_/proximity_) so power users can
+         map a tile back to its file group at a glance. -->
+    <string name="recording_lib_type_normal">CAM</string>
+    <string name="recording_lib_type_event">EVENT</string>
+    <string name="recording_lib_type_proximity">PROX</string>
+    <string name="recording_lib_type_oem">OEM</string>
+    <!-- Toast shown when a multi-select share is dispatched. -->
+    <string name="toast_share_recordings">Sharing %1$d recordings</string>
 
     <!-- fragment_sentry_config -->
 

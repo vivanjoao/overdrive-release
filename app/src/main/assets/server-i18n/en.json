@@ -72,7 +72,7 @@
     "streaming_pipeline_not_available": "Pipeline not available",
     "streaming_start_failed_with_detail": "Failed to start pipeline: {0}",
     "streaming_enable_failed_with_detail": "Failed to enable streaming: {0}",
-    "streaming_invalid_view_mode": "Invalid view mode. Use 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left, 5=Raw strip",
+    "streaming_invalid_view_mode": "Invalid view mode. Use 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left, 5=OEM Dashcam",
     "surveillance_invalid_quadrant_id": "Invalid quadrant ID",
     "surveillance_invalid_quadrant_with_id": "Invalid quadrant: {0}",
     "surveillance_event_frame_failed_with_detail": "Failed to process event frame: {0}",
