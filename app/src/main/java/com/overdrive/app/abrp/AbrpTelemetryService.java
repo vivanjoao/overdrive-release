@@ -62,7 +62,6 @@ public class AbrpTelemetryService {
     // Change detection (report-by-exception) + "only while ABRP app is in use" gate
     private final TelemetryDiffer differ = new TelemetryDiffer();
     private AbrpAppPresence appPresence;
-    private volatile boolean warnedAppMissing = false;
 
     // Data source references
     private final VehicleDataMonitor vehicleDataMonitor;
@@ -171,7 +170,7 @@ public class AbrpTelemetryService {
      * Device access is now handled by BydDataCollector — no per-device reflection needed here.
      */
     public void init(Context context) {
-        this.appPresence = new AbrpAppPresence(config, context);
+        this.appPresence = new AbrpAppPresence(config);
         logger.info("ABRP telemetry service initialized (using BydDataCollector for vehicle data)");
     }
 
@@ -539,11 +538,6 @@ public class AbrpTelemetryService {
 
             // Outer gate (optional): only stream while the ABRP app is actually in use.
             if (config.isGateOnApp() && appPresence != null) {
-                if (!appPresence.isInstalled() && !warnedAppMissing) {
-                    warnedAppMissing = true;
-                    logger.warn("ABRP app gate enabled but '" + config.getAppPackage()
-                            + "' not found — streaming anyway");
-                }
                 if (!appPresence.isActive()) {
                     logger.debug("ABRP app not active (" + appPresence.describe() + ") — skipping upload");
                     scheduleNext(getMinInterval());
@@ -645,8 +639,8 @@ public class AbrpTelemetryService {
             status.put("maxInterval", getMaxInterval());
             status.put("appGate", config.isGateOnApp());
             if (config.isGateOnApp() && appPresence != null) {
-                status.put("appPresence", appPresence.describe());
-                status.put("appActive", appPresence.isActive());
+                status.put("abrp_app_state", appPresence.describe());
+                status.put("abrp_app_active", appPresence.isActive());
             }
             if (lastTelemetrySnapshot != null) {
                 status.put("lastTelemetry", lastTelemetrySnapshot);

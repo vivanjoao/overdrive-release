@@ -128,8 +128,8 @@ const ABRP = {
                 // ABRP app presence (when the app gate is enabled)
                 const presEl = document.getElementById('abrpAppPresence');
                 if (presEl) {
-                    if (s.appGate && s.appPresence) {
-                        presEl.textContent = s.appPresence + (s.appActive ? ' ✓' : '');
+                    if (s.appGate && s.abrp_app_state) {
+                        presEl.textContent = s.abrp_app_state + (s.abrp_app_active ? ' ✓' : '');
                     } else {
                         presEl.textContent = '--';
                     }

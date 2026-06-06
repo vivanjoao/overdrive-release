@@ -1,21 +1,21 @@
 package com.overdrive.app.abrp;
 
-import android.content.Context;
-
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 
 /**
- * Detects whether the ABRP Android app is installed and currently in use on this
- * head unit, so telemetry can be streamed only while the user is actually
- * route-planning (the biggest possible data saving — zero uploads otherwise).
+ * Detects whether the ABRP app is currently running on this head unit, so
+ * telemetry can be streamed only while the user is actually route-planning.
  *
  * "Active" has two modes (read live from {@link AbrpConfig}):
  *   - foreground : ABRP was the resumed/top activity within a grace window
  *                  (survives quick app-switches; pauses shortly after leaving ABRP).
  *   - running    : the ABRP process is alive at all (better for background navigation).
+ *
+ * No installed-check — if ABRP isn't on the device it simply won't appear as
+ * foreground or running, so the gate naturally returns false without extra logic.
  *
  * Foreground detection uses {@code dumpsys activity activities} via a shell — the
  * same privileged idiom the rest of the app uses (AccSentryDaemon, ServiceLauncher).
@@ -29,42 +29,26 @@ public class AbrpAppPresence {
     private static final long CHECK_TTL_MS = 8000;
 
     private final AbrpConfig config;
-    private final Context context;
 
     private volatile long lastCheckMs = 0;
     private volatile long lastForegroundSeenMs = 0;
     private volatile boolean lastProcessAlive = false;
-    private volatile boolean lastInstalled = false;
-    private volatile String lastForegroundPkg = null;
 
-    public AbrpAppPresence(AbrpConfig config, Context context) {
+    public AbrpAppPresence(AbrpConfig config) {
         this.config = config;
-        this.context = context;
     }
 
-    /** Whether the ABRP package is installed on this device (cached with the foreground probe). */
-    public boolean isInstalled() {
-        refreshIfStale();
-        return lastInstalled;
-    }
-
-    /** Human-readable presence for the status panel: "foreground" / "running" / "background" / "not installed". */
+    /** Human-readable presence for the status panel: "foreground" / "running" / "not running". */
     public String describe() {
         refreshIfStale();
-        if (!lastInstalled) return "not installed";
         if (isForegroundWithinGrace()) return "foreground";
         if (lastProcessAlive) return "running";
-        return "background";
+        return "not running";
     }
 
     /** True if telemetry should be allowed to flow right now. */
     public boolean isActive() {
         refreshIfStale();
-        if (!lastInstalled) {
-            // Can't gate on an app that isn't here — fail open so the user isn't
-            // silently never-sending. The caller surfaces a warning instead.
-            return true;
-        }
         boolean foregroundMode = !"running".equalsIgnoreCase(config.getAppActiveMode());
         return foregroundMode ? isForegroundWithinGrace() : lastProcessAlive;
     }
@@ -82,38 +66,20 @@ public class AbrpAppPresence {
         String pkg = config.getAppPackage();
         if (pkg == null || pkg.isEmpty()) pkg = "com.iternio.abrpapp";
 
-        lastInstalled = checkInstalled(pkg);
-        if (!lastInstalled) {
-            lastProcessAlive = false;
-            return;
-        }
-
         String top = readForegroundPackage();
-        lastForegroundPkg = top;
         if (top != null && top.contains(pkg)) {
             lastForegroundSeenMs = now;
         }
         lastProcessAlive = (top != null && top.contains(pkg)) || isProcessAlive(pkg);
     }
 
-    private boolean checkInstalled(String pkg) {
-        try {
-            context.getPackageManager().getPackageInfo(pkg, 0);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     /** Parse the resumed/top activity package from dumpsys. */
     private String readForegroundPackage() {
-        // Look at the lines that name the currently resumed / focused activity.
         String out = runShell("dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity|mCurrentFocus' | head -n 5");
         if (out == null || out.isEmpty()) {
             out = runShell("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | head -n 5");
         }
         if (out == null) return null;
-        // Extract a token of the form "<package>/<activity>".
         for (String line : out.split("\n")) {
             int slash = line.indexOf('/');
             if (slash <= 0) continue;
@@ -124,7 +90,7 @@ public class AbrpAppPresence {
                 start--;
             }
             String token = line.substring(start, slash);
-            if (token.contains(".")) return token; // looks like a package name
+            if (token.contains(".")) return token;
         }
         return null;
     }
