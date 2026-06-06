@@ -149,6 +149,14 @@ public final class DaemonLogConfig {
     /** SocHistoryDatabase - SOC history H2 database */
     public static final boolean SOC_HISTORY_DATABASE = false;
 
+    /** RoadSense - speed-breaker/pothole detect+warn+crowdsource. Covers the daemon
+     *  controller (regime transitions, IMU-flow heartbeat, hazard detections,
+     *  calibration restore/auto-accept), the H2 store, and the ground-truth store.
+     *  FALSE in production (no file-log spam — the 30 s imu-flow heartbeat would
+     *  otherwise churn the daemon log); flip to true to debug a RoadSense field issue.
+     *  android.util.Log calls in these classes are always stripped in release anyway. */
+    public static final boolean ROADSENSE = false;
+
     // ==================== STREAMING ====================
     
     /** WSStreamServer - WebSocket stream server */
@@ -271,6 +279,11 @@ public final class DaemonLogConfig {
             if (PERFORMANCE_MONITOR)        ENABLED_TAGS.add("PerformanceMonitor");
             if (PERFORMANCE_BRIDGE)         ENABLED_TAGS.add("PerformanceBridge");
             if (SOC_HISTORY_DATABASE)       ENABLED_TAGS.add("SocHistoryDatabase");
+            if (ROADSENSE) {
+                ENABLED_TAGS.add("RoadSense");              // controller plog
+                ENABLED_TAGS.add("RoadSenseStore");         // H2 store
+                ENABLED_TAGS.add("RoadSense/GroundTruth");  // labels store
+            }
             if (WS_STREAM_SERVER)           ENABLED_TAGS.add("WSStreamServer");
             if (ABRP_TELEMETRY)             ENABLED_TAGS.add("AbrpTelemetryService");
             if (ABRP_CONFIG)                ENABLED_TAGS.add("AbrpConfig");

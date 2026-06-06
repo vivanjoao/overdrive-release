@@ -326,15 +326,32 @@ public class PerformanceMonitor {
                     if (lastAppCpuTime > 0 && lastCpuTime > 0) {
                         long appDelta = appCpuTime - lastAppCpuTime;
                         long cpuDelta = lastCpuTime - lastCpuTimeForApp;
-                        
+
                         if (cpuDelta > 0) {
-                            // Calculate app CPU as percentage of total CPU time
-                            // This ensures app CPU <= system CPU (logically correct)
-                            // Multiply by number of cores since /proc/stat is aggregate
+                            // TOP-STYLE app CPU %: 100% = one fully-busy core,
+                            // ceiling = numCores × 100 (e.g. 800% on 8 cores).
+                            // This matches what `top`/Android profilers report
+                            // in their per-process %CPU column, so the dashboard
+                            // and a live `top` agree.
+                            //
+                            // cpuDelta is the AGGREGATE /proc/stat jiffy delta
+                            // (summed across all cores), so appDelta/cpuDelta is
+                            // the WHOLE-DEVICE fraction (0..1). Multiplying by
+                            // numCores rescales it to per-core units.
+                            //
+                            // THE ORIGINAL BUG was NOT this multiply — it was the
+                            // clamp below comparing this per-core number against
+                            // cpuUsagePercent (a whole-device 0..100 value).
+                            // 37%-per-core clamped against an 80%-whole-device
+                            // system reading collapsed to ≈system%. The fix is to
+                            // clamp in MATCHING units: app-per-core must be ≤
+                            // system-per-core (= cpuUsagePercent × numCores), the
+                            // honest sanity bound. It only corrects sampling skew
+                            // between the two separate /proc reads.
                             int numCores = Runtime.getRuntime().availableProcessors();
                             snapshot.appCpuUsagePercent = 100.0 * appDelta / cpuDelta * numCores;
-                            // Clamp: app CPU should never exceed system CPU usage
-                            snapshot.appCpuUsagePercent = Math.min(snapshot.cpuUsagePercent, 
+                            double systemPerCore = snapshot.cpuUsagePercent * numCores;
+                            snapshot.appCpuUsagePercent = Math.min(systemPerCore,
                                 Math.max(0.0, snapshot.appCpuUsagePercent));
                         }
                     }
@@ -959,6 +976,11 @@ public class PerformanceMonitor {
                 JSONObject cpu = new JSONObject();
                 cpu.put("system", round(cpuUsagePercent));
                 cpu.put("app", round(appCpuUsagePercent));
+                // Core count so the web layer can scale the per-core "app" value
+                // (top-style, ceiling = cores × 100) onto a 0-100 bar/graph.
+                // Auto-detected, never hardcoded — same source the app% math
+                // uses in collectCpuMetrics().
+                cpu.put("cores", Runtime.getRuntime().availableProcessors());
                 cpu.put("freqMhz", cpuFreqMhz);
                 cpu.put("tempC", round(cpuTempCelsius));
                 json.put("cpu", cpu);

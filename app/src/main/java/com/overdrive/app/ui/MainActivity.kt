@@ -62,6 +62,15 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var updateCheckRunnable: Runnable? = null
 
+    // True only for the headless boot launch where BootReceiver delivers
+    // `minimize_on_start=true` so the app process stays alive for daemon
+    // stability without surfacing UI. Consumed once in onCreate; not
+    // re-read from intent later because Android's singleTop handling does
+    // NOT update getIntent() on subsequent onNewIntent calls unless we
+    // explicitly setIntent — without this latch the stale boot intent
+    // would permanently bypass the PIN gate after a launcher tap.
+    private var headlessBootSilenceGate: Boolean = false
+
     // UI elements
     private lateinit var toolbar: MaterialToolbar
     private lateinit var navigationRail: LinearLayout
@@ -106,6 +115,33 @@ class MainActivity : AppCompatActivity() {
             }
         }.start()
         
+        // Register the screen-off receiver that locks the PIN session as
+        // soon as the panel sleeps. Idempotent — safe to call again on
+        // config-change recreate. The receiver is held by the application
+        // process so it survives Activity destruction.
+        com.overdrive.app.auth.PinSession.ensureScreenOffReceiverRegistered(applicationContext)
+
+        // Latch the headless-boot silence flag exactly once from the
+        // initial launch intent and STRIP the extra so the OS task-restore
+        // path (process kill → fresh MainActivity instance recreated from
+        // the same intent record) cannot re-arm the silence gate against
+        // the user's intent. Without the strip, a task restore after OOM
+        // would silently bypass the PIN gate again on the recreated
+        // instance — see audit round 2/3.
+        val rawIntent = intent
+        headlessBootSilenceGate =
+            rawIntent?.getBooleanExtra("minimize_on_start", false) == true
+        if (headlessBootSilenceGate) {
+            rawIntent?.removeExtra("minimize_on_start")
+            if (rawIntent != null) setIntent(rawIntent)
+        }
+
+        // Gate before any visible state appears. If the PIN is enabled and
+        // the session isn't fresh, push PinLockActivity on top right away
+        // so MainActivity never paints first. Daemons / surveillance /
+        // DeterrentActivity are unaffected — this only governs MainActivity.
+        maybeShowPinLock()
+
         initViews()
         setupNavigation(savedInstanceState)
         setupCopyButton()
@@ -193,9 +229,13 @@ class MainActivity : AppCompatActivity() {
         // If launched from boot receiver with minimize flag, move to back immediately.
         // This keeps the process alive (important for daemon stability) without
         // showing the app UI over the BYD home screen.
-        if (intent?.getBooleanExtra("minimize_on_start", false) == true) {
+        if (headlessBootSilenceGate) {
             android.util.Log.i("MainActivity", "Boot launch — minimizing to background")
             moveTaskToBack(true)
+            // Boot moveTaskToBack puts the task behind home; the very next
+            // foreground entry is the user — clear the silence latch so
+            // the gate fires from the next onResume / onNewIntent.
+            headlessBootSilenceGate = false
         }
     }
     
@@ -215,6 +255,10 @@ class MainActivity : AppCompatActivity() {
             logsViewModel.info("Overlay", "Status overlay service started")
         }
 
+        // RoadSense floating overlay (D-024): start only when the feature is enabled.
+        // It's a separate window from the status overlay and renders the pill/card.
+        syncRoadSenseOverlay()
+
         // showIfNeeded is no-op when the seen install-time matches the current
         // PackageInfo.lastUpdateTime, so it's safe to call on every launch.
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -224,6 +268,20 @@ class MainActivity : AppCompatActivity() {
     
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
+        // Re-pin getIntent() to the new intent so any code that consults
+        // it (now or later) sees the current launcher/notification intent
+        // rather than the original cold-launch intent. Null-guarded so we
+        // don't strand getIntent() at null if the platform delivers a
+        // null intent on some upstream OEM build.
+        if (intent != null) setIntent(intent)
+        // Clear the boot-silence latch as soon as a fresh user intent
+        // arrives. Any onNewIntent path is by definition the user
+        // bringing the app forward — they should be gated.
+        headlessBootSilenceGate = false
+        // PIN gate first — notification taps reach MainActivity via
+        // onNewIntent because of singleTop. Gating here keeps that path
+        // covered without relying on onResume firing first.
+        maybeShowPinLock()
         intent?.let {
             handleLocationStartIntent(it)
             // Critical: when MainActivity is already running and the install
@@ -449,8 +507,101 @@ class MainActivity : AppCompatActivity() {
     
     override fun onResume() {
         super.onResume()
+        // PIN gate: if Settings → Security has the app lock enabled and the
+        // session isn't currently unlocked (or the auto-lock timeout has
+        // elapsed since last pause), bring up the lock screen on top of
+        // this Activity. We don't finish() — MainActivity remains behind
+        // PinLockActivity so unlock returns straight to the user's nav
+        // destination. Daemons / surveillance / DeterrentActivity are
+        // never affected by this gate.
+        maybeShowPinLock()
+
         // Try to start overlay if permission was just granted (user returned from settings)
         com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
+
+        // Re-sync the RoadSense overlay on resume: the user may have just toggled
+        // RoadSense on/off in the web UI and returned to the app, or granted the
+        // overlay permission. Cheap — a no-op if the state already matches.
+        syncRoadSenseOverlay()
+    }
+
+    /**
+     * Start the RoadSense floating overlay when the feature is enabled (and overlay
+     * permission is granted), or stop it when disabled. RoadSense persists its
+     * `enabled` flag in the UnifiedConfigManager `roadSense` section (cross-UID with
+     * the daemon); we forceReload so a just-written daemon/web change is seen. The
+     * overlay itself only RENDERS daemon-published state, so starting it while the
+     * daemon isn't producing hazards simply shows the idle "scanning" pill.
+     */
+    private fun syncRoadSenseOverlay() {
+        try {
+            val enabled = com.overdrive.app.roadsense.config.RoadSenseConfig
+                .snapshot(forceReload = true).enabled
+            if (enabled) {
+                com.overdrive.app.roadsense.overlay.RoadSenseOverlayService.startIfPermitted(this)
+            } else {
+                com.overdrive.app.roadsense.overlay.RoadSenseOverlayService.stop(this)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("MainActivity", "syncRoadSenseOverlay failed: ${t.message}")
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.overdrive.app.auth.PinSession.notePaused()
+    }
+
+    /**
+     * Single source of truth for PIN gating. Called from onCreate, onResume,
+     * and onNewIntent; bails fast when the lock is disabled.
+     *
+     * Two extra side-effects beyond launching PinLockActivity:
+     *  1. While the lock is active, FLAG_SECURE is applied to MainActivity's
+     *     window. The BYD launcher's recents thumbnail / OS task switcher
+     *     would otherwise capture whatever fragment was on screen — which
+     *     leaks live-camera, vehicle-control, and dashboard data while
+     *     the app is supposedly "locked." FLAG_SECURE causes the
+     *     framework to render a black snapshot.
+     *  2. The flag is cleared once the session is unlocked (called from
+     *     onResume after PinLockActivity returns RESULT_OK).
+     *
+     * The {@code minimize_on_start} intent extra is set by BootReceiver
+     * for headless boot launches that immediately moveTaskToBack to keep
+     * the process alive without showing UI. In that path the user isn't
+     * present, so we skip the gate — otherwise the lock screen would
+     * flash up on top of the BYD home screen at every boot.
+     */
+    private fun maybeShowPinLock() {
+        try {
+            val pinEnabled = com.overdrive.app.auth.PinManager.isEnabled()
+            // Apply / clear FLAG_SECURE based on current lock state, regardless
+            // of whether we're about to gate (covers the unlock-now path too).
+            if (pinEnabled && !com.overdrive.app.auth.PinSession.isUnlocked()) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
+            if (!pinEnabled) return
+
+            // Headless boot: BootReceiver may launch us with minimize_on_start
+            // so the app process exists for daemon stability, but the user
+            // isn't there. Skip the lock-screen flash for that one launch —
+            // the gate will fire on the user's next foreground entry. The
+            // flag is one-shot per Activity instance (latched in onCreate
+            // from the original launch intent) and explicitly cleared on
+            // any subsequent user-driven foreground entry below.
+            if (headlessBootSilenceGate) return
+
+            val autoLock = com.overdrive.app.auth.PinManager.getAutoLockMs()
+            if (com.overdrive.app.auth.PinSession.shouldGate(autoLock)) {
+                val pinIntent = android.content.Intent(this, com.overdrive.app.ui.PinLockActivity::class.java)
+                pinIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                startActivity(pinIntent)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("MainActivity", "PIN gate check failed: ${t.message}")
+        }
     }
     
     /**
@@ -868,6 +1019,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.vehicleControlFragment,
                 R.id.tripsFragment,
                 R.id.integrationsFragment,
+                R.id.roadSenseFragment,
                 R.id.diagnosticsFragment,
                 R.id.settingsFragment,
                 R.id.settingsAboutFragment
@@ -904,6 +1056,8 @@ class MainActivity : AppCompatActivity() {
                 R.drawable.ic_trips, R.string.rail_trips),
             RailItem(R.id.railDestIntegrations, R.id.integrationsFragment,
                 R.drawable.ic_integrations, R.string.rail_integrations),
+            RailItem(R.id.railDestRoadSense, R.id.roadSenseFragment,
+                R.drawable.ic_roadsense, R.string.rail_roadsense),
             RailItem(R.id.railDestDiagnostics, R.id.diagnosticsFragment,
                 R.drawable.ic_diagnostics, R.string.rail_diagnostics),
             RailItem(R.id.railDestSettings, R.id.settingsFragment,

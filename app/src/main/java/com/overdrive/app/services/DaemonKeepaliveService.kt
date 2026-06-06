@@ -33,7 +33,26 @@ class DaemonKeepaliveService : Service() {
         private const val TAG = "DaemonKeepalive"
         private const val NOTIFICATION_ID = 19876
         private const val CHANNEL_ID = "daemon_keepalive_channel"
-        
+
+        // Shared notification grouping. The three foreground services that
+        // Overdrive runs (this one + LocationSidecarService + StatusOverlay
+        // Service) each post their own ongoing notification — Android needs
+        // the FGS notification to remain visible per service. Tagging them
+        // all with the same group key, plus a 4th `setGroupSummary(true)`
+        // notification posted by this service, collapses the four entries
+        // into a single expandable shade row. The user sees one "Overdrive
+        // Active" tile with the per-service lines available on tap-to-expand.
+        //
+        // The summary notification is *not* a foreground-service notification
+        // — it's a plain ongoing notification posted via NotificationManager
+        // .notify(). FGS notifs can't be the group summary on every Android
+        // version; a separate summary side-steps that and survives any of
+        // the three children temporarily disappearing (e.g. permission flap
+        // killing LocationSidecarService).
+        const val NOTIFICATION_GROUP_KEY = "com.overdrive.app.STATUS"
+        private const val SUMMARY_NOTIFICATION_ID = 19875
+        private const val SUMMARY_CHANNEL_ID = "overdrive_status_summary"
+
         fun start(context: Context) {
             val intent = Intent(context, DaemonKeepaliveService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -42,7 +61,7 @@ class DaemonKeepaliveService : Service() {
                 context.startService(intent)
             }
         }
-        
+
         fun stop(context: Context) {
             context.stopService(Intent(context, DaemonKeepaliveService::class.java))
         }
@@ -54,9 +73,11 @@ class DaemonKeepaliveService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "Service onCreate")
-        
+
         createNotificationChannel()
+        createSummaryChannel()
         startForegroundWithNotification()
+        postOrUpdateSummary()
         acquireWakeLock()
         registerScreenOffReceiver()
 
@@ -110,10 +131,22 @@ class DaemonKeepaliveService : Service() {
     
     override fun onDestroy() {
         Log.i(TAG, "Service onDestroy")
-        
+
+        // Drop the group-summary so the user doesn't see a stale "Overdrive"
+        // row after the keepalive service stops. The per-service FGS notifs
+        // are auto-removed by the framework when their service stops; only
+        // the summary (posted via NotificationManager.notify) needs an
+        // explicit cancel.
+        try {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.cancel(SUMMARY_NOTIFICATION_ID)
+        } catch (e: Exception) {
+            Log.w(TAG, "cancel summary failed: ${e.message}")
+        }
+
         unregisterScreenOffReceiver()
         releaseWakeLock()
-        
+
         super.onDestroy()
     }
     
@@ -158,24 +191,103 @@ class DaemonKeepaliveService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE
         )
-        
+
+        val title = getString(R.string.daemon_keepalive_notif_title)
+        val text  = getString(R.string.daemon_keepalive_notif_text)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("Overdrive Active")
-                .setContentText("Monitoring vehicle systems")
+                .setContentTitle(title)
+                .setContentText(text)
                 .setSmallIcon(R.drawable.ic_sentry)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
+                .setGroup(NOTIFICATION_GROUP_KEY)
                 .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setContentTitle("Overdrive Active")
-                .setContentText("Monitoring vehicle systems")
+                .setContentTitle(title)
+                .setContentText(text)
                 .setSmallIcon(R.drawable.ic_sentry)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
+                .setGroup(NOTIFICATION_GROUP_KEY)
                 .build()
+        }
+    }
+
+    /**
+     * Dedicated channel for the group-summary notification. Kept separate
+     * from the daemon-keepalive channel so the user can mute the summary
+     * row without losing the per-service FGS notifications underneath
+     * (Android requires the FGS channel to stay user-visible). Importance
+     * mirrors the children — LOW means silent, no badge, but sticky.
+     */
+    private fun createSummaryChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                SUMMARY_CHANNEL_ID,
+                "Overdrive Status",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Combined status row for Overdrive's background services"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Post (or refresh) the group-summary notification. This is what the
+     * user actually sees collapsed in the shade. The three FGS children
+     * (this service, LocationSidecarService, StatusOverlayService) all
+     * carry the same `setGroup(NOTIFICATION_GROUP_KEY)` so Android pairs
+     * them under this summary on API 20+ (every supported version of this
+     * app — minSdk is 28).
+     *
+     * The summary is intentionally generic. We don't enumerate the three
+     * children inline because the keepalive service can outlive the other
+     * two:
+     *   - On first launch, this summary is posted from Application.onCreate
+     *     before MainActivity has had a chance to start LocationSidecar /
+     *     StatusOverlay — naming them here would lie for a few hundred ms.
+     *   - After an OOM kill with no Activity, START_STICKY only respawns
+     *     this service; LocationSidecar (kicked from MainActivity) stays
+     *     dead until the next app launch. A static "Location: GPS tracking"
+     *     line would lie for the entire respawn window.
+     * Tap-to-expand still shows whichever per-service FGS notifications
+     * are actually live, so the user sees the truth on demand.
+     *
+     * Idempotent — calling it again replaces the existing summary.
+     */
+    private fun postOrUpdateSummary() {
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, SUMMARY_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        val notification = builder
+            .setContentTitle(getString(R.string.overdrive_status_summary_title))
+            .setContentText(getString(R.string.overdrive_status_summary_text))
+            .setSmallIcon(R.drawable.ic_sentry)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setGroup(NOTIFICATION_GROUP_KEY)
+            .setGroupSummary(true)
+            .build()
+        try {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.notify(SUMMARY_NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.w(TAG, "postOrUpdateSummary failed: ${e.message}")
         }
     }
     

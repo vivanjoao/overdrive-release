@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RoadSense mark — M3, single-color, tint-driven (24dp grid).
+
+  Concept (per design steer): a ROAD in perspective + an EXCLAMATION mark =
+  "road hazard ahead." Authored in the Material Symbols 960-unit grid and scaled
+  via the same <group> transform as ic_diagnostics / ic_directions_car / ic_sentry,
+  so the weight, fill and proportions match the rest of the rail exactly.
+
+  Geometry follows the Material baseline convention (x:0..960, y:-960..0, baseline
+  at 0), symmetric about x=480:
+    - Exclamation (focal point): a bold tapered bar (y -850..-550) + round dot
+      (centre y=-450) occupying the top ~60% as the hazard warning.
+    - Road: a filled perspective band in the bottom ~30% — converging toward the
+      horizon (y=-340), wide at the base (y=-110) — with two dashed centre
+      segments punched out so it reads unmistakably as a road, not a triangle.
+    Dot bottom (-394) clears the road horizon (-340), so the motifs never collide.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorOnSurfaceVariant">
+    <group
+        android:scaleX="0.025"
+        android:scaleY="0.025"
+        android:translateY="24">
+
+        <!-- Exclamation bar: bold tapered hazard mark, focal point of the icon. -->
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M419,-810 Q419,-850 480,-850 Q541,-850 541,-810 L519,-580 Q516,-550 480,-550 Q444,-550 441,-580 Z" />
+
+        <!-- Exclamation dot. -->
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M480,-450 m-56,0 a56,56 0 1,0 112,0 a56,56 0 1,0 -112,0 Z" />
+
+        <!-- Road in perspective: filled trapezoid (bottom band) with dashed
+             centre line punched out via evenOdd. -->
+        <path
+            android:fillColor="@android:color/white"
+            android:fillType="evenOdd"
+            android:pathData="M398,-340 L562,-340 Q583,-340 588,-320 L672,-142 Q681,-110 648,-110 L312,-110 Q279,-110 288,-142 L372,-320 Q377,-340 398,-340 Z M462,-276 L452,-236 L508,-236 L498,-276 Z M438,-188 L424,-140 L536,-140 L522,-188 Z" />
+    </group>
+</vector>

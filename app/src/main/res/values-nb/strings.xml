@@ -7,6 +7,7 @@
     <string name="action_select_all">Velg alle</string>
     <string name="action_select_all_short">Alle</string>
     <string name="action_delete">Slett</string>
+    <string name="action_share">Del</string>
     <string name="action_done">Gjort</string>
     <string name="action_remind_me_later">Minn meg senere</string>
     <string name="action_retry">Prøv igjen</string>
@@ -32,7 +33,13 @@
     <string name="cd_player_maximize">Maksimalisere spilleren</string>
     <string name="cd_player_minimize">Utgang fullskjerm</string>
     <string name="cd_player_mute">Slå ut lyd</string>
+    <string name="cd_player_quadrant_all">Vis alle kameraer</string>
+    <string name="cd_player_quadrant_front">Vis frontkamera</string>
+    <string name="cd_player_quadrant_right">Vis høyre kamera</string>
+    <string name="cd_player_quadrant_rear">Vis bakkamera</string>
+    <string name="cd_player_quadrant_left">Vis venstre kamera</string>
     <string name="cd_delete">Slett</string>
+    <string name="cd_share">Del</string>
     <string name="cd_expand">Utvide</string>
     <string name="cd_configure">Konfigurering</string>
     <string name="cd_download_log">Nedlasting logg</string>
@@ -43,6 +50,14 @@
     <string name="overlay_rec_inactive_label">REC</string>
     <string name="overlay_trip_inactive_label">TRIP</string>
     <string name="overlay_mic_inactive_label">MIC</string>
+    <string name="overlay_mode_off_label">AV</string>
+    <string name="overlay_mode_continuous_label">CONT</string>
+    <string name="overlay_mode_drive_label">KØR</string>
+    <string name="overlay_mode_proximity_label">PROX</string>
+    <string name="overlay_mode_off_cd">Stopp opptak</string>
+    <string name="overlay_mode_continuous_cd">Kontinuerlig registrering</string>
+    <string name="overlay_mode_drive_cd">Opptak i drevmodus</string>
+    <string name="overlay_mode_proximity_cd">Nærhetsbevaringsopptak</string>
     <string name="log_entry_default_timestamp">12:34:56</string>
     <string name="log_entry_default_tag">- Det er ikke noe problem.</string>
     <string name="log_entry_default_message">Logg melding her</string>
@@ -82,6 +97,13 @@
     <string name="camera_option_4">Kamera 4</string>
     <string name="camera_option_5">Kamera 5</string>
     <string name="camera_selection_hint">Auto velger riktig kamera for din trim på hver boot. Kamera 1 = BYD Seal, Kamera 0 = Atto trimmer. Restart daemon etter å ha endret kamera-ID for innstillingen å komme i kraft.</string>
+    <string name="camera_oem_dashcam_title">OEM Dashcam Kamera ID</string>
+    <string name="camera_oem_dashcam_hint">Velg AVMCamera id som peker på den fremre dashcam sensoren. Dashcam er motsatsen til pano: Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1.</string>
+    <string name="camera_oem_dashcam_auto_resolved">Auto  ved hjelp av id %1$d (pano er id %2$d)</string>
+    <string name="camera_oem_dashcam_auto_unavailable">Auto  pano id er %1$d, kan ikke konkludere dashcam</string>
+    <string name="camera_oem_dashcam_save">Lagre</string>
+    <string name="camera_oem_option_0">Kamera 0  Seal / Han (avhengig)</string>
+    <string name="camera_oem_option_1">Kamera 1  Atto / Tang</string>
     <string name="camera_mapping_title">Kamera kartlegging</string>
     <string name="camera_role_label">Rollemapping</string>
     <string name="camera_candidate_previous">Tidligere</string>
@@ -177,6 +199,7 @@
     <string name="recording_lib_filter_section_severity">Sværhet</string>
     <string name="recording_lib_filter_section_type">Type</string>
     <string name="recording_lib_filter_section_place">Stedet</string>
+    <string name="recording_lib_place_search_hint">Søk steder…</string>
     <string name="recording_lib_chip_type_normal">Vanlig</string>
     <string name="recording_lib_chip_type_proximity">Nærhet</string>
     <string name="recording_lib_date_today">I dag</string>
@@ -194,6 +217,19 @@
     <string name="cd_next_day">Neste dag</string>
     <string name="cd_open_filters">Åpne filter</string>
     <string name="cd_clear_filter">Klar filter</string>
+    <string name="recording_lib_empty_title">Ingen opptak matcher</string>
+    <string name="recording_lib_empty_body">Prøv å justere datoområdet eller chipfiltre.</string>
+    <string name="recording_lib_empty_clear_filters">Klar filter</string>
+    <string name="recording_lib_empty_disk_title">Ingenting registrert ennå</string>
+    <string name="recording_lib_empty_disk_body">Bildene vil dukke opp her så snart dashcam eller overvåkning pipeline skriver en klippe.</string>
+    <string name="recording_lib_building_index_title">Byggingsbiblioteksindeks</string>
+    <string name="recording_lib_building_index_body">Et øyeblikk mens daemon skanner opptakene dine.</string>
+    <string name="recording_lib_building_index_progress">Indexert %1$d av %2$d klipp...</string>
+    <string name="recording_lib_type_normal">CAM</string>
+    <string name="recording_lib_type_event">HANDLING</string>
+    <string name="recording_lib_type_proximity">PROX</string>
+    <string name="recording_lib_type_oem">OEM</string>
+    <string name="toast_share_recordings">Deling av %1$d-opptak</string>
     <string name="player_title_recording">Opptak</string>
     <string name="player_time_zero">Klokken 0: 00</string>
     <string name="player_time_separator"> / </string>
@@ -401,6 +437,10 @@
     <string name="nav_page_byd_cloud">BYD Cloud</string>
     <string name="status_overlay_notif_title">OverDrive Status</string>
     <string name="status_overlay_notif_text">Status overlay aktiv</string>
+    <string name="daemon_keepalive_notif_title">Overdrive Aktive</string>
+    <string name="daemon_keepalive_notif_text">Systemer for overvåking av kjøretøy</string>
+    <string name="overdrive_status_summary_title">Overdrive</string>
+    <string name="overdrive_status_summary_text">Bakgrunntjenester i drift</string>
     <string name="rail_dashboard">Dashboard</string>
     <string name="rail_live">Leve</string>
     <string name="rail_recordings">Opptak</string>

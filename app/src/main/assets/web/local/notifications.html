@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
     <title data-i18n="app.notifications_title">Notifications - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=3"></script>
+    <script src="../shared/theme.js?v=4"></script>
     <script src="../shared/app-shell.js"></script>
     <!--
       WebView detection MUST run before app-tabs.js builds the tab bar so
@@ -53,7 +53,7 @@
             : __OT_ALL_TABS;
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css">
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -216,6 +216,23 @@
         .device-row-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .device-row-label { font-weight: 500; }
         .device-row-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        /* "(this device)" tag — small tonal chip inline with the device label
+           so the user can identify the row corresponding to the current
+           browser before clicking Remove. */
+        .device-row-self {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 1px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            vertical-align: middle;
+        }
         .empty-state {
             padding: 24px 16px; text-align: center;
             color: var(--text-secondary); font-size: 13px;
@@ -592,14 +609,14 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/pwa-init.js"></script>
+    <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/update-flow.js"></script>
     <!-- surveillance.js owns the SurvSettings module that backs the Telegram
          tier toggles. We load it here so the v2TelegramSendStartPing /
          v2TelegramTierGroup controls hooked into surveillance.js wiring
          keep firing without a per-page bridge. -->
-    <script src="../shared/surveillance.js"></script>
+    <script src="../shared/surveillance.js?v=index1"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -1344,12 +1361,21 @@
                 if (!r.ok) return;
                 var data = await r.json();
                 var subs = data.subscriptions || [];
-                renderDevices(subs);
 
-                if (!('serviceWorker' in navigator)) return;
-                const { reg, sub } = await getPushSubscription();
-                if (!sub) return;
-                var localId = await localIdForEndpoint(sub.endpoint);
+                // Resolve which row corresponds to THIS browser BEFORE rendering
+                // so the row UI can flag it. Without that flag the user has no
+                // way to tell which row is theirs and may click "Remove" on a
+                // peer device when they meant to disable here.
+                var localId = null;
+                if ('serviceWorker' in navigator) {
+                    try {
+                        const { reg, sub } = await getPushSubscription();
+                        if (sub) localId = await localIdForEndpoint(sub.endpoint);
+                    } catch (_) { /* localId stays null */ }
+                }
+
+                renderDevices(subs, localId);
+
                 if (!localId) return;
                 var found = subs.find(function (s) { return s.id === localId; });
                 if (found) {
@@ -1367,7 +1393,7 @@
             }
         }
 
-        function renderDevices(subs) {
+        function renderDevices(subs, localId) {
             var card = document.getElementById('devicesCard');
             if (!card) return;
             if (!subs.length) {
@@ -1381,32 +1407,77 @@
                 var lastSeen = s.lastSeenAt
                     ? new Date(s.lastSeenAt).toLocaleString()
                     : BYD.i18n.t('notif.device_never');
+                var isThis = localId && s.id === localId;
+                // "(this device)" tag is rendered as a small subdued chip so
+                // the user can pick the right row to remove. It's also the
+                // signal removeDevice() uses to do a FULL local+server
+                // unsubscribe instead of the previous server-only path.
+                var thisDeviceTag = isThis
+                    ? ' <span class="device-row-self" data-i18n="notif.device_this_device">(this device)</span>'
+                    : '';
+                var btnLabel = isThis
+                    ? BYD.i18n.t('notif.device_remove_this')
+                    : BYD.i18n.t('notif.device_remove');
                 row.innerHTML =
                     '<div class="device-row-top">' +
                         '<div>' +
-                            '<div class="device-row-label">' + escapeHtml(s.label || BYD.i18n.t('notif.unnamed_device')) + '</div>' +
+                            '<div class="device-row-label">' + escapeHtml(s.label || BYD.i18n.t('notif.unnamed_device')) + thisDeviceTag + '</div>' +
                             '<div class="device-row-meta">' + escapeHtml(BYD.i18n.t('notif.device_last_seen', {time: lastSeen})) + '</div>' +
                         '</div>' +
-                        '<button class="notif-btn danger" data-id="' + escapeAttr(s.id) + '">' + escapeHtml(BYD.i18n.t('notif.device_remove')) + '</button>' +
+                        '<button class="notif-btn danger" data-id="' + escapeAttr(s.id) + '"' +
+                            (isThis ? ' data-self="1"' : '') + '>' +
+                            escapeHtml(btnLabel) + '</button>' +
                     '</div>';
                 card.appendChild(row);
             });
             card.querySelectorAll('button[data-id]').forEach(function (b) {
                 b.addEventListener('click', function () {
-                    removeDevice(b.dataset.id);
+                    removeDevice(b.dataset.id, b.dataset.self === '1');
                 });
             });
         }
 
-        async function removeDevice(id) {
+        async function removeDevice(id, isThisDevice) {
             if (!confirm(BYD.i18n.t('notif.remove_device_confirm'))) return;
             try {
-                await BYDAuth.fetch('/api/push/unsubscribe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id })
-                });
-                await loadSubscriptions();
+                if (isThisDevice && window.OverdrivePush) {
+                    // Full unsubscribe path: clears the browser-side push
+                    // manager subscription AND the server row. Without this,
+                    // removing your own row used to leave the browser
+                    // holding a live subscription that any subsequent
+                    // /api/push/subscribe POST would resurrect server-side.
+                    await window.OverdrivePush.unsubscribe();
+                    await loadSubscriptions();
+                } else {
+                    // Peer-device removal: server-only is correct (we can't
+                    // reach into another phone's PushManager). The new
+                    // server-side tombstone (TOMBSTONE_WINDOW_MS) prevents
+                    // that device from re-subscribing silently — when its
+                    // pwa-init.js runs, postSubscription returns 410 and
+                    // the local self-heal aborts.
+                    var resp = await BYDAuth.fetch('/api/push/unsubscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: id })
+                    });
+                    if (!resp.ok) {
+                        showStatus('error', BYD.i18n.t('notif.remove_device_failed'));
+                        return;
+                    }
+                    var body = null;
+                    try { body = await resp.json(); } catch (_) {}
+                    if (body && body.success === false) {
+                        showStatus('error', BYD.i18n.t('notif.remove_device_failed'));
+                        return;
+                    }
+                    await loadSubscriptions();
+                    // Tell the user the tombstone is in effect — without
+                    // this banner the user has no way to know that the peer
+                    // device is now blocked from silently re-registering
+                    // for the next 30 min, which is exactly the guarantee
+                    // they wanted when they clicked Remove.
+                    showStatus('ok', BYD.i18n.t('notif.remove_device_tombstoned'));
+                }
             } catch (e) {
                 if (isNetworkError(e)) showTunnelUnreachable();
                 else showStatus('error', BYD.i18n.t('notif.remove_device_failed'));

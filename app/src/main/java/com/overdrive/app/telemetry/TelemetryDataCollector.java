@@ -19,18 +19,26 @@ public class TelemetryDataCollector {
     private static final String TAG = "TelemetryDataCollector";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final long POLL_INTERVAL_MS = 200; // 5 Hz — only used when overlay recording is active
+    // 2 Hz overlay poll. Dropped from 5 Hz → 2 Hz to cut CPU during ACC-ON
+    // recording: every fast tick drives a reflective BYD-HAL sweep plus an
+    // overlay bitmap re-raster + GL re-upload, so the rate is a direct CPU
+    // multiplier on the recording path. Overlay text (speed/gear/pedals/turn/
+    // belt) does not change meaningfully faster than ~2 Hz to a viewer, so 500ms
+    // is visually indistinguishable while roughly halving the per-second
+    // reflective-poll + raster cost. The tick-count constants below are
+    // re-derived from this period so their WALL-CLOCK behavior is unchanged.
+    private static final long POLL_INTERVAL_MS = 500; // 2 Hz — only used when overlay recording is active
     private static final long SLOW_POLL_INTERVAL_MS = 1000; // 1 Hz fallback when not recording
 
-    // Slow-path sub-polling: seatbelts and brake-pedal state don't change at 5Hz.
-    // Poll them at 1Hz (every 5th fast poll) to save reflection calls per cycle.
-    private static final int SLOW_FIELD_DIVISOR = 5; // every 5th poll = 1Hz at 200ms base
+    // Slow-path sub-polling: seatbelts and brake-pedal state don't change fast.
+    // Poll them at ~1Hz to save reflection calls per cycle.
+    private static final int SLOW_FIELD_DIVISOR = 2; // every 2nd poll = 1Hz at 500ms base
 
     // Turn-signal sticky window: how many fast-path ticks to hold "on" after the
     // last observed flash, to bridge the off-phase of the ~1.5Hz blink cycle.
-    // 3 ticks = ~600ms at 5Hz — long enough to span an off-frame, short enough
-    // that a cancelled indicator clears from the overlay almost immediately.
-    private static final int TURN_STICKY_TICKS = 3;
+    // 2 ticks = ~1000ms at 2Hz — spans an off-frame (~333ms) with margin while
+    // still clearing a cancelled indicator from the overlay within ~1s.
+    private static final int TURN_STICKY_TICKS = 2;
 
     // BYDAutoSpeedDevice
     private Object speedDevice;
@@ -75,7 +83,7 @@ public class TelemetryDataCollector {
     // Staleness detection: if speed stays identical for too long, force reconnect
     private int staleSpeedCount = 0;
     private int prevSpeedForStaleCheck = -1;
-    private static final int STALE_THRESHOLD = 50; // 10 seconds at 5Hz
+    private static final int STALE_THRESHOLD = 20; // 10 seconds at 2Hz
     private boolean lastBrakePedalPressed = false;
     private int lastGearMode = 1; // P
     private boolean lastLeftTurn = false;
@@ -207,13 +215,13 @@ public class TelemetryDataCollector {
     }
 
     /**
-     * Set overlay recording mode. When active, polling runs at 5Hz.
+     * Set overlay recording mode. When active, polling runs at 2Hz.
      * When inactive, drops to 1Hz. Restarts the scheduler if the rate changes.
      */
     public void setOverlayRecordingActive(boolean active) {
         if (this.overlayRecordingActive == active) return;
         this.overlayRecordingActive = active;
-        logger.info("Overlay recording " + (active ? "ACTIVE (5Hz)" : "INACTIVE (1Hz)"));
+        logger.info("Overlay recording " + (active ? "ACTIVE (2Hz)" : "INACTIVE (1Hz)"));
         // Restart scheduler at new rate if currently running
         restartAtCurrentRate();
     }
@@ -364,7 +372,7 @@ public class TelemetryDataCollector {
             if (speedKmh == prevSpeedForStaleCheck && !(speedKmh == 0 && lastGearMode == 1)) {
                 staleSpeedCount++;
                 if (staleSpeedCount >= STALE_THRESHOLD) {
-                    logger.warn("Speed device appears stale (same value " + speedKmh + " for " + (staleSpeedCount / 5) + "s), reconnecting");
+                    logger.warn("Speed device appears stale (same value " + speedKmh + " for " + (staleSpeedCount * POLL_INTERVAL_MS / 1000) + "s), reconnecting");
                     boolean reconnected = tryReconnectSpeedDevice();
                     if (reconnected) {
                         speedKmh = lastSpeedKmh;

@@ -489,9 +489,10 @@ class VideoPlayerFragment : Fragment() {
             // between completion and the next prepare doesn't reach into a
             // released instance. The new prepared listener resets it.
             currentMediaPlayer = null
-            // Auto-advance: if we have a next clip, play it. Mirrors the
-            // events.html "next video on end" behavior so the user can review
-            // a day's clips without tapping between each.
+            // Auto-advance to the next clip so the user can review a run of
+            // clips without tapping between each. Callers build the playlist in
+            // chronological order (oldest->newest), so index+1 is the NEWER
+            // clip even though the library lists newest-first.
             val nextIdx = playlistIndex + 1
             if (playlistPaths.isNotEmpty() && nextIdx in playlistPaths.indices) {
                 jumpTo(nextIdx)

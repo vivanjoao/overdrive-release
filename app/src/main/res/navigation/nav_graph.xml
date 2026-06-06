@@ -137,6 +137,14 @@
             android:defaultValue="/byd-cloud" />
     </fragment>
 
+    <!-- RoadSense: hazard / road-surface sensing surface (web). Hosts the
+         /road-sense page via WebViewFragment, mirroring the other web
+         destinations on a single renderer. -->
+    <fragment
+        android:id="@+id/roadSenseFragment"
+        android:name="com.overdrive.app.ui.fragment.RoadSenseFragment"
+        android:label="@string/rail_roadsense" />
+
     <!-- Diagnostics: logs + ADB console + utilities -->
     <fragment
         android:id="@+id/diagnosticsFragment"
@@ -172,6 +180,14 @@
         android:name="com.overdrive.app.ui.fragment.settings.SettingsAboutFragment"
         android:label="@string/settings_section_about"
         tools:layout="@layout/fragment_settings_about" />
+
+    <!-- Security — PIN lock controls. Reachable from the portrait Settings
+         hub's Security card and from the landscape sub-rail Security row. -->
+    <fragment
+        android:id="@+id/settingsSecurityFragment"
+        android:name="com.overdrive.app.ui.fragment.settings.SettingsSecurityFragment"
+        android:label="@string/settings_section_security"
+        tools:layout="@layout/fragment_settings_security" />
 
     <!-- Native video player (entered from Recordings) -->
     <fragment

@@ -39,6 +39,21 @@
     <methods>;
 }
 
+# ==================== Static Watchdog Builders (cross-process callers) ====================
+# These companion-object static helpers are called from daemon processes
+# (AccSentryDaemon, TelegramBotDaemon) to build the SAME shell-watchdog
+# script the UI deploys. Without `-keep` here, R8 may rename
+# `buildTelegramWatchdogScript` etc., the runtime call from
+# AccSentryDaemon.launchTelegramDaemon would NoSuchMethodError, and the
+# code falls back to the bare-nohup unsupervised launch — silently
+# regressing the H2 watchdog work.
+-keep class com.overdrive.app.launcher.DaemonLauncher$Companion {
+    public *;
+}
+-keep class com.overdrive.app.launcher.ZrokLauncher$Companion {
+    public *;
+}
+
 # ==================== Daemon Support Classes ====================
 # These are used by daemons but don't need full preservation
 
@@ -50,6 +65,42 @@
 # S - Short alias for string decryption (used throughout daemon code)
 -keep class com.overdrive.app.daemon.proxy.S {
     public static java.lang.String d(java.lang.String);
+}
+
+# Enc - holds decrypted constants accessed via reflection from
+# DaemonBootstrap.verifySafeWorking() (Class.forName + getDeclaredField).
+# Without this, R8 renames APP_PACKAGE to a single-letter name and the
+# bootstrap aborts before the daemon ever loads.
+-keep class com.overdrive.app.daemon.proxy.Enc {
+    public static java.lang.String APP_PACKAGE;
+    *;
+}
+
+# CameraDaemon.getAppContext() — called reflectively by ScreenDeterrent.resolveContext()
+# (surveillance package can't compile-time depend on daemon package). The
+# main()-only -keep above doesn't preserve this, so R8 renames it to a()
+# and ScreenDeterrent silently falls through to DaemonBootstrap.
+-keepclassmembers class com.overdrive.app.daemon.CameraDaemon {
+    public static android.content.Context getAppContext();
+}
+
+# DaemonBootstrap.getContext() — fallback path for the same reflection above.
+-keepclassmembers class com.overdrive.app.daemon.DaemonBootstrap {
+    public static android.content.Context getContext();
+}
+
+# Messages.get(String, String) and Messages.get(String) — called
+# reflectively by SrtWriter.lookupCatalog() so subtitle generation can
+# pull localized strings without a compile-time dependency from
+# surveillance → server.
+-keepclassmembers class com.overdrive.app.server.Messages {
+    public static java.lang.String get(java.lang.String, java.lang.String);
+    public static java.lang.String get(java.lang.String);
+}
+
+# LocaleManager.get() — called reflectively by SrtWriter.resolveCurrentLocale()
+-keepclassmembers class com.overdrive.app.server.LocaleManager {
+    public static java.lang.String get();
 }
 
 # Keep class names for daemon subpackages (for Class.forName if used internally)
@@ -86,20 +137,29 @@
 -keep class org.eclipse.paho.client.mqttv3.** { *; }
 -keep class org.eclipse.paho.client.mqttv3.logging.** { *; }
 -dontwarn org.eclipse.paho.client.mqttv3.**
+# v5 client used by BydCloudMqttSubscriber for BYD's EMQ broker — same
+# reflection-based logging-bundle loader as v3. The package roots differ
+# from v3 (mqttv5 sits directly under org.eclipse.paho, no .client. prefix
+# in the package after that), so the v3 rules above don't cover it.
+-keep class org.eclipse.paho.mqttv5.** { *; }
+-keep class org.eclipse.paho.mqttv5.client.logging.** { *; }
+-dontwarn org.eclipse.paho.mqttv5.**
 
 # ==================== RTMP client ====================
 -keep class com.pedro.** { *; }
 -dontwarn com.pedro.**
 
 # ==================== TensorFlow Lite ====================
+# CPU-only (XNNPACK). The GPU delegate dependency was removed because on
+# Adreno 610 (unified-memory SoC) concurrent OpenCL inference and the H.265
+# encoder share one DDR bus, producing visible eglSwap stalls during
+# recording. See YoloDetector.kt class doc.
 -keep class org.tensorflow.lite.** { *; }
 -keep interface org.tensorflow.lite.** { *; }
 -keepclassmembers class org.tensorflow.lite.** { *; }
--keep class org.tensorflow.lite.gpu.** { *; }
 -keep class org.tensorflow.lite.support.** { *; }
 -keep class com.google.auto.value.** { *; }
 -dontwarn com.google.auto.value.**
--dontwarn org.tensorflow.lite.gpu.**
 
 # AI detection classes - keep class names but allow method obfuscation
 # Detection data class needs field names for any serialization
@@ -125,6 +185,14 @@
 -keep class com.overdrive.app.receiver.BootReceiver { *; }
 -keep class com.overdrive.app.receiver.LocationBootReceiver { *; }
 -keep class com.overdrive.app.services.LocationSidecarService { *; }
+# RoadSense IMU sidecar — launched by the daemon via a STRING-LITERAL `am
+# start-foreground-service -n .../RoadSenseImuSidecarService` (R8 can't see that
+# reference), so its class name must not be renamed/stripped. Same rationale as
+# LocationSidecarService above. The daemon→app bridge (CameraDaemon.getRoadSense,
+# RoadSenseController, RoadSenseApiHandler) is reached by typed calls so R8 tracks
+# those automatically; only the am-launched component needs an explicit keep.
+-keep class com.overdrive.app.roadsense.sidecar.RoadSenseImuSidecarService { *; }
+-keep class com.overdrive.app.roadsense.overlay.RoadSenseOverlayService { *; }
 
 # ==================== App Packages (allow obfuscation) ====================
 # Keep class names for debugging but obfuscate methods/fields

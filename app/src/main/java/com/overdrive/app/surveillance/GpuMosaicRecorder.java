@@ -151,6 +151,18 @@ public class GpuMosaicRecorder {
     // own startStopLock as defense in depth.
     private volatile boolean recording = false;
     private final Object recordingLock = new Object();
+    // FIX (audit R1, RESIDUAL): segment-rotation listener. Pipeline registers
+    // a Runnable that stamps its lastSegmentRotateMs so RecordingModeManager
+    // can suppress wedge-detection during the natural isRecording()=false
+    // flicker between segments. Optional — null means no listener wired.
+    private volatile Runnable segmentRotatedListener = null;
+    // Pending override for the next {@link #startRecording(File, String)}
+    // call. Written by the storage watchdog when a hot remount lands the
+    // volume on a different filesystem path; consumed by the next
+    // start-recording entry so future segments are written to the new
+    // mount point rather than the stale path captured at the original
+    // startRecording. Null = no override (default behaviour).
+    private volatile java.io.File pendingOutputDirOverride = null;
     private volatile boolean apaMode = false;  // APA mode: passthrough instead of mosaic split
     private volatile int cameraLayout = 0;  // 0=4-cam, 1=APA passthrough, 2=3-cam, 3=esco-parity passthrough
     // Set when setCameraLayout flips on a non-GL thread; consumed inside
@@ -200,6 +212,10 @@ public class GpuMosaicRecorder {
     private OverlayBitmapRenderer overlayRenderer;
     private TelemetryDataCollector telemetryCollector;
     private int overlayFrameCounter = 0;
+    // Frame stride between telemetry-overlay bitmap re-rasters, derived from
+    // encoder fps in init() to land near 2 Hz (matches TelemetryDataCollector
+    // overlay poll rate). Default assumes 15 fps → every 8th frame ≈ 1.9 Hz.
+    private int overlayRasterStride = 8;
     private volatile boolean overlayRecordingModeAllowed = false;
     private boolean overlayTextureReady = false;
     private boolean overlayTextureInitialized = false;
@@ -427,16 +443,56 @@ public class GpuMosaicRecorder {
         int encFps = encoder != null ? encoder.getFps() : 15;
         maxDrawDurationNs = 2L * 1_000_000_000L / Math.max(1, encFps);
 
+        // Re-raster the telemetry overlay bitmap at ~2 Hz, matching the
+        // TelemetryDataCollector overlay poll rate. The CPU raster
+        // (overlayRenderer.renderFrame) is the expensive half of the overlay
+        // pass; the composite draw reuses the last texture every frame and is
+        // cheap. Rastering faster than telemetry updates just redraws identical
+        // pixels — pure waste. Derive the frame stride from fps so a 30 fps
+        // profile rasters every 15th frame, 15 fps every 8th, etc., all landing
+        // near 2 Hz. Min 1 so a pathologically low fps still rasters.
+        overlayRasterStride = Math.max(1, Math.round(encFps / 2.0f));
+
         // Reset the swap-time monotonic clamp on every init so a recorder
         // reinit (encoder swap, codec change) doesn't carry over a stale
         // ceiling that would clamp every new frame to a far-future PTS.
         lastSwappedPtsNs = 0;
+
+        // FIX (audit R2): register writer-abort callback so SD-card death /
+        // disk-write failure inside the encoder thread propagates back into
+        // wrapper.recording AND StorageManager.recordingActive. Without this
+        // bridge, RMM's wedge detector reads pipeline.isRecording()==true
+        // forever (the wrapper boolean lies), the watchdog's
+        // pendingOutputDirOverride never gets consumed, and recording stays
+        // dead until ACC OFF/ON or daemon restart.
+        encoder.setWriterAbortListener(reason -> {
+            try {
+                if (recording) {
+                    recording = false;
+                    logger.warn("Writer aborted — wrapper recording flag cleared (reason="
+                        + reason + ")");
+                }
+                com.overdrive.app.storage.StorageManager.getInstance().setRecordingActive(false);
+            } catch (Throwable t) {
+                logger.warn("onWriterAborted bridge failed: " + t.getMessage());
+            }
+        });
 
         // Register callback to sync recording flag when encoder closes file
         encoder.setFileClosedCallback(() -> {
             if (recording) {
                 recording = false;
                 logger.info("Recording flag reset (encoder closed file)");
+            }
+            // FIX (audit R1, RESIDUAL): notify segment-rotation listener so
+            // RecordingModeManager's wedge ticker can grace-window the
+            // between-segments isRecording()=false flicker.
+            Runnable rotL = segmentRotatedListener;
+            if (rotL != null) {
+                try { rotL.run(); }
+                catch (Throwable t) {
+                    logger.warn("Segment-rotated listener threw: " + t.getMessage());
+                }
             }
             
             // SOTA: Trigger storage cleanup after each file is saved
@@ -731,10 +787,14 @@ public class GpuMosaicRecorder {
         if (overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null) {
             overlayFrameCounter++;
             try {
-                // Update bitmap every 3rd frame (~5 FPS at 15 FPS recording)
-                if ((overlayFrameCounter == 1 || overlayFrameCounter % 3 == 0) && telemetryCollector != null) {
+                // Re-raster the overlay bitmap at ~2 Hz (overlayRasterStride is
+                // fps-derived in init()). Faster than this just redraws pixels
+                // the telemetry layer hasn't changed. The composite draw below
+                // still runs every frame off the last uploaded texture.
+                if ((overlayFrameCounter == 1 || overlayFrameCounter % overlayRasterStride == 0)
+                        && telemetryCollector != null) {
                     TelemetrySnapshot snapshot = telemetryCollector.getLatestSnapshot();
-                    overlayRenderer.renderFrame(snapshot, overlayFrameCounter / 3);
+                    overlayRenderer.renderFrame(snapshot, overlayFrameCounter / overlayRasterStride);
                 }
                 
                 // Upload new bitmap to texture ONLY when the double buffer actually swapped.
@@ -1012,8 +1072,25 @@ public class GpuMosaicRecorder {
             com.overdrive.app.storage.StorageManager storageManager =
                 com.overdrive.app.storage.StorageManager.getInstance();
 
-            // Use provided directory or default to recordings dir
-            java.io.File targetDir = outputDir != null ? outputDir : storageManager.getRecordingsDir();
+            // Resolution order:
+            //  1) Caller-supplied outputDir (explicit, wins).
+            //  2) pendingOutputDirOverride (set by storage watchdog after a
+            //     hot remount; one-shot — cleared after consumption so the
+            //     next call falls back to live StorageManager.getRecordingsDir()
+            //     unless the watchdog re-pokes it again).
+            //  3) Live StorageManager.getRecordingsDir() (default).
+            java.io.File overrideDir = this.pendingOutputDirOverride;
+            java.io.File targetDir;
+            if (outputDir != null) {
+                targetDir = outputDir;
+            } else if (overrideDir != null) {
+                targetDir = overrideDir;
+                this.pendingOutputDirOverride = null;
+                logger.info("Recorder using watchdog-supplied output dir override: "
+                    + overrideDir.getAbsolutePath());
+            } else {
+                targetDir = storageManager.getRecordingsDir();
+            }
 
             // Ensure directory exists
             if (!targetDir.exists()) {
@@ -1113,11 +1190,36 @@ public class GpuMosaicRecorder {
     
     /**
      * Checks if currently recording.
-     * 
+     *
      * @return true if recording, false otherwise
      */
     public boolean isRecording() {
         return recording;
+    }
+
+    /**
+     * Sets the output directory to use for the NEXT segment / recording
+     * session. Storage watchdog calls this after a hot SD/USB remount so
+     * that future {@link #startRecording(java.io.File, String)} calls land
+     * on the freshly-mounted volume rather than the stale path captured
+     * at the original start.
+     *
+     * <p>Does NOT affect the current in-flight segment — the underlying
+     * encoder's {@code segmentBasePath} is fixed at the segment's open;
+     * mid-segment volume change cannot be hot-patched without a stop
+     * and re-start. The current segment's writes will continue to fail
+     * silently against the vanished mount until the encoder rotates or
+     * the recording is restarted.
+     *
+     * @param dir new recordings directory, or {@code null} to clear the
+     *            override and fall back to {@code StorageManager.getRecordingsDir()}
+     *            on the next start-recording call.
+     */
+    public void setOutputDir(java.io.File dir) {
+        this.pendingOutputDirOverride = dir;
+        logger.info("Recorder output dir override set to "
+            + (dir != null ? dir.getAbsolutePath() : "(null/default)")
+            + " — applies on next startRecording()");
     }
     
     /**
@@ -1450,7 +1552,17 @@ public class GpuMosaicRecorder {
     public void setTelemetryCollector(TelemetryDataCollector collector) {
         this.telemetryCollector = collector;
     }
-    
+
+    /**
+     * Registers a listener invoked whenever a recording segment file finishes
+     * closing (segment rotation or final stop). Used by GpuSurveillancePipeline
+     * to stamp lastSegmentRotateMs so RecordingModeManager's wedge ticker can
+     * grace-window the natural isRecording()=false flicker between segments.
+     */
+    public void setSegmentRotatedListener(Runnable listener) {
+        this.segmentRotatedListener = listener;
+    }
+
     /**
      * Returns true if the encoder surface has died and needs reinitialization.
      * Called by PanoramicCameraGpu to trigger encoder recovery.

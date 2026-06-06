@@ -46,4 +46,12 @@
     <!-- Section overline gap -->
     <dimen name="section_overline_top">12dp</dimen>
     <dimen name="section_overline_bottom">8dp</dimen>
+
+    <!-- PIN unlock keypad (PinLockActivity). 72dp keys give a 14.4mm hit
+         target on the BYD Seal 15.6" panel — well above Material's 48dp
+         minimum and comfortable for cluster-distance interaction. -->
+    <dimen name="pin_key_size">72dp</dimen>
+    <dimen name="pin_key_margin">6dp</dimen>
+    <dimen name="pin_key_corner">36dp</dimen>
+    <dimen name="pin_key_text_size">28sp</dimen>
 </resources>

@@ -28,6 +28,7 @@ import com.overdrive.app.ui.fragment.settings.SettingsDaemonsFragment
 import com.overdrive.app.ui.fragment.settings.SettingsOverlayFragment
 import com.overdrive.app.ui.fragment.settings.SettingsPrivacyFragment
 import com.overdrive.app.ui.fragment.settings.SettingsRecordingFragment
+import com.overdrive.app.ui.fragment.settings.SettingsSecurityFragment
 import com.overdrive.app.ui.fragment.settings.SettingsSurveillanceFragment
 import com.overdrive.app.ui.util.PreferencesManager
 import com.overdrive.app.ui.util.navigateDrillDown
@@ -69,6 +70,7 @@ class SettingsFragment : Fragment() {
         RECORDING(R.string.settings_section_recording, R.drawable.ic_recording, navigates = true),
         SURVEILLANCE(R.string.settings_section_surveillance, R.drawable.ic_sentry, navigates = true),
         OVERLAY(R.string.settings_section_overlay, R.drawable.ic_overlay_rec_active),
+        SECURITY(R.string.settings_section_security, R.drawable.ic_security_lock),
         DAEMONS(R.string.settings_section_daemons, R.drawable.ic_services),
         PRIVACY(R.string.settings_section_privacy, R.drawable.ic_delete),
     }
@@ -199,6 +201,7 @@ class SettingsFragment : Fragment() {
         Section.RECORDING -> SettingsRecordingFragment()
         Section.SURVEILLANCE -> SettingsSurveillanceFragment()
         Section.OVERLAY -> SettingsOverlayFragment()
+        Section.SECURITY -> SettingsSecurityFragment()
         Section.DAEMONS -> SettingsDaemonsFragment()
         Section.PRIVACY -> SettingsPrivacyFragment()
     }
@@ -283,6 +286,9 @@ class SettingsFragment : Fragment() {
         }
         view.findViewById<View>(R.id.cardSectionSurveillance)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.surveillanceSettingsWebFragment)
+        }
+        view.findViewById<View>(R.id.cardSectionSecurity)?.setOnClickListener {
+            findNavController().navigateDrillDown(R.id.settingsSecurityFragment)
         }
         view.findViewById<View>(R.id.cardSectionDaemons)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.daemonsFragment)

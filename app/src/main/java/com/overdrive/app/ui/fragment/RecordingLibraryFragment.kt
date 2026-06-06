@@ -1248,9 +1248,14 @@ class RecordingLibraryFragment : Fragment() {
         try {
             // Build a playlist from the currently visible list so the player
             // can offer prev/next that respects the user's filters & date.
-            val paths = currentList.map { it.path }.toTypedArray()
-            val titles = currentList.map { it.name }.toTypedArray()
-            val idx = currentList.indexOfFirst { it.path == recording.path }
+            // The visible list is newest-first (ts_ms DESC); the player treats
+            // index+1 as "next", so feed it in chronological order (oldest->
+            // newest) and "next" / auto-advance lands on the NEWER clip while
+            // the on-screen library stays descending.
+            val ordered = currentList.asReversed()
+            val paths = ordered.map { it.path }.toTypedArray()
+            val titles = ordered.map { it.name }.toTypedArray()
+            val idx = ordered.indexOfFirst { it.path == recording.path }
             val bundle = Bundle().apply {
                 putString(VideoPlayerFragment.ARG_VIDEO_PATH, recording.path)
                 putString(VideoPlayerFragment.ARG_VIDEO_TITLE, recording.name)

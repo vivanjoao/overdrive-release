@@ -1417,13 +1417,18 @@ public class OemDashcamPipeline {
                 && telemetryCollector != null) {
             overlayFrameCounter++;
             try {
-                // Refresh the bitmap every 3rd frame (~5 fps at 15 fps
-                // recording) — the overlay text only changes that fast,
-                // and skipping the Canvas redraw on intermediate frames
-                // keeps the GL thread budget intact.
-                if (overlayFrameCounter == 1 || overlayFrameCounter % 3 == 0) {
+                // Re-raster the bitmap at ~2 Hz, matching TelemetryDataCollector's
+                // overlay poll rate (the shared collector publishes at 2 Hz).
+                // Rastering faster just redraws pixels the telemetry layer hasn't
+                // changed — pure CPU waste on the GL thread. Derive the stride
+                // from the configured fps so 30 fps rasters every 15th frame,
+                // 15 fps every 8th, etc. The Canvas raster is the expensive half;
+                // the composite draw below still runs every frame off the cached
+                // texture. (Mirrors the pano path in GpuMosaicRecorder.)
+                int overlayRasterStride = Math.max(1, Math.round(fps / 2.0f));
+                if (overlayFrameCounter == 1 || overlayFrameCounter % overlayRasterStride == 0) {
                     TelemetrySnapshot snapshot = telemetryCollector.getLatestSnapshot();
-                    overlayRenderer.renderFrame(snapshot, overlayFrameCounter / 3);
+                    overlayRenderer.renderFrame(snapshot, overlayFrameCounter / overlayRasterStride);
                 }
 
                 // Upload the new bitmap only when the double buffer

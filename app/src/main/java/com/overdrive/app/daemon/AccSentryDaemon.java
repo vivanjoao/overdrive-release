@@ -75,6 +75,55 @@ public class AccSentryDaemon {
     private static volatile boolean inSentryMode = false;
     private static int lastPowerLevel = -1;
     private static int lastMcuStatus = -1;
+    // Set to true once a bodywork listener has been successfully registered
+    // with the BYD HAL. The slow-retry thread spins until this flips true,
+    // and the periodic ACC heartbeat is gated on it as well — there's no
+    // point publishing state if the daemon never received an event source.
+    private static volatile boolean bodyworkRegistered = false;
+    // Heartbeat thread for periodic ACC state republish (covers the wedge
+    // where CameraDaemon restarts mid-drive and misses our edge-only IPC).
+    private static Thread accHeartbeatThread = null;
+    // Last accOff value the heartbeat actually published. -1 = nothing
+    // published yet; 0 = ACC ON; 1 = ACC OFF. Heartbeat short-circuits
+    // when its tick would re-publish the same state, because each IPC
+    // re-runs CameraDaemon.onAccStateChanged side-effects (cleanupDoorLockGate,
+    // surveillanceEnabled reset, DB write, OEM recalc) that aren't fully
+    // idempotent. Edge handlers in onPowerLevelChanged still notify
+    // unconditionally — they're the authoritative state delta. See
+    // prior-audit "Heartbeat triggers full CameraDaemon.onAccStateChanged
+    // side-effects every 30s".
+    private static volatile int lastHeartbeatPublishedAccOff = -1;
+    // Counter of consecutive heartbeat ticks that hit the dedup
+    // short-circuit (state unchanged since last publish). When this
+    // reaches HEARTBEAT_FORCE_REPUBLISH_TICKS we publish anyway, so a
+    // CameraDaemon process restart mid-drive (which resets its in-process
+    // lastDispatchedAccIsOff cache) resyncs within ~5 min instead of
+    // waiting indefinitely for the next bodywork edge. CameraDaemon's
+    // own onAccStateChanged dedup (CameraDaemon.java:2802-2809) drops
+    // the no-op IPC when the consumer is already in sync, so the
+    // periodic republish is cheap when not needed. See prior-audit
+    // "Heartbeat refuses to republish ACC ON after CameraDaemon
+    // process restart".
+    private static volatile int heartbeatDedupRunLength = 0;
+    // Dropped from 10 (~5min) to 2 (~1min) per prior-audit "Heartbeat
+    // dedup creates 5-minute pano wedge on CameraDaemon mid-drive
+    // restart". CameraDaemon's onAccStateChanged dedup drops the no-op
+    // IPC when state already matches, so a 1min republish is cheap in
+    // steady state but caps the post-restart resync window at 60s
+    // instead of 5min — pano stays armed for at most one extra minute
+    // of staleness before the heartbeat force-republishes.
+    private static final int HEARTBEAT_FORCE_REPUBLISH_TICKS = 2;
+    // Dedicated single-thread executor for IPC dispatch — keeps
+    // sendSurveillanceCommandRaw retry sleeps off the BYD HAL listener
+    // thread (callbacks are single-threaded and a stalled listener
+    // would drop subsequent ACC edges). See prior-audit "notifyAccState
+    // blocks BYD HAL listener thread up to 11s on retry".
+    private static final java.util.concurrent.ExecutorService accNotifyExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "AccSentryNotifyIPC");
+            t.setDaemon(true);
+            return t;
+        });
     // Thread for the 10-second loop
     private static Thread systemKeepAliveThread = null;
     // Interval from  (C0004a0)
@@ -554,8 +603,16 @@ public class AccSentryDaemon {
                     registered = registerBodyworkListener(context);
                 }
             }
-            if (!registered) {
-                log("Bodywork listener failed after retries - ACC monitoring unavailable");
+            if (registered) {
+                bodyworkRegistered = true;
+                // Periodic ACC state heartbeat — repairs the wedge where
+                // CameraDaemon restarts mid-drive and never receives an
+                // edge-only ACC IPC. Cheap (~1 HAL probe / 30 s).
+                startAccStateHeartbeat();
+            } else {
+                log("Bodywork listener failed after retries — starting slow-retry every 60s "
+                    + "(daemon should never run without a listener if one can be eventually established)");
+                startBodyworkSlowRetry(context);
             }
 
             // Esco-parity: ALSO register BYDAutoPowerDevice
@@ -1092,10 +1149,33 @@ public class AccSentryDaemon {
             if (level == 0 && inSentryMode) {
                 log("CRITICAL: Battery level LOW - triggering emergency wake");
                 forceMcuWakeUp();
-                
+
                 if (surveillanceEnabled) {
-                    log("LOW BATTERY - Disabling surveillance to conserve power");
-                    disableSurveillance();
+                    // Dispatch disableSurveillance off the BYD HAL listener thread
+                    // — it does an IPC with up to ~11s of retry sleep
+                    // (sendSurveillanceCommandRaw 2× attempts × 5s SoTimeout +
+                    // 1s backoff). Stalling the listener here drops subsequent
+                    // ACC edges. FIFO single-thread accNotifyExecutor preserves
+                    // ordering against any in-flight notifyAccState. See
+                    // prior-audit "AccListener.onBatteryVoltageLevelChanged
+                    // calls disableSurveillance inline".
+                    log("LOW BATTERY - Dispatching surveillance disable off HAL listener thread");
+                    try {
+                        accNotifyExecutor.execute(() -> {
+                            try {
+                                disableSurveillance();
+                            } catch (Throwable t) {
+                                log("WARN: low-battery disableSurveillance failed: " + t.getMessage());
+                            }
+                        });
+                    } catch (java.util.concurrent.RejectedExecutionException ree) {
+                        // Executor shut down (process tearing down). Run inline as
+                        // last-chance attempt; we'd rather block briefly than
+                        // miss the disable on shutdown.
+                        log("WARN: accNotifyExecutor rejected low-battery disable, running inline: "
+                            + ree.getMessage());
+                        disableSurveillance();
+                    }
                 }
             }
         }
@@ -1144,20 +1224,6 @@ public class AccSentryDaemon {
         inSentryMode = true;
         log("=== ENTERING SENTRY MODE ===");
 
-        // Clear any stale screen-deterrent stop flag from the previous sentry
-        // session. exitSentryMode sets it; the ScreenWake worker clears it on
-        // its way out, but if the daemon was killed mid-exit the flag may
-        // linger. Without this clear, the first motion in this session would
-        // see screenDeterrentForceStop=true and refuse to render.
-        try {
-            com.overdrive.app.config.UnifiedConfigManager.updateValues(
-                "surveillance",
-                java.util.Collections.singletonMap("screenDeterrentForceStop", false));
-            com.overdrive.app.config.UnifiedConfigManager.updateValues(
-                "surveillance",
-                java.util.Collections.singletonMap("screenDeterrentActiveUntilMs", 0L));
-        } catch (Throwable ignored) {}
-
         // CRITICAL: Always notify CameraDaemon that ACC is OFF immediately.
         // enableSurveillance() may skip the IPC if surveillanceEnabled is already true
         // or if the user has surveillance disabled in config, which would leave
@@ -1168,6 +1234,26 @@ public class AccSentryDaemon {
         // Background thread for setup
         new Thread(() -> {
             try {
+                // 0. Clear any stale screen-deterrent stop flag from the previous
+                // sentry session. exitSentryMode sets it; the ScreenWake worker
+                // clears it on its way out, but if the daemon was killed mid-exit
+                // the flag may linger. Without this clear, the first motion in
+                // this session would see screenDeterrentForceStop=true and refuse
+                // to render. Coalesced into a single updateValues call (full-JSON
+                // write) and dispatched off the BYD HAL listener thread per
+                // prior-audit "enterSentryMode does two inline UnifiedConfig
+                // .updateValues writes on BYD HAL listener thread".
+                try {
+                    java.util.Map<String, Object> deterrentClear = new java.util.HashMap<>();
+                    deterrentClear.put("screenDeterrentForceStop", false);
+                    deterrentClear.put("screenDeterrentActiveUntilMs", 0L);
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues(
+                        "surveillance", deterrentClear);
+                    log("Cleared stale screen-deterrent flags on SentrySetup worker (coalesced)");
+                } catch (Throwable t) {
+                    log("WARN: failed to clear stale screen-deterrent flags: " + t.getMessage());
+                }
+
                 // 1. Initialize voltage monitoring FIRST (for battery protection)
                 initVehicleDataMonitor();
                 
@@ -1237,6 +1323,13 @@ public class AccSentryDaemon {
 
     /**
      * Exit Sentry Mode - Restore normal operation.
+     *
+     * Listener-thread contract: BYD bodywork callbacks are single-threaded.
+     * Anything that does shell exec, Process.waitFor, Thread.join, binder
+     * reflection, or UnifiedConfig disk writes MUST be dispatched off this
+     * thread or the next ACC edge will queue behind us. The state flips
+     * (inSentryMode/surveillanceEnabled) and the dispatch decision happen
+     * inline; everything heavy runs on SentryTeardown.
      */
     private static void exitSentryMode() {
         if (!inSentryMode) {
@@ -1256,57 +1349,75 @@ public class AccSentryDaemon {
         inSentryMode = false;
         surveillanceEnabled = false;
 
-        // Tear down any in-progress screen deterrent. ScreenDeterrent.fire()
-        // runs in byd_cam_daemon's process (different JVM), so we signal it
-        // via unified config: screenDeterrentForceStop=true. The render loop
-        // polls this every tick and exits its draw loop, which lets its
-        // finally block release the surface and turn the backlight off
-        // BEFORE our setBacklightState(true) below — otherwise our wake
-        // would land while the deterrent surface still occluded the panel.
-        try {
-            com.overdrive.app.config.UnifiedConfigManager.updateValues(
-                "surveillance",
-                java.util.Collections.singletonMap("screenDeterrentForceStop", true));
-        } catch (Throwable t) {
-            log("Failed to signal screen deterrent stop: " + t.getMessage());
-        }
-
         // CRITICAL: Always notify CameraDaemon that ACC is ON.
         // CameraDaemon handles all surveillance cleanup (door lock gate, unlock poll,
-        // cloud listener, pipeline stop) in its ACC ON path.
+        // cloud listener, pipeline stop) in its ACC ON path. notifyAccState already
+        // dispatches the IPC onto accNotifyExecutor so it doesn't block the listener.
         notifyAccState(false);  // accOff=false → ACC is ON
-        
-        // Clear safe zone suppression flag (clean slate for next sentry session)
+
+        // Clear safe zone suppression flag (clean slate for next sentry session) —
+        // simple in-memory volatile flip in CameraDaemon, safe inline.
         try { CameraDaemon.setSafeZoneSuppressed(false); } catch (Exception ignored) {}
-        
-        // Restore stock peripheral power behavior (allow MCU to cut power)
-        configurePeripheralPower(false);
-        
-        // Stop Telegram daemon if it was auto-started
-        stopTelegramDaemonIfAutoStarted();
-        
-        // Stop active charging maintenance (NO-OP — kept for symmetry).
-        stopChargingMaintenance();
 
-        // Stop the V2 voltage monitor that owns the new MCU sleep/wake loop.
-        try {
-            com.overdrive.app.power.BatteryVoltageMonitorV2.stopMonitor();
-        } catch (Throwable t) {
-            log("BatteryVoltageMonitorV2 stop failed: " + t.getMessage());
-        }
+        // Background thread for teardown — symmetric to enterSentryMode's
+        // SentrySetup worker. Heavy work (UnifiedConfig writes, peripheral
+        // power binder chain, Telegram shell stop with Process.waitFor,
+        // keep-alive Thread.join, monitor teardown) MUST NOT run on the
+        // BYD HAL listener thread; a 5-30 s stall there would queue any
+        // subsequent ACC edge and the second OFF/ON transition would land
+        // late, leaving CONTINUOUS / DRIVE_MODE recording on stale ACC
+        // state until the 30 s heartbeat resyncs.
+        log("Dispatching sentry teardown off BYD HAL listener thread");
+        new Thread(() -> {
+            try {
+                // Tear down any in-progress screen deterrent. ScreenDeterrent.fire()
+                // runs in byd_cam_daemon's process (different JVM), so we signal it
+                // via unified config: screenDeterrentForceStop=true. The render loop
+                // polls this every tick and exits its draw loop, which lets its
+                // finally block release the surface and turn the backlight off
+                // BEFORE our setBacklightState(true) below — otherwise our wake
+                // would land while the deterrent surface still occluded the panel.
+                try {
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues(
+                        "surveillance",
+                        java.util.Collections.singletonMap("screenDeterrentForceStop", true));
+                } catch (Throwable t) {
+                    log("Failed to signal screen deterrent stop: " + t.getMessage());
+                }
 
-        // Stop the SoC-based cutoff monitor.
-        try {
-            com.overdrive.app.power.SocCutoffMonitor.stopMonitor();
-        } catch (Throwable t) {
-            log("SocCutoffMonitor stop failed: " + t.getMessage());
-        }
+                // Restore stock peripheral power behavior (allow MCU to cut power)
+                configurePeripheralPower(false);
 
-        // Stop VehicleDataMonitor listener
-        stopVehicleDataMonitor();
-        
-        // Stop system keep-alive (thread will exit cleanly since inSentryMode is already false)
-        stopSystemKeepAlive();
+                // Stop Telegram daemon if it was auto-started
+                stopTelegramDaemonIfAutoStarted();
+
+                // Stop active charging maintenance (NO-OP — kept for symmetry).
+                stopChargingMaintenance();
+
+                // Stop the V2 voltage monitor that owns the new MCU sleep/wake loop.
+                try {
+                    com.overdrive.app.power.BatteryVoltageMonitorV2.stopMonitor();
+                } catch (Throwable t) {
+                    log("BatteryVoltageMonitorV2 stop failed: " + t.getMessage());
+                }
+
+                // Stop the SoC-based cutoff monitor.
+                try {
+                    com.overdrive.app.power.SocCutoffMonitor.stopMonitor();
+                } catch (Throwable t) {
+                    log("SocCutoffMonitor stop failed: " + t.getMessage());
+                }
+
+                // Stop VehicleDataMonitor listener
+                stopVehicleDataMonitor();
+
+                // Stop system keep-alive (thread will exit cleanly since inSentryMode is already false)
+                stopSystemKeepAlive();
+            } catch (Throwable t) {
+                log("WARN: sentry teardown worker failed: " + t.getMessage());
+                t.printStackTrace();
+            }
+        }, "SentryTeardown").start();
 
         // Restore backlight — retry a few times with delay.
         // The keep-alive thread should be fully stopped by now (inSentryMode=false
@@ -1325,14 +1436,14 @@ public class AccSentryDaemon {
             // Once we've finished the wake sequence, clear the cross-process
             // force-stop flag so the next sentry session can run deterrents
             // again. Done last so any belated ScreenDeterrent tick still sees
-            // the stop signal.
+            // the stop signal. Coalesced into a single updateValues call
+            // (full-JSON write) per prior-audit pattern.
             try {
+                java.util.Map<String, Object> deterrentClear = new java.util.HashMap<>();
+                deterrentClear.put("screenDeterrentForceStop", false);
+                deterrentClear.put("screenDeterrentActiveUntilMs", 0L);
                 com.overdrive.app.config.UnifiedConfigManager.updateValues(
-                    "surveillance",
-                    java.util.Collections.singletonMap("screenDeterrentForceStop", false));
-                com.overdrive.app.config.UnifiedConfigManager.updateValues(
-                    "surveillance",
-                    java.util.Collections.singletonMap("screenDeterrentActiveUntilMs", 0L));
+                    "surveillance", deterrentClear);
             } catch (Throwable ignored) {}
         }, "ScreenWake").start();
 
@@ -2704,47 +2815,361 @@ public class AccSentryDaemon {
     // delegates by calling notifyAccState() — see enterSentryMode() / exitSentryMode().
     
     /**
+     * Read the current bodywork power level via reflection.
+     *
+     * Returns the raw int the HAL gave us (0..3 = real states, 4 = FAKE_OK,
+     * 255 = INVALID, anything else = unknown). Returns -1 if reflection
+     * itself failed (no HAL, no context). Callers MUST gate sentinel values
+     * (4, 255, anything outside 0..3) — see startAccStateHeartbeat().
+     *
+     * Mirrors the inline reflection used in registerBodyworkListener; kept
+     * standalone so the heartbeat doesn't have to re-register a listener
+     * just to peek at the current level.
+     */
+    private static int readPowerLevel() {
+        if (appContext == null) return -1;
+        try {
+            Class<?> deviceClass = Class.forName(
+                "android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice");
+            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
+            Object device = getInstance.invoke(null, appContext);
+            if (device == null) return -1;
+            Method getPowerLevel = deviceClass.getMethod("getPowerLevel");
+            return (Integer) getPowerLevel.invoke(device);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * Periodic ACC state heartbeat — runs every 30s while the daemon is up
+     * and a bodywork listener has been registered. Republishes the current
+     * ACC state to CameraDaemon so a CameraDaemon restart mid-drive
+     * resyncs within ≤30s instead of waiting for the next ACC edge (which
+     * may never come if the user just keeps driving).
+     *
+     * Skips sentinel HAL readings (FAKE_OK=4, INVALID=255, anything outside
+     * 0..3) — only publish definitive states. Same parsing as the
+     * onPowerLevelChanged edge handler.
+     */
+    private static synchronized void startAccStateHeartbeat() {
+        if (accHeartbeatThread != null && accHeartbeatThread.isAlive()) {
+            return;
+        }
+        accHeartbeatThread = new Thread(() -> {
+            log("ACC state heartbeat started (30s interval)");
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(30_000L);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+                try {
+                    int level = readPowerLevel();
+                    // Gate on definitive levels only. 4 = FAKE_OK and
+                    // 255 = INVALID are HAL bluffs; -1 is our reflection
+                    // failure sentinel. Any of these → no publish.
+                    //
+                    // Also skip level=1 (ACC). During ignition there is a
+                    // 200-500ms transient where the HAL emits level=1
+                    // before settling at 2/3; a heartbeat tick landing in
+                    // that window would publish accOff=true mid-startup
+                    // and falsely flip CameraDaemon into the ACC OFF path.
+                    // Edge handler in onPowerLevelChanged already maps
+                    // level=1 correctly (drop-from-ON treated as OFF, no
+                    // transition otherwise) — heartbeat doesn't need to
+                    // duplicate that. See prior-audit "Heartbeat publishes
+                    // during transient level=1 ACC-edge blip".
+                    if (level == POWER_LEVEL_ACC) {
+                        log("ACC heartbeat: level=ACC (1) is a transient — skipping publish");
+                    } else if (level == POWER_LEVEL_OFF
+                            || level == POWER_LEVEL_ON
+                            || level == POWER_LEVEL_OK) {
+                        boolean isAccOff = level < POWER_LEVEL_ON;
+                        int desiredFlag = isAccOff ? 1 : 0;
+                        // Equality short-circuit. CameraDaemon.onAccStateChanged
+                        // runs cleanupDoorLockGate, surveillanceEnabled reset,
+                        // DB write, OEM recalc on every IPC; none are
+                        // unconditionally idempotent, so a 30s heartbeat
+                        // republishing the same state churns those side
+                        // effects forever. Only publish on actual change
+                        // since last heartbeat publish (edge handler still
+                        // owns transitions). See prior-audit
+                        // "Heartbeat triggers full CameraDaemon
+                        // .onAccStateChanged side-effects every 30s".
+                        if (desiredFlag == lastHeartbeatPublishedAccOff) {
+                            // No-op: state unchanged since last publish.
+                            // Do not log every tick to avoid log flood —
+                            // 2880 lines/day at 30s otherwise.
+                            //
+                            // EXCEPT: if we've been deduping for
+                            // HEARTBEAT_FORCE_REPUBLISH_TICKS ticks (~1 min at
+                            // 30s tick × 2 — was ~5min, dropped per prior-audit
+                            // "Heartbeat dedup creates 5-minute pano wedge on
+                            // CameraDaemon mid-drive restart"),
+                            // republish anyway so a CameraDaemon process
+                            // restart mid-drive (which resets its
+                            // lastDispatchedAccIsOff cache to null) resyncs
+                            // without waiting for the next bodywork edge.
+                            // CameraDaemon's onAccStateChanged dedup drops
+                            // the no-op IPC when state already matches, so
+                            // this is a cheap heartbeat in steady state.
+                            heartbeatDedupRunLength++;
+                            if (heartbeatDedupRunLength >= HEARTBEAT_FORCE_REPUBLISH_TICKS) {
+                                notifyAccState(isAccOff);
+                                heartbeatDedupRunLength = 0;
+                                log("ACC heartbeat: forced republish after "
+                                    + HEARTBEAT_FORCE_REPUBLISH_TICKS
+                                    + " dedup ticks (~1min) accOff=" + isAccOff
+                                    + " — covers CameraDaemon process restart");
+                            }
+                        } else {
+                            notifyAccState(isAccOff);
+                            lastHeartbeatPublishedAccOff = desiredFlag;
+                            heartbeatDedupRunLength = 0;
+                            log("ACC heartbeat: level=" + powerLevelToString(level)
+                                + " accOff=" + isAccOff + " (state changed since last heartbeat)");
+                        }
+                    }
+                } catch (Throwable th) {
+                    log("ACC heartbeat error: " + th.getMessage());
+                }
+            }
+        }, "AccSentryHeartbeat");
+        accHeartbeatThread.setDaemon(true);
+        accHeartbeatThread.start();
+    }
+
+    /**
+     * Slow-retry for bodywork listener registration — never gives up.
+     *
+     * Called when the initial 5×5s retry budget is exhausted. We can't run
+     * as a wakelock-holding zombie with no event source forever, so we keep
+     * trying every 60s. If/when registration eventually succeeds, the
+     * heartbeat starts and the daemon recovers without any external
+     * intervention. Per memory `feedback_watchdog_no_retry_cap.md` —
+     * sentinel-only stop, no retry cap.
+     */
+    private static void startBodyworkSlowRetry(final Context context) {
+        Thread slow = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted() && !bodyworkRegistered) {
+                try {
+                    Thread.sleep(60_000L);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+                try {
+                    if (registerBodyworkListener(context)) {
+                        bodyworkRegistered = true;
+                        log("Bodywork slow-retry succeeded — heartbeat starting");
+                        startAccStateHeartbeat();
+                        return;
+                    }
+                } catch (Throwable th) {
+                    log("Bodywork slow-retry error: " + th.getMessage());
+                }
+            }
+        }, "AccSentrySlowRetry");
+        slow.setDaemon(true);
+        slow.start();
+    }
+
+    /**
      * Notify CameraDaemon of ACC state change.
      * This updates AccMonitor so HTTP API returns correct acc status.
-     * 
+     *
      * @param accOff true if ACC is OFF, false if ACC is ON
      */
-    private static void notifyAccState(boolean accOff) {
+    private static void notifyAccState(final boolean accOff) {
+        // Dispatch onto the dedicated single-thread executor so the IPC
+        // (with its 1s ConnectException retry sleep + up-to-2× 5s socket
+        // timeout = ~11s worst case) never blocks the BYD HAL listener
+        // thread. BYD's bodywork callbacks are single-threaded; if we
+        // stall the listener inside onPowerLevelChanged the HAL drops
+        // subsequent ACC edges. The executor is FIFO single-thread so
+        // ordering of accOff transitions is preserved end-to-end. See
+        // prior-audit "notifyAccState blocks BYD HAL listener thread up
+        // to 11s on retry".
         try {
-            JSONObject cmd = new JSONObject();
-            cmd.put("command", "SET_CONFIG");
-            JSONObject config = new JSONObject();
-            config.put("accOff", accOff);
-            cmd.put("config", config);
-            
-            sendSurveillanceCommandRaw(cmd);
-            log("ACC state notified to CameraDaemon: accOff=" + accOff);
-        } catch (Exception e) {
-            log("WARN: Failed to notify ACC state: " + e.getMessage());
+            accNotifyExecutor.execute(() -> {
+                try {
+                    JSONObject cmd = new JSONObject();
+                    cmd.put("command", "SET_CONFIG");
+                    JSONObject config = new JSONObject();
+                    config.put("accOff", accOff);
+                    cmd.put("config", config);
+
+                    JSONObject resp = sendSurveillanceCommandRaw(cmd);
+                    if (resp == null) {
+                        // IPC failed (CameraDaemon not running, port not bound,
+                        // socket timeout, etc). Reset heartbeat dedup state so
+                        // the next heartbeat tick republishes unconditionally
+                        // — covers the case where CameraDaemon was mid-restart
+                        // and the heartbeat would otherwise wait
+                        // HEARTBEAT_FORCE_REPUBLISH_TICKS to force-republish.
+                        // Per prior-audit "Heartbeat dedup creates 5-minute
+                        // pano wedge on CameraDaemon mid-drive restart".
+                        lastHeartbeatPublishedAccOff = -1;
+                        heartbeatDedupRunLength = 0;
+                        log("WARN: ACC state IPC returned null — reset heartbeat dedup state for next tick");
+                    } else if (!resp.optBoolean("success", false)) {
+                        // Non-null reply but consumer reports partial-apply
+                        // failure (CameraDaemon caught a side-effect throw
+                        // and returned {success:false,error:...}). Treating
+                        // this as success previously seeded dedup against a
+                        // partial-apply consumer state, with CameraDaemon's
+                        // own lastDispatchedAccIsOff cache then suppressing
+                        // subsequent heartbeats. Keep dedup unseeded so the
+                        // next heartbeat tick republishes unconditionally
+                        // and lets the consumer rebuild correctly. Per
+                        // prior-audit "notifyAccState treats {success:false}
+                        // IPC reply as success → seeds dedup against a
+                        // partial-apply on consumer side".
+                        lastHeartbeatPublishedAccOff = -1;
+                        heartbeatDedupRunLength = 0;
+                        String err = resp.optString("error", "<no-error-field>");
+                        log("WARN: ACC state IPC reply success=false (error="
+                            + err + ") — kept heartbeat dedup unseeded so next tick republishes");
+                    } else {
+                        // Seed heartbeat dedup so the first heartbeat tick
+                        // after startup / edge-driven notify is a true no-op
+                        // rather than a redundant republish. Per prior-audit
+                        // "lastHeartbeatPublishedAccOff not seeded by initial
+                        // -state seed or edge handler" — collapses one extra
+                        // IPC per startup and per ACC edge.
+                        lastHeartbeatPublishedAccOff = accOff ? 1 : 0;
+                        heartbeatDedupRunLength = 0;
+                        log("ACC state notified to CameraDaemon: accOff=" + accOff
+                            + " (seeded heartbeat dedup=" + lastHeartbeatPublishedAccOff + ")");
+                    }
+                } catch (Exception e) {
+                    // Same dedup reset on exception path so a transient HAL
+                    // / IPC fault doesn't silently delay resync by 5 min.
+                    lastHeartbeatPublishedAccOff = -1;
+                    heartbeatDedupRunLength = 0;
+                    log("WARN: Failed to notify ACC state: " + e.getMessage()
+                        + " — reset heartbeat dedup state");
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ree) {
+            // Executor shut down (process tearing down) — fall back to
+            // direct call so a final state update during shutdown still
+            // makes it across the wire if at all possible.
+            log("WARN: notifyAccState executor rejected (likely shutdown), running inline: "
+                + ree.getMessage());
+            try {
+                JSONObject cmd = new JSONObject();
+                cmd.put("command", "SET_CONFIG");
+                JSONObject config = new JSONObject();
+                config.put("accOff", accOff);
+                cmd.put("config", config);
+                JSONObject resp = sendSurveillanceCommandRaw(cmd);
+                if (resp == null) {
+                    lastHeartbeatPublishedAccOff = -1;
+                    heartbeatDedupRunLength = 0;
+                    log("WARN: inline ACC state IPC returned null — reset heartbeat dedup state");
+                } else if (!resp.optBoolean("success", false)) {
+                    // Mirror the executor path: a non-null {success:false}
+                    // reply means the consumer caught a partial-apply throw
+                    // and may be holding a stale lastDispatchedAccIsOff.
+                    // Don't seed dedup — let the next heartbeat republish
+                    // unconditionally. Per prior-audit "notifyAccState
+                    // treats {success:false} IPC reply as success".
+                    lastHeartbeatPublishedAccOff = -1;
+                    heartbeatDedupRunLength = 0;
+                    String err = resp.optString("error", "<no-error-field>");
+                    log("WARN: inline ACC state IPC reply success=false (error="
+                        + err + ") — kept heartbeat dedup unseeded");
+                } else {
+                    // Seed dedup on inline-fallback success path too. Per
+                    // prior-audit "lastHeartbeatPublishedAccOff not seeded
+                    // by initial-state seed or edge handler".
+                    lastHeartbeatPublishedAccOff = accOff ? 1 : 0;
+                    heartbeatDedupRunLength = 0;
+                    log("inline ACC state notified to CameraDaemon: accOff=" + accOff
+                        + " (seeded heartbeat dedup=" + lastHeartbeatPublishedAccOff + ")");
+                }
+            } catch (Exception e) {
+                lastHeartbeatPublishedAccOff = -1;
+                heartbeatDedupRunLength = 0;
+                log("WARN: inline notifyAccState fallback failed: " + e.getMessage()
+                    + " — reset heartbeat dedup state");
+            }
         }
     }
 
     private static JSONObject sendSurveillanceCommandRaw(JSONObject command) {
-        Socket socket = null;
-        try {
-            socket = new Socket("127.0.0.1", SURVEILLANCE_IPC_PORT);
-            socket.setSoTimeout(5000);
+        // Bounded retry: 2 attempts, 1s backoff between them. Targets the
+        // narrow case where CameraDaemon's IPC server is mid-bind (port not
+        // yet listening) — without this, an edge ACC event could land in the
+        // ~hundreds of ms gap and silently drop, leaving AccMonitor wedged
+        // on stale state. Connection-refused only; other errors fail fast
+        // (treat as the existing terminal path).
+        for (int attempt = 0; attempt < 2; attempt++) {
+            Socket socket = null;
+            try {
+                // Bound the connect itself to 2s. `new Socket(host, port)`
+                // uses the OS default connect timeout (~21s on Android),
+                // so a half-stuck CameraDaemon (port bound but accept
+                // stalled by HAL/init) would block this single-thread
+                // executor for ~42s per IPC across 2 retries — backing
+                // up subsequent ACC edges. See prior-audit
+                // "sendSurveillanceCommandRaw lacks a connect timeout".
+                socket = new Socket();
+                socket.connect(new java.net.InetSocketAddress("127.0.0.1", SURVEILLANCE_IPC_PORT), 2000);
+                socket.setSoTimeout(5000);
 
-            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
+                BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-            writer.println(command.toString());
-            String responseLine = reader.readLine();
+                writer.println(command.toString());
+                String responseLine = reader.readLine();
 
-            return responseLine != null ? new JSONObject(responseLine) : null;
-        } catch (Exception e) {
-            log("Surveillance IPC error: " + e.getMessage());
-            return null;
-        } finally {
-            if (socket != null) {
-                try { socket.close(); } catch (Exception ignored) {}
+                return responseLine != null ? new JSONObject(responseLine) : null;
+            } catch (java.net.ConnectException ce) {
+                if (attempt == 0) {
+                    log("IPC connect refused, retry in 1s");
+                    try {
+                        Thread.sleep(1000L);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                    continue;
+                }
+                log("IPC connect refused after retry: " + ce.getMessage());
+                return null;
+            } catch (java.net.SocketTimeoutException ste) {
+                // Connect or read timed out. The 2s connect cap above
+                // turns a half-stuck CameraDaemon listen queue into a
+                // SocketTimeoutException; retry once with the same 1s
+                // backoff as ConnectException so transient HAL stalls
+                // self-heal. Read-side timeouts (5s SoTimeout) also land
+                // here — same retry policy is fine since we're
+                // idempotent on SET_CONFIG accOff.
+                if (attempt == 0) {
+                    log("WARN: IPC socket timeout (connect or read), retry in 1s: "
+                        + ste.getMessage());
+                    try {
+                        Thread.sleep(1000L);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                    continue;
+                }
+                log("WARN: IPC socket timeout after retry: " + ste.getMessage());
+                return null;
+            } catch (Exception e) {
+                log("Surveillance IPC error: " + e.getMessage());
+                return null;
+            } finally {
+                if (socket != null) {
+                    try { socket.close(); } catch (Exception ignored) {}
+                }
             }
         }
+        return null;
     }
 
     // ==================== TELEGRAM DAEMON AUTO-START ====================

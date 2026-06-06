@@ -9,9 +9,9 @@
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
     <title data-i18n="about.page_title">About — OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=3"></script>
+    <script src="../shared/theme.js?v=4"></script>
     <script src="../shared/app-shell.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css">
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -201,6 +201,21 @@
                         <div class="credits-card" id="supportersList"></div>
                     </section>
 
+                    <!-- Third-party asset attributions (license obligations). The
+                         RoadSense approach-warning chimes are from the Google Sound
+                         Library under CC BY 4.0 — attribution is required by the
+                         license, so it is surfaced here in the shipped app. -->
+                    <section class="about-section">
+                        <h3 class="about-subhead" data-i18n="about.acknowledgements_title">Acknowledgements</h3>
+                        <p class="about-section-sub" data-i18n="about.acknowledgements_sub">Third-party assets used in OverDrive, with their licenses.</p>
+                        <div class="credits-card">
+                            <p class="about-ack-line">
+                                <span data-i18n="about.ack_chimes">RoadSense warning chimes — sounds from the Google Sound Library, licensed under</span>
+                                <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.
+                            </p>
+                        </div>
+                    </section>
+
                     <section class="about-section">
                         <div class="support-tier-list">
                             <a class="tier-card" id="tierStar" target="_blank" rel="noopener noreferrer">
@@ -260,7 +275,7 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/pwa-init.js"></script>
+    <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/update-flow.js"></script>
     <script>

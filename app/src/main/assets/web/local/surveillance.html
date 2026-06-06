@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=3"></script>
+    <script src="../shared/theme.js?v=4"></script>
     <script src="../shared/app-shell.js"></script>
     <!--
       Per-page bottom-tab manifest. Five tabs grouped by user task:
@@ -28,12 +28,12 @@
             { id: 'general',   label: 'General',   i18n: 'surveillance.tab_general',   svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' },
             { id: 'detection', label: 'Detection', i18n: 'surveillance.tab_detection', svg: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>' },
             { id: 'recording', label: 'Recording', i18n: 'surveillance.tab_recording', svg: '<path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>' },
-            { id: 'storage',   label: 'Storage',   i18n: 'surveillance.tab_storage',   svg: '<line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>' },
-            { id: 'advanced',  label: 'Advanced',  i18n: 'surveillance.tab_advanced',  svg: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' }
+            { id: 'oem',       label: 'Dashcam',   i18n: 'surveillance.tab_oem',     svg: '<rect x="3" y="6" width="14" height="12" rx="2"/><path d="M17 10l4-2v8l-4-2"/><circle cx="10" cy="12" r="2.5"/>' },
+            { id: 'storage',   label: 'Storage',   i18n: 'surveillance.tab_storage',   svg: '<line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>' }
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css">
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <style>
@@ -404,10 +404,11 @@
                     </div>
                 </div>
 
-                <!-- Developer / debug toggles — extracted from the Detection card so
-                     they live on the dedicated Advanced tab. Same input IDs preserved
-                     so SurvSettings.updateV2Dev() / loadConfig() bindings keep working. -->
-                <div class="card" data-tab="advanced">
+                <!-- Developer / debug toggles. Originally split onto a dedicated
+                     Advanced tab; folded back into Detection (the motion-detection
+                     diagnostics are conceptually adjacent). Input IDs preserved so
+                     SurvSettings.updateV2Dev() / loadConfig() bindings keep working. -->
+                <div class="card" data-tab="detection">
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
@@ -781,7 +782,6 @@
                             <div class="setting-info">
                                 <div class="setting-name">
                                     <span data-i18n="recording.recording_quality">Recording Quality</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_live">Applies live</span>
                                 </div>
                                 <div class="setting-desc" data-i18n="recording.recording_quality_desc">Higher tiers preserve more detail at the cost of more storage. Output is a 2560×1920 mosaic of four 1280×960 cameras.</div>
                             </div>
@@ -809,7 +809,6 @@
                             <div class="setting-info">
                                 <div class="setting-name">
                                     <span data-i18n="recording.codec">Video Codec</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_live">Applies live</span>
                                 </div>
                                 <div class="setting-desc" data-i18n="recording.codec_desc">H.265 produces 50% smaller files</div>
                             </div>
@@ -824,7 +823,6 @@
                             <div class="setting-info">
                                 <div class="setting-name">
                                     <span data-i18n="recording.camera_fps">Camera FPS</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_live">Applies live</span>
                                 </div>
                                 <div class="setting-desc" data-i18n="recording.camera_fps_desc">Frame rate for recording &amp; surveillance.</div>
                             </div>
@@ -859,6 +857,156 @@
                         </div>
                         <div class="timeline-labels">
                             <span id="preLabel">5s before</span><span data-i18n="surveillance.timeline_motion_detected">Motion Detected</span><span id="postLabel">10s after</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fisheye Correction (Fitzgibbon division-model rectifier).
+                     SHARED with the recording page — same unified-config key
+                     (recording.rectifyStrength). Editing on either page
+                     affects ACC-on dashcam AND ACC-off surveillance clips.
+                     Hidden on dilink4 cars: HAL emits a clean 2x2 mosaic
+                     natively and the legacy-mode shader branch is not
+                     exercised on those firmwares. -->
+                <div class="card" data-tab="recording" id="survRectifyCard">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="9"/>
+                                <path d="M3 12h18"/>
+                                <path d="M12 3c2.5 3 2.5 15 0 18"/>
+                                <path d="M12 3c-2.5 3-2.5 15 0 18"/>
+                            </svg>
+                            <span data-i18n="recording.rectify_title">Fisheye Correction</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="recording.rectify_label">Correction Strength</div>
+                                <div class="setting-desc" data-i18n="recording.rectify_desc">Straightens the residual fisheye barrel curve in recordings and surveillance clips. 0 = off (raw HAL output). Higher values pull peripheral pixels inward.</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="slider-control">
+                                    <span class="slider-value" id="survRectifyValue">Off</span>
+                                    <input type="range" class="slider" id="survRectifySlider" min="0" max="100" step="1" value="0" oninput="SurvSettings.updateRectifyStrength(this.value)">
+                                </div>
+                                <!-- Range labels constrained to the 120px slider track
+                                     and right-anchored under the slider (not flushed
+                                     to the full row width). Mirrors the recording-page
+                                     card layout. -->
+                                <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
+                                    <span data-i18n="recording.rectify_min">Off</span>
+                                    <span data-i18n="recording.rectify_max">Max</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OEM Dashcam — surveillance-mode picker. Mirrors the
+                     recording.html layout but binds to surveillanceMode.
+                     Off | Continuous | Smart. Smart = follow pano motion
+                     detection (write dvr_*.mp4 alongside event_*.mp4 on
+                     each surveillance trigger). -->
+                <div class="card" data-tab="oem" id="oemDashcamMainCard">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 17h18l-3-9H6l-3 9z"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>
+                                <path d="M9 8V5a3 3 0 0 1 6 0v3"/>
+                            </svg>
+                            <span data-i18n="oem_dashcam.title">OEM Dashcam</span>
+                        </div>
+                        <span class="status-badge inactive" id="oemPipelineBadge" data-i18n="oem_dashcam.status_idle" role="status" aria-live="polite" aria-atomic="true" style="opacity:0;">Idle</span>
+                    </div>
+                    <div class="card-body">
+                        <!-- Camera-ID-unset state. -->
+                        <div class="setting-row" id="oemDashcamIdUnsetRow" style="display:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="oem_dashcam.id_unset_title">Camera ID not configured</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.id_unset_desc">Open the camera-mapping dialog from the Android settings to pick which AVMCamera id is the forward dashcam sensor. Auto = pano XOR 1; on Seal/Han pano is id 1 so OEM dashcam defaults to id 0.</div>
+                            </div>
+                        </div>
+
+                        <div class="setting-row" id="oemSurvModeRow" style="border-bottom:none;padding-bottom:12px;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="oem_dashcam.surveillance_mode_title">Surveillance behaviour</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.surveillance_mode_desc">Controls when the forward dashcam sensor writes dvr_*.mp4 in response to surveillance (parked-car motion / sentry).</div>
+                            </div>
+                        </div>
+                        <div class="mode-selector" role="radiogroup" aria-busy="true" data-hydrating="true" data-i18n-attr="aria-label:oem_dashcam.mode_picker_aria_surveillance" aria-label="OEM Dashcam surveillance mode" aria-controls="oemPipelineStatusHint">
+                            <label class="mode-option">
+                                <input type="radio" name="oemSurveillanceMode" value="off" checked onchange="SurvSettings.setOemSurveillanceMode('off')" aria-describedby="oemSurvModeDesc_off">
+                                <div class="mode-card mode-card-active">
+                                    <span class="mode-icon" aria-hidden="true">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                                    </span>
+                                    <span class="mode-body">
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_off">Off</span>
+                                        <span class="mode-desc" id="oemSurvModeDesc_off" data-i18n="oem_dashcam.mode_off_desc_surveillance">Don't record from the OEM forward sensor on surveillance. Pano sentry keeps writing event_*.mp4 normally.</span>
+                                    </span>
+                                    <span class="mode-radio" aria-hidden="true"></span>
+                                </div>
+                            </label>
+                            <label class="mode-option">
+                                <input type="radio" name="oemSurveillanceMode" value="continuous" onchange="SurvSettings.setOemSurveillanceMode('continuous')" aria-describedby="oemSurvModeDesc_continuous">
+                                <div class="mode-card">
+                                    <span class="mode-icon" aria-hidden="true">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/></svg>
+                                    </span>
+                                    <span class="mode-body">
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_continuous">Continuous</span>
+                                        <span class="mode-desc" id="oemSurvModeDesc_continuous" data-i18n="oem_dashcam.mode_continuous_desc_surveillance">Always record dvr_*.mp4 the whole time the car is parked, regardless of motion. Will burn through storage fastest.</span>
+                                    </span>
+                                    <span class="mode-radio" aria-hidden="true"></span>
+                                </div>
+                            </label>
+                            <label class="mode-option">
+                                <input type="radio" name="oemSurveillanceMode" value="smart" onchange="SurvSettings.setOemSurveillanceMode('smart')" aria-describedby="oemSurvModeDesc_smart">
+                                <div class="mode-card">
+                                    <span class="mode-icon" aria-hidden="true">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </span>
+                                    <span class="mode-body">
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_smart">Smart</span>
+                                        <span class="mode-desc" id="oemSurvModeDesc_smart" data-i18n="oem_dashcam.mode_smart_desc_surveillance">Mirror pano motion detection: when surveillance fires (motion + AI confirms a person/vehicle), write dvr_*.mp4 alongside event_*.mp4. Honors the same Safe Locations, Schedule, and per-camera filters as the pano sentry.</span>
+                                    </span>
+                                    <span class="mode-radio" aria-hidden="true"></span>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="setting-row" id="oemPipelineStatusRow" style="border-bottom:none;">
+                            <div class="setting-info" style="flex:1 1 auto;">
+                                <div class="setting-name" id="oemPipelineStatus" data-i18n="oem_dashcam.status_idle">Idle</div>
+                                <div class="setting-desc" id="oemPipelineStatusHint" data-i18n="oem_dashcam.status_hint_off">Pick Continuous or Smart above to enable surveillance recording on the OEM forward sensor.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Native DVR (com.byd.cdr) — same surface as recording.html. -->
+                <div class="card" data-tab="oem" id="oemNativeDvrCard" style="display:none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="6" width="20" height="12" rx="2"/>
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M7 6V4"/><path d="M17 6V4"/>
+                            </svg>
+                            <span data-i18n="oem_dashcam.native_dvr_title">Native DVR app (com.byd.cdr)</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info" style="flex:1 1 auto;">
+                                <div class="setting-desc" data-i18n="oem_dashcam.native_dvr_explainer">The factory dashcam app records to /sdcard/DCIM/BYDCam and opens AVMCamera on every ACC ON. Disabling lets OverDrive own the camera without contention.</div>
+                                <div class="setting-name" id="oemNativeDvrStatusLabel" style="margin-top:8px;" data-i18n="oem_dashcam.native_dvr_status_enabled">Status: Enabled</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-primary" id="oemNativeDvrToggleBtn" onclick="SurvSettings.toggleOemNativeDvr()" data-i18n="oem_dashcam.native_dvr_disable">Disable native DVR</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1050,10 +1198,10 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/pwa-init.js"></script>
+    <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/surveillance.js"></script>
+    <script src="../shared/surveillance.js?v=index1"></script>
     <script src="../shared/safe-locations.js"></script>
     <script src="../shared/roi-schedule.js"></script>
     <script>

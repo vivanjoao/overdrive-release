@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=3"></script>
+    <script src="../shared/theme.js?v=4"></script>
     <script src="../shared/app-shell.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css">
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <style>
@@ -755,7 +755,104 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        
+
+        /* Free-text place search — sits inline as the leading element
+           of the place row so it reads as one continuous control with
+           the chip strip. Pill-shaped to share the chip vocabulary, but
+           with a focus ring + filled background to telegraph "input"
+           rather than "tappable filter". Routes through placeContains
+           on /api/recordings + /api/recordings/places for substring
+           match across short, medium, and displayName place labels. */
+        .place-search {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px 4px 10px;
+            background: var(--bg-base);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 999px;
+            min-width: 180px;
+            max-width: 240px;
+            transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+        }
+        .place-search:focus-within {
+            border-color: var(--brand-primary, rgba(255,255,255,0.45));
+            background: var(--bg-surface);
+            box-shadow: 0 0 0 3px rgba(14,165,233,0.18);
+        }
+        .place-search.has-query {
+            border-color: rgba(255,255,255,0.25);
+            background: var(--bg-hover);
+        }
+        .place-search svg {
+            flex: 0 0 auto;
+            width: 14px;
+            height: 14px;
+            color: var(--text-muted);
+            stroke-width: 2.2;
+        }
+        .place-search input {
+            flex: 1 1 auto;
+            min-width: 0;
+            background: transparent;
+            border: 0;
+            outline: none;
+            color: var(--text-primary, #fff);
+            font-size: 12px;
+            font-family: inherit;
+            padding: 4px 0;
+            line-height: 1.2;
+        }
+        .place-search input::placeholder {
+            color: var(--text-muted);
+            opacity: 0.85;
+        }
+        .place-search-clear {
+            flex: 0 0 auto;
+            width: 22px;
+            height: 22px;
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+        .place-search-clear:hover {
+            background: rgba(255,255,255,0.08);
+            color: var(--text-primary, #fff);
+        }
+        .place-search.has-query .place-search-clear {
+            display: inline-flex;
+        }
+        .place-search-clear svg {
+            width: 12px;
+            height: 12px;
+            color: inherit;
+        }
+        /* Active-search hint pill at the end of the place row. Mirrors
+           the chip language so the user can see the substring is doing
+           something even when zero chips are visible. */
+        .place-search-hits {
+            flex: 0 0 auto;
+            font-size: 10px;
+            color: var(--text-muted);
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.06);
+            white-space: nowrap;
+            display: none;
+        }
+        .place-search-hits.visible { display: inline-flex; }
+        @media (max-width: 480px) {
+            .place-search { min-width: 140px; max-width: 200px; }
+        }
+
+
         .recording-meta {
             font-size: 11px;
             color: var(--text-muted);
@@ -866,11 +963,27 @@
             position: fixed;
             inset: 0;
             background: var(--modal-backdrop);
-            z-index: 1000;
+            /* Above the body-level theme FAB (z-index 9000 in theme.js).
+               Keeps the floating theme picker from sitting on top of the
+               player on PWA / external mobile browsers. The Android
+               WebView path doesn't render the FAB at all (theme.js
+               opt-out), so this is purely a PWA / desktop concern. */
+            z-index: 10000;
             display: none;
             align-items: center;
             justify-content: center;
             padding: 16px;
+        }
+
+        /* Belt-and-suspenders: while the video modal is open, also fully
+           hide the body-level theme FAB. The z-index bump above already
+           handles stacking, but on iOS Safari the native fullscreen API
+           creates a top-layer subtree that excludes body-level fixed
+           elements unless they're descendants — meaning the FAB would
+           re-appear inside the fullscreen world. Hiding via a class on
+           <html> is the universal off-switch. */
+        html.video-modal-open #bydThemePicker {
+            display: none !important;
         }
 
         .video-modal.active {
@@ -887,6 +1000,240 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
+        }
+
+        /* ====================================================================
+           Fullscreen state.
+           Applied via the Fullscreen API on .video-container; the
+           :fullscreen pseudo-class catches the browser-driven case and
+           .is-fullscreen is the manual fallback for WebViews without
+           the API. Layout rules are identical for both paths.
+
+           Key constraints:
+             - Container must escape the modal's 16/20px padding, so we
+               position:fixed inset:0 (the API path does this for free,
+               but the fallback needs it explicitly).
+             - The video frame keeps its source aspect-ratio (set inline
+               by events.js on loadedmetadata) so quadrant-corner zoom
+               still has no internal letterbox to surface. We size it to
+               the LARGEST box that fits the available viewport while
+               preserving that aspect — width:100% + height:auto + a
+               max-height tied to the column's remaining slot lets the
+               browser pick this box automatically.
+             - .video-details is hidden in fullscreen (its info is
+               redundant with the title in the header) to maximize the
+               area available for the video itself.
+           ==================================================================== */
+        .video-container:fullscreen,
+        .video-container:-webkit-full-screen,
+        .video-container.is-fullscreen {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            max-width: 100vw;
+            max-height: 100vh;
+            max-height: 100dvh;
+            border-radius: 0;
+            background: #000;
+            z-index: 2000;
+            /* Push the video player block to fill the remaining space
+               between header and transport row, and center its contents
+               horizontally so an aspect-mismatched wrapper sits centered
+               in the viewport instead of pinned left. */
+            justify-content: flex-start;
+            align-items: stretch;
+        }
+
+        /* The video frame: fill width AND grow vertically to consume
+           whatever the header + transport leave behind, while honoring
+           the source aspect-ratio set inline by events.js. The browser
+           reconciles aspect-ratio + max-height by shrinking the wrapper
+           on whichever axis hits its bound first — exactly the
+           "fit-largest-box" behavior we want.
+
+           min-height:0 is the standard flex-column escape so the wrapper
+           can actually be smaller than its content's intrinsic min size. */
+        .video-container:fullscreen .video-player,
+        .video-container:-webkit-full-screen .video-player,
+        .video-container.is-fullscreen .video-player {
+            flex: 1 1 auto;
+            min-height: 0;
+            width: auto;
+            max-width: 100%;
+            max-height: 100%;
+            margin: auto;
+            align-self: center;
+        }
+
+        /* Header + transport in fullscreen: keep them, but hide the
+           details meta block (date/time/size + Download). The header
+           shows the title and the close button is reachable; the
+           transport is the primary scrub surface. */
+        .video-container:fullscreen .video-details,
+        .video-container:-webkit-full-screen .video-details,
+        .video-container.is-fullscreen .video-details {
+            display: none;
+        }
+
+        /* In fullscreen the header floats over the video as a transparent
+           gradient strip — gives back the vertical space the bordered
+           header would have eaten while keeping the title + close button
+           legible against bright frames. The status-bar / notch insets
+           are honored explicitly (env(safe-area-inset-top)) so the close
+           button never lands underneath the system UI on mobile. */
+        /* Fullscreen header: a FULL-width transparent strip whose only
+           job is to be the swipe-drag-to-close hit zone (binding lives
+           on .video-header in events.js). Title + close are positioned
+           absolutely OUTSIDE the flex layout so the quadrant pill on
+           the right never has to share width budget with them — that
+           was compressing the close button on narrow phones.
+
+           Layout in fullscreen:
+              [X-FAB | title …]          …          [quadrant pill]
+              ←——————————————————————————————————————————————→
+                          (drag-to-close strip)
+        */
+        .video-container:fullscreen .video-header,
+        .video-container:-webkit-full-screen .video-header,
+        .video-container.is-fullscreen .video-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            background: transparent;
+            border-bottom: none;
+            /* Match the visual safe-area inset so the strip is tall
+               enough to comfortably grab on phones with notches. The
+               actual interactive children re-anchor below. */
+            height: calc(env(safe-area-inset-top, 0px) + 64px);
+            padding: 0;
+            display: block;
+        }
+        /* Close button → top-left FAB. Lifts out of the flex flow so it
+           keeps its 44 × 44 footprint regardless of what's around it. */
+        .video-container:fullscreen .video-close,
+        .video-container:-webkit-full-screen .video-close,
+        .video-container.is-fullscreen .video-close {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 14px);
+            left: calc(env(safe-area-inset-left, 0px) + 12px);
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            flex-shrink: 0;
+            z-index: 21;
+        }
+        /* Title sits to the right of the close FAB and ellipsizes if
+           it'd run into the quadrant pill on the opposite side. Right
+           offset accounts for: safe-area-right + bar width + gutter. */
+        .video-container:fullscreen .video-title,
+        .video-container:-webkit-full-screen .video-title,
+        .video-container.is-fullscreen .video-title {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 22px);
+            left: calc(env(safe-area-inset-left, 0px) + 68px);
+            right: calc(env(safe-area-inset-right, 0px) + 280px);
+            color: #fff;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
+        }
+        /* Visual gradient strip — separate pseudo so it spans the whole
+           top edge for legibility but never intercepts pointer events
+           aimed at the quadrant bar. */
+        .video-container:fullscreen::after,
+        .video-container:-webkit-full-screen::after,
+        .video-container.is-fullscreen::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: calc(env(safe-area-inset-top, 0px) + 56px);
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0));
+            z-index: 9;
+            pointer-events: none;
+        }
+
+        /* (Close button + title styling for fullscreen lives in the
+           absolutely-positioned rules above — those rules are more
+           specific layout-wise so they handle look + position together,
+           which is why this older "just chrome" block is gone.) */
+
+        /* Transport row in fullscreen also clears its safe-area inset so
+           the time text + scrubber sit above any home-indicator gesture
+           bar. Slight transparency lets the video peek through. */
+        .video-container:fullscreen .video-transport,
+        .video-container:-webkit-full-screen .video-transport,
+        .video-container.is-fullscreen .video-transport {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 10;
+            background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0));
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        .video-container:fullscreen .video-controls,
+        .video-container:-webkit-full-screen .video-controls,
+        .video-container.is-fullscreen .video-controls,
+        .video-container:fullscreen .timeline-legend,
+        .video-container:-webkit-full-screen .timeline-legend,
+        .video-container.is-fullscreen .timeline-legend {
+            border-top: none;
+            color: #fff;
+        }
+        .video-container:fullscreen .video-ctrl-btn,
+        .video-container:-webkit-full-screen .video-ctrl-btn,
+        .video-container.is-fullscreen .video-ctrl-btn {
+            color: #fff;
+        }
+
+        /* Swipe-down-to-dismiss visual: the container is translated by
+           events.js while the gesture is active. Backdrop fades with the
+           drag to reinforce "dropping the surface". */
+        .video-modal.dragging .video-container {
+            transition: none !important;
+        }
+        .video-modal {
+            transition: background 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+        }
+        .video-container {
+            transition: transform 320ms cubic-bezier(0.2, 0.9, 0.3, 1);
+        }
+        /* Pull-handle affordance — only visible in fullscreen (in-modal
+           the X button + drag-anywhere already telegraph dismissal). */
+        .video-container:fullscreen::before,
+        .video-container:-webkit-full-screen::before,
+        .video-container.is-fullscreen::before {
+            content: "";
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            width: 38px;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.5);
+            z-index: 11;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 200ms ease;
+        }
+        .video-container:fullscreen.show-handle::before,
+        .video-container:-webkit-full-screen.show-handle::before,
+        .video-container.is-fullscreen.show-handle::before {
+            opacity: 1;
         }
 
         @media (min-width: 768px) {
@@ -934,14 +1281,156 @@
         
         .video-player {
             width: 100%;
+            /* Initial aspect — replaced at runtime by events.js once
+               loadedmetadata fires (videoPlayerWrap.style.aspectRatio is
+               set to the actual mosaic dims, typically 4/3 for Seal at
+               2560×1920 or 16/9 for Tang at 2560×1440). Matching the
+               wrapper aspect to the source is what eliminates the
+               letterbox bands at the corners — without it, a 4:3 mosaic
+               in a 16:9 frame pillarboxes, and zooming 2x into a corner
+               surfaces half-a-pillarbox of black space. */
             aspect-ratio: 16/9;
+            /* Cap height so portrait modal layouts (head unit rotated)
+               don't make the video taller than the visible viewport; the
+               4:3 mosaic + 320px modal width otherwise yields ~427px of
+               video which can clip the chrome under it. */
+            max-height: calc(100dvh - 32px - 64px - 80px);
             background: black;
+            /* Quadrant zoom is implemented as a CSS transform on the
+               <video> element (scale + transform-origin). overflow:hidden
+               crops the off-screen quadrants instead of overflowing the
+               modal layout.
+
+               IMPORTANT: ALL transport chrome (scrubber, time text,
+               play/pause, mute) lives OUTSIDE this element — see
+               .video-transport below. The native <video controls> overlay
+               cannot be used here: it's painted as part of the video
+               element, so a transform: scale(2) on <video> drags the
+               native control bar with it and pushes the timestamp +
+               native scrubber off-screen on every quadrant zoom. We render
+               our own chrome and leave <video> with only the surface. */
+            position: relative;
+            overflow: hidden;
         }
-        
+
         .video-player video {
+            position: absolute;
+            inset: 0;
             width: 100%;
             height: 100%;
+            display: block;
+            /* `fill` (not `cover`/`contain`) is intentional: the wrapper
+               aspect-ratio is set at runtime to match the mosaic exactly,
+               so a stretched fit IS pixel-correct — and it guarantees no
+               letterbox bands inside the wrapper. With `cover` the browser
+               can still letterbox by a hair if the wrapper aspect drifts
+               (sub-pixel rounding), and with `contain` the bands always
+               appear when the wrapper aspect doesn't match the source.
+               Setting wrapper aspect == source aspect + object-fit:fill
+               makes "fill the frame" deterministic. */
+            object-fit: fill;
+            /* Animate scale/translate when switching quadrants. Material 3
+               emphasized decelerate curve — same vocabulary as the native
+               player so the surfaces feel identical. */
+            transition: transform 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+            will-change: transform;
+            transform-origin: 50% 50%;
+            /* `manipulation` keeps the browser's pinch-to-zoom + double-tap-
+               to-zoom gestures from stealing the gesture stream — without
+               it, fast double-taps on a touch-only head unit map to "zoom
+               the page" and never reach our dblclick handler. Also skips
+               the legacy 300 ms tap-delay heuristic. */
+            touch-action: manipulation;
+            /* Click anywhere on the surface = toggle play/pause (since we
+               removed the native controls bar). cursor:pointer signals
+               affordance on desktop; touch devices ignore it harmlessly. */
+            cursor: pointer;
         }
+
+        .video-player.zoom-front video { transform-origin: 0% 0%; transform: scale(2); }
+        .video-player.zoom-right video { transform-origin: 100% 0%; transform: scale(2); }
+        .video-player.zoom-rear  video { transform-origin: 0% 100%; transform: scale(2); }
+        .video-player.zoom-left  video { transform-origin: 100% 100%; transform: scale(2); }
+
+        /* Quadrant pill — floats over the video, top-right corner. Mirrors
+           the native player's selector chrome so the surfaces feel uniform.
+           Auto-hides with the rest of the controls when the user is just
+           watching (managed in events.js). */
+        .quadrant-bar {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            /* Above the modal's video-header (z-index: auto inside the
+               flex column). Important for the fullscreen path too where
+               the header gradient pseudo sits at z:9 — bar must reliably
+               receive taps even when visually overlapping. */
+            z-index: 15;
+            /* Match the video transform's 240ms emphasized-decelerate so
+               chrome and surface settle on the same beat. */
+            transition: opacity 240ms cubic-bezier(0.05, 0.7, 0.1, 1),
+                        transform 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+        }
+        /* Auto-hide state — fades out + lifts slightly out of frame after
+           the player sits idle. Pointer events disabled so a stale tap
+           target doesn't intercept while the bar is invisible. Tapping
+           the video brings it back (events.js). */
+        .quadrant-bar.hidden {
+            opacity: 0;
+            transform: translateY(-6px);
+            pointer-events: none;
+        }
+
+        /* Fullscreen mobile fix: re-anchor the bar to the .video-container
+           so it sits at the screen's top-right (not the centered video
+           rect's top-right, which on aspect-mismatched viewports drifts
+           inward). Clear safe-area-top so the buttons never sit under
+           the notch / status bar. z-index 20 puts it above the header
+           gradient pseudo (z:9) and the header element itself (z:10). */
+        .video-container:fullscreen .quadrant-bar,
+        .video-container:-webkit-full-screen .quadrant-bar,
+        .video-container.is-fullscreen .quadrant-bar {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 14px);
+            right: calc(env(safe-area-inset-right, 0px) + 12px);
+            z-index: 20;
+        }
+        .quadrant-bar button {
+            /* Touch-target sized to comfortably hit on the head unit. The
+               visual circle is 32 px (matches the icon's optical weight)
+               but the button itself is 44 px — Apple/MD3 minimum — so a
+               glove tap doesn't miss. Padding absorbs the extra area. */
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.55;
+            transition: opacity 150ms ease, background 150ms ease;
+            padding: 0;
+            touch-action: manipulation;
+            /* Prevent iOS/Chrome touch grey-flash; we have our own
+               .active state styling that does the job legibly. */
+            -webkit-tap-highlight-color: transparent;
+        }
+        .quadrant-bar button:hover { background: rgba(255, 255, 255, 0.1); }
+        .quadrant-bar button.active { opacity: 1; background: rgba(255, 255, 255, 0.18); }
+        .quadrant-bar svg { width: 18px; height: 18px; }
+        /* The 2x2 grid icon — cells are inline rects so we can use opacity
+           on the inactive cells for a glance-readable map. */
+        .quadrant-bar .qcell { fill: rgba(255, 255, 255, 0.45); }
+        .quadrant-bar .qcell.lit { fill: #FFFFFF; }
         
         .video-details {
             padding: 12px 16px;
@@ -1032,71 +1521,161 @@
             to { transform: rotate(360deg); }
         }
         
-        /* SOTA: Event Timeline Scrubber */
+        /* ====================================================================
+           Video transport — sits OUTSIDE the zooming .video-player surface so
+           none of these controls move when a quadrant transform fires. This
+           replaces the native <video controls> overlay (which can't be used
+           here because it scales with the video element).
+           ==================================================================== */
+        .video-transport {
+            background: var(--bg-elevated);
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* SOTA: Event Timeline Scrubber.
+           22 px tall touch target on the head unit; the visible track is the
+           inner 6 px stripe. This matches Material 3's "thin track, generous
+           tap area" pattern and YouTube's mobile player. */
         .timeline-scrubber {
             position: relative;
             width: 100%;
-            height: 12px;
-            background: var(--bg-elevated);
+            height: 22px;
             cursor: pointer;
-            user-select: none;
-            -webkit-user-select: none;
-            border-radius: 0 0 4px 4px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: none;
         }
-        
+
+        /* Inner visible stripe — centered vertically. Click/drag still
+           registers on the full 22 px parent, so users don't have to thread
+           a needle to seek. */
         .timeline-track {
             position: absolute;
-            top: 0;
             left: 0;
             right: 0;
-            bottom: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 6px;
+            background: rgba(148, 163, 184, 0.18);
+            border-radius: 3px;
+            overflow: visible;
         }
-        
-        .timeline-marker {
+
+        /* Watched-progress fill (always behind the markers so a contiguous
+           motion stripe still reads as motion, not "watched"). */
+        .timeline-progress {
             position: absolute;
             top: 0;
             bottom: 0;
+            left: 0;
+            width: 0;
+            background: var(--brand-primary);
+            border-radius: 3px;
+            pointer-events: none;
+            transition: width 0.08s linear;
+        }
+
+        .timeline-marker {
+            position: absolute;
+            /* Markers extend slightly above/below the track stripe so
+               event bands read as proper "highlights" on top of the
+               progress fill rather than a hairline within it. */
+            top: -3px;
+            bottom: -3px;
             min-width: 2px;
-            border-radius: 1px;
+            border-radius: 2px;
             pointer-events: none;
         }
-        
+
         .timeline-marker.type-motion {
             background: rgba(148, 163, 184, 0.6);
         }
-        
+
         .timeline-marker.type-person {
             background: rgba(239, 68, 68, 0.85);
         }
-        
+
         .timeline-marker.type-car {
             background: rgba(59, 130, 246, 0.85);
         }
-        
+
         .timeline-marker.type-bike {
             background: rgba(251, 146, 60, 0.85);
         }
-        
+
         .timeline-playhead {
             position: absolute;
-            top: -1px;
-            bottom: -1px;
-            width: 2px;
+            top: 50%;
+            left: 0;
+            width: 14px;
+            height: 14px;
+            margin-left: -7px;
+            margin-top: -7px;
+            border-radius: 50%;
             background: white;
-            border-radius: 1px;
             pointer-events: none;
-            z-index: 2;
-            box-shadow: 0 0 4px rgba(255,255,255,0.5);
-            transition: left 0.1s linear;
+            z-index: 3;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.18);
+            /* No transition during scrub — feels laggy. Re-enabled while
+               playing via .smooth so timeupdate's 4 Hz cadence interpolates
+               into a smooth crawl instead of stepping. */
         }
-        
+        .timeline-playhead.smooth { transition: left 0.25s linear; }
+        .timeline-scrubber.dragging .timeline-playhead { transform: scale(1.18); }
+
         .timeline-legend {
             display: flex;
             gap: 12px;
-            padding: 4px 8px;
-            background: var(--bg-elevated);
+            padding: 6px 12px;
             justify-content: center;
+            border-top: 1px solid var(--border-subtle);
         }
+
+        /* Transport row — play/pause + time + mute. Lives below the scrubber
+           and is never affected by the quadrant zoom. */
+        .video-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .video-ctrl-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            transition: background 150ms ease;
+        }
+        .video-ctrl-btn:hover { background: var(--bg-hover); }
+        .video-ctrl-btn:active { background: var(--bg-elevated); }
+        .video-ctrl-btn svg { width: 22px; height: 22px; }
+
+        .video-time {
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            padding: 0 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .video-time .sep { color: var(--text-muted); margin: 0 2px; }
+        .video-time .dur { color: var(--text-muted); }
+
+        /* Spacer pushes the mute button to the right edge of the row. */
+        .video-controls .spacer { flex: 1; }
         
         .legend-item {
             display: flex;
@@ -1316,14 +1895,45 @@
                       Place chip row — dynamically populated from
                       `rec.place.short` of the currently loaded recordings
                       (descending count, alpha-tiebreak, capped at 8).
-                      Hidden until at least one tagged clip is present in
-                      the loaded set, so legacy/feature-disabled users
-                      never see this row appear.
+                      Always mounted now so the inline place-search input
+                      is reachable from page load — even on a fresh user
+                      with no resolved places yet, the search affordance
+                      is visible. Data chips ("Any" + N labels) populate
+                      progressively as the index lands.
                     -->
-                    <div class="filter-tabs filter-tabs-row2" data-filter-row="place" id="placeFilterRow" style="display:none;">
+                    <div class="filter-tabs filter-tabs-row2" data-filter-row="place" id="placeFilterRow">
                         <span class="filter-row-label" data-i18n="events.filter_place">Place:</span>
+                        <!--
+                          Free-text place search — substring across short /
+                          medium / displayName labels. Lives inline at the
+                          head of the place row so the user sees one
+                          coherent "Place" control rather than a separate
+                          search bar competing for attention. Visibility is
+                          coupled to the chip row — both appear once the
+                          backend returns at least one indexed place; from
+                          that moment the input remains visible regardless
+                          of whether the active filter narrows the chip
+                          set to zero.
+                        -->
+                        <label class="place-search" id="placeSearchWrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="search" id="placeSearchInput"
+                                   autocomplete="off" autocorrect="off"
+                                   autocapitalize="off" spellcheck="false"
+                                   data-i18n-attr="placeholder:events.place_search_hint"
+                                   placeholder="Search places…"
+                                   data-i18n-attr-aria="aria-label:events.place_search_hint"
+                                   aria-label="Search places" />
+                            <button type="button" class="place-search-clear"
+                                    id="placeSearchClear"
+                                    data-i18n-attr="aria-label:common.close"
+                                    aria-label="Clear">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </label>
                         <button class="filter-chip active" data-place="" onclick="BYD.events.setActorFilter('place','')" data-i18n="events.actor_any">Any</button>
                         <!-- Data chips injected by BYD.events.renderPlaceChips() -->
+                        <span class="place-search-hits" id="placeSearchHits" aria-live="polite"></span>
                     </div>
                 </div>
                 
@@ -1394,18 +2004,91 @@
                     </svg>
                 </button>
             </div>
-            <div class="video-player">
-                <video id="videoPlayer" controls autoplay muted playsinline webkit-playsinline preload="auto"></video>
-                <!-- SOTA: Event Timeline Scrubber -->
-                <div class="timeline-scrubber" id="timelineScrubber" style="display:none;">
-                    <div class="timeline-track" id="timelineTrack"></div>
-                    <div class="timeline-playhead" id="timelinePlayhead"></div>
+            <div class="video-player" id="videoPlayerWrap">
+                <!-- IMPORTANT: NO `controls` attribute on <video>. The native
+                     control bar is painted as part of the video element, so a
+                     transform: scale(2) (used for quadrant zoom) drags the
+                     timestamp + native scrubber off-screen. We render our own
+                     transport chrome below this surface (see .video-transport)
+                     which lives outside the zooming subtree. -->
+                <video id="videoPlayer" autoplay muted playsinline webkit-playsinline preload="auto"></video>
+                <!-- Quadrant selector. The four AVM cameras are baked into a
+                     single MP4 as a 2x2 mosaic (Front=TL, Right=TR, Rear=BL,
+                     Left=BR by GpuMosaicRecorder convention). Tapping a
+                     quadrant button applies a CSS transform that zooms 2x to
+                     just that camera; tapping the active button or the All
+                     button restores the full mosaic view. -->
+                <div class="quadrant-bar" id="quadrantBar" role="group" data-i18n-attr="aria-label:events.quadrant_group" aria-label="Camera selector">
+                    <button type="button" data-quadrant="all" class="active" data-i18n-attr="title:events.quadrant_all;aria-label:events.quadrant_all" title="Show all cameras" aria-label="Show all cameras">
+                        <svg viewBox="0 0 24 24"><rect class="qcell lit" x="3" y="3" width="8" height="8"/><rect class="qcell lit" x="13" y="3" width="8" height="8"/><rect class="qcell lit" x="3" y="13" width="8" height="8"/><rect class="qcell lit" x="13" y="13" width="8" height="8"/></svg>
+                    </button>
+                    <button type="button" data-quadrant="front" data-i18n-attr="title:events.quadrant_front;aria-label:events.quadrant_front" title="Show front camera" aria-label="Show front camera">
+                        <svg viewBox="0 0 24 24"><rect class="qcell lit" x="3" y="3" width="8" height="8"/><rect class="qcell" x="13" y="3" width="8" height="8"/><rect class="qcell" x="3" y="13" width="8" height="8"/><rect class="qcell" x="13" y="13" width="8" height="8"/></svg>
+                    </button>
+                    <button type="button" data-quadrant="right" data-i18n-attr="title:events.quadrant_right;aria-label:events.quadrant_right" title="Show right camera" aria-label="Show right camera">
+                        <svg viewBox="0 0 24 24"><rect class="qcell" x="3" y="3" width="8" height="8"/><rect class="qcell lit" x="13" y="3" width="8" height="8"/><rect class="qcell" x="3" y="13" width="8" height="8"/><rect class="qcell" x="13" y="13" width="8" height="8"/></svg>
+                    </button>
+                    <button type="button" data-quadrant="rear" data-i18n-attr="title:events.quadrant_rear;aria-label:events.quadrant_rear" title="Show rear camera" aria-label="Show rear camera">
+                        <svg viewBox="0 0 24 24"><rect class="qcell" x="3" y="3" width="8" height="8"/><rect class="qcell" x="13" y="3" width="8" height="8"/><rect class="qcell lit" x="3" y="13" width="8" height="8"/><rect class="qcell" x="13" y="13" width="8" height="8"/></svg>
+                    </button>
+                    <button type="button" data-quadrant="left" data-i18n-attr="title:events.quadrant_left;aria-label:events.quadrant_left" title="Show left camera" aria-label="Show left camera">
+                        <svg viewBox="0 0 24 24"><rect class="qcell" x="3" y="3" width="8" height="8"/><rect class="qcell" x="13" y="3" width="8" height="8"/><rect class="qcell" x="3" y="13" width="8" height="8"/><rect class="qcell lit" x="13" y="13" width="8" height="8"/></svg>
+                    </button>
                 </div>
+            </div>
+            <!-- ============================================================
+                 Custom transport — lives OUTSIDE .video-player so quadrant
+                 zoom never moves the scrubber, time text, or play/pause.
+                 ============================================================ -->
+            <div class="video-transport">
+                <!-- Always-visible scrubber. Markers are populated only when
+                     a JSON sidecar exists; the bar itself stays so users have
+                     a seek surface for plain recordings too. -->
+                <div class="timeline-scrubber" id="timelineScrubber" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Seek">
+                    <div class="timeline-track" id="timelineTrack">
+                        <div class="timeline-progress" id="timelineProgress"></div>
+                    </div>
+                    <div class="timeline-playhead smooth" id="timelinePlayhead"></div>
+                </div>
+                <!-- Event-type legend — hidden until the timeline has marker
+                     data. Plain recordings show the scrubber alone. -->
                 <div class="timeline-legend" id="timelineLegend" style="display:none;">
                     <span class="legend-item"><span class="legend-dot legend-motion"></span><span data-i18n="events.legend_motion">Motion</span></span>
                     <span class="legend-item"><span class="legend-dot legend-person"></span><span data-i18n="events.actor_person">Person</span></span>
                     <span class="legend-item"><span class="legend-dot legend-car"></span><span data-i18n="events.actor_vehicle">Vehicle</span></span>
                     <span class="legend-item"><span class="legend-dot legend-bike"></span><span data-i18n="events.actor_bike">Bike</span></span>
+                </div>
+                <div class="video-controls">
+                    <button type="button" class="video-ctrl-btn" id="videoPlayPauseBtn" data-i18n-attr="title:events.player_play_pause;aria-label:events.player_play_pause" title="Play/Pause" aria-label="Play/Pause">
+                        <!-- Icon swapped between play/pause in events.js -->
+                        <svg id="videoPlayPauseIcon" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+                    </button>
+                    <span class="video-time" id="videoTimeDisplay">
+                        <span id="videoCurTime">0:00</span><span class="sep">/</span><span class="dur" id="videoDurTime">0:00</span>
+                    </span>
+                    <span class="spacer"></span>
+                    <button type="button" class="video-ctrl-btn" id="videoMuteBtn" data-i18n-attr="title:events.player_mute;aria-label:events.player_mute" title="Mute" aria-label="Mute">
+                        <svg id="videoMuteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <!-- Initial state — muted (the player starts muted for autoplay). -->
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <line x1="23" y1="9" x2="17" y2="15"/>
+                            <line x1="17" y1="9" x2="23" y2="15"/>
+                        </svg>
+                    </button>
+                    <!-- Fullscreen toggle. We fullscreen the .video-container
+                         (NOT the <video>) so our quadrant zoom + custom
+                         transport survive. Native <video> fullscreen would
+                         drop us into the browser's player chrome and lose
+                         the zoom transform. -->
+                    <button type="button" class="video-ctrl-btn" id="videoFullscreenBtn" data-i18n-attr="title:events.player_fullscreen;aria-label:events.player_fullscreen" title="Fullscreen" aria-label="Fullscreen">
+                        <svg id="videoFullscreenIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <!-- Initial state — enter fullscreen (corner brackets). -->
+                            <path d="M4 9V4h5"/>
+                            <path d="M20 9V4h-5"/>
+                            <path d="M4 15v5h5"/>
+                            <path d="M20 15v5h-5"/>
+                        </svg>
+                    </button>
                 </div>
             </div>
             <div class="video-details">
@@ -1476,10 +2159,10 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/pwa-init.js"></script>
+    <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/events.js"></script>
+    <script src="../shared/events.js?v=placesearch2"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

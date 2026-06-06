@@ -441,10 +441,17 @@ class RecordingsFragment : Fragment() {
         val view = view ?: return
         if (view.findViewById<View>(R.id.previewContainer) == null) return
 
+        // Keep currentInlineIndex as an index into the descending currentPlaylist
+        // (the on-screen list order) — onListChanged relies on that to track the
+        // playing clip across re-renders.
         currentInlineIndex = currentPlaylist.indexOfFirst { it.path == recording.path }
-        // Build a parallel string playlist for the player (paths only).
-        val paths = currentPlaylist.map { it.path }.toTypedArray()
-        val titles = currentPlaylist.map { it.name }.toTypedArray()
+        // The player treats index+1 as "next"/auto-advance, so hand it the
+        // playlist in chronological order (oldest->newest). "Next" then plays
+        // the NEWER clip while the library RecyclerView stays newest-first.
+        val ordered = currentPlaylist.asReversed()
+        val paths = ordered.map { it.path }.toTypedArray()
+        val titles = ordered.map { it.name }.toTypedArray()
+        val playerIndex = ordered.indexOfFirst { it.path == recording.path }
 
         val player = VideoPlayerFragment().apply {
             arguments = Bundle().apply {
@@ -455,7 +462,7 @@ class RecordingsFragment : Fragment() {
                 putStringArray(VideoPlayerFragment.ARG_PLAYLIST_TITLES, titles)
                 putInt(
                     VideoPlayerFragment.ARG_PLAYLIST_INDEX,
-                    currentInlineIndex.coerceAtLeast(0)
+                    playerIndex.coerceAtLeast(0)
                 )
             }
             isFullscreen = playerFullscreen

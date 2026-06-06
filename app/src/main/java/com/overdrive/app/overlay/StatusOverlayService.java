@@ -58,8 +58,20 @@ public class StatusOverlayService extends Service {
     private static final String PREFS_NAME = "status_overlay_prefs";
     private static final String PREF_POS_X = "pos_x";
     private static final String PREF_POS_Y = "pos_y";
+    // Last non-NONE mode the user picked from the overlay's action bar.
+    // Used so a long-press quick-toggle from OFF returns to whatever the
+    // user was previously in (CONT/DRIVE/PROX) instead of always defaulting
+    // to CONTINUOUS. Stored in app-side prefs only — this is a UX
+    // shortcut, the daemon's authoritative mode lives in the unified
+    // config and gets set via setRecordingMode TCP.
+    private static final String PREF_LAST_NON_NONE_MODE = "last_non_none_mode";
     private static final int DEFAULT_POS_X = 20;
     private static final int DEFAULT_POS_Y = 100;
+    // Auto-collapse the expanded action bar after this much idle time.
+    // Long enough for an unhurried tap on the desired chip while parked
+    // and short enough that the pill returns to its glance footprint
+    // before the user looks back at the road.
+    private static final long EXPAND_AUTOCOLLAPSE_MS = 5000;
 
     private WindowManager windowManager;
     private View overlayView;
@@ -71,12 +83,23 @@ public class StatusOverlayService extends Service {
     private LinearLayout recContainer;
     private LinearLayout tripContainer;
     private LinearLayout micContainer;
+    private LinearLayout actionBar;
     private ImageView ivRecIcon;
     private ImageView ivTripIcon;
     private ImageView ivMicIcon;
+    private ImageView btnModeOff;
+    private ImageView btnModeContinuous;
+    private ImageView btnModeDrive;
+    private ImageView btnModeProximity;
     private TextView tvRecLabel;
     private TextView tvTripLabel;
     private TextView tvMicLabel;
+
+    // Tap-to-expand state. The action bar shows mode quick-actions and
+    // auto-collapses after EXPAND_AUTOCOLLAPSE_MS. Touched only from the
+    // main thread so a plain boolean is sufficient.
+    private boolean actionBarExpanded = false;
+    private final Runnable autocollapseRunnable = () -> setActionBarExpanded(false);
 
     // State
     private volatile String configuredMode = "NONE";
@@ -98,6 +121,23 @@ public class StatusOverlayService extends Service {
     // stop() are both synchronized on the controller so they serialize.
     private volatile com.overdrive.app.audio.AppAudioCaptureController audioController;
 
+    // Single shared Runnable for the poll-loop reschedule. Used so we
+    // can call `handler.removeCallbacks(pollRunnable)` to drop the
+    // pending poll without nuking unrelated main-thread runnables (the
+    // rejection Toast, autocollapse, in-flight updateUI posts).
+    // Method-references like `this::pollStatus` allocate a new lambda
+    // instance per call, so removeCallbacks(method-ref) wouldn't match;
+    // the field gives a stable identity.
+    private final Runnable pollRunnable = this::pollStatus;
+
+    // Generation counter. Bumped every time we re-issue pollStatus
+    // from outside the executor (applyMode, onStartCommand re-entry).
+    // The executor's tail-reschedule reads this counter when its tick
+    // started; if it's been bumped since, the in-flight tick skips
+    // its own postDelayed so we never spawn parallel poll chains.
+    private final java.util.concurrent.atomic.AtomicInteger pollGeneration =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
     // Edge-trigger fast-poll: when ACC flips OFF→ON, run the poll loop at 1s
     // for 30s so we minimize the audio-capture-start latency at trip start.
     // Without this, ACC turning on can take up to POLL_INTERVAL_ACC_OFF_MS
@@ -108,6 +148,28 @@ public class StatusOverlayService extends Service {
     private volatile long fastPollUntilElapsedMs = 0;
     private static final long FAST_POLL_INTERVAL_MS = 1000;
     private static final long FAST_POLL_WINDOW_MS = 30_000;
+
+    // Optimistic-mode guard. When the user taps a mode chip, we flip
+    // configuredMode locally before the daemon has confirmed. An
+    // already-in-flight pollStatus tick (already past fetchStatus, about
+    // to enter parseStatus) would otherwise overwrite our optimistic
+    // value with the pre-change daemon state and the chip selection
+    // would visibly bounce. Stamp the moment we flipped; parseStatus
+    // ignores its own configuredMode read while still inside the
+    // window so the user-driven value sticks.
+    private volatile long optimisticModeUntilElapsedMs = 0;
+    private static final long OPTIMISTIC_MODE_WINDOW_MS = 1500;
+
+    // Coalesce rapid-fire chip taps. Mashing the same chip would
+    // otherwise queue N TCP jobs serially on the polling executor,
+    // and a wedged daemon could starve actual status polls for
+    // seconds. We drop duplicate setRecordingMode calls within this
+    // window if the requested mode is the same as the in-flight
+    // request; different-mode taps still go through (user is
+    // changing their mind).
+    private volatile String inflightModeRequest = null;
+    private volatile long inflightModeRequestMs = 0;
+    private static final long MODE_REQUEST_DEDUP_WINDOW_MS = 500;
 
     // Track the last AppAudioCaptureController.start() that returned false so
     // the MIC pill can paint RED with a "mic claimed / unavailable" hint.
@@ -158,9 +220,17 @@ public class StatusOverlayService extends Service {
         // Theme refresh — caller flipped the app's day/night setting.
         // Rebuild the overlay against the new uiMode. rebuildOverlay() also
         // re-fires pollStatus() so the pill repaints; return early so the
-        // standard start path doesn't double-poll.
+        // standard start path doesn't double-poll. If the service was
+        // freshly created by this same start (running == false) we
+        // still need to arm the poll loop — without it, every poll
+        // would short-circuit at running.get() and the pill would
+        // never appear. startPolling() is idempotent against the same
+        // service instance because it sets running=true; rebuildOverlay
+        // already kicked rescheduleImmediatePoll, so its postDelayed
+        // covers the actual cadence.
         if (intent != null && ACTION_REFRESH_THEME.equals(intent.getAction())) {
             Log.i(TAG, "ACTION_REFRESH_THEME — rebuilding overlay");
+            if (!running.get()) running.set(true);
             rebuildOverlay();
             return START_STICKY;
         }
@@ -168,11 +238,14 @@ public class StatusOverlayService extends Service {
             startPolling();
         } else {
             // Re-entry while we're already running: MainActivity is asking
-            // us to refresh. Cancel any in-flight delayed poll and fire one
-            // immediately so a stale "ACC=off, slow poll" loop doesn't keep
-            // us hidden for up to POLL_INTERVAL_ACC_OFF_MS.
-            handler.removeCallbacksAndMessages(null);
-            pollStatus();
+            // us to refresh. Drop the pending pollStatus reschedule and
+            // post a fresh one. rescheduleImmediatePoll bumps the
+            // generation counter so an in-flight executor tick skips
+            // its own tail-reschedule rather than spawning a parallel
+            // poll chain. Pre-fix this used removeCallbacksAndMessages(null)
+            // which collaterally wiped the autocollapse runnable and any
+            // queued Toast / updateUI posts on the same handler.
+            rescheduleImmediatePoll();
         }
 
         return START_STICKY;
@@ -287,8 +360,11 @@ public class StatusOverlayService extends Service {
             }
         } catch (Exception ignored) {}
         removeOverlay();
-        handler.removeCallbacksAndMessages(null);
-        pollStatus();
+        // Targeted re-issue: same generation-counter pattern as
+        // applyMode / onStartCommand re-entry. Wholesale-wipe would
+        // also drop autocollapse and any pending updateUI/Toast posts
+        // unrelated to the poll cadence.
+        rescheduleImmediatePoll();
     }
 
     /**
@@ -390,25 +466,66 @@ public class StatusOverlayService extends Service {
             } catch (Exception ignored) {}
             overlayView = null;
         }
+        // Cancel any pending auto-collapse and reset the expanded flag —
+        // the View references it tracked are gone, and a stale "true"
+        // would force the next createOverlay() into the wrong state.
+        actionBarExpanded = false;
+        handler.removeCallbacks(autocollapseRunnable);
     }
 
     private void bindViews() {
         recContainer = overlayView.findViewById(R.id.recContainer);
         tripContainer = overlayView.findViewById(R.id.tripContainer);
         micContainer = overlayView.findViewById(R.id.micContainer);
+        actionBar = overlayView.findViewById(R.id.actionBar);
         ivRecIcon = overlayView.findViewById(R.id.ivRecIcon);
         ivTripIcon = overlayView.findViewById(R.id.ivTripIcon);
         ivMicIcon = overlayView.findViewById(R.id.ivMicIcon);
+        btnModeOff = overlayView.findViewById(R.id.btnModeOff);
+        btnModeContinuous = overlayView.findViewById(R.id.btnModeContinuous);
+        btnModeDrive = overlayView.findViewById(R.id.btnModeDrive);
+        btnModeProximity = overlayView.findViewById(R.id.btnModeProximity);
         tvRecLabel = overlayView.findViewById(R.id.tvRecLabel);
         tvTripLabel = overlayView.findViewById(R.id.tvTripLabel);
         tvMicLabel = overlayView.findViewById(R.id.tvMicLabel);
 
-        // Tap on recording item → restart recording if it should be running but isn't
+        // Tap on REC chip → toggle the expanded action bar with mode
+        // quick-actions. If the daemon is showing a should-be-running-
+        // but-isn't state, the same tap doubles as the legacy "kick the
+        // recording" repair gesture so we don't lose that affordance.
         recContainer.setOnClickListener(v -> {
             if (!isRecording && shouldRecordingBeActive()) {
                 restartRecording();
+                return;
             }
+            setActionBarExpanded(!actionBarExpanded);
         });
+
+        // Long-press on REC → fast quick-toggle for the muscle-memory
+        // case: "I want to stop recording right now" / "resume what I
+        // had before". Bypasses the expanded UI entirely so the user
+        // doesn't have to aim at a chip.
+        recContainer.setOnLongClickListener(v -> {
+            quickToggleRecording();
+            return true;
+        });
+
+        // Action chip taps. Each fires setRecordingMode over the
+        // daemon's TCP command channel and arms a fast-poll window so
+        // the UI repaints within ~1s instead of waiting for the next
+        // 3s tick.
+        if (btnModeOff != null) {
+            btnModeOff.setOnClickListener(v -> applyMode("NONE"));
+        }
+        if (btnModeContinuous != null) {
+            btnModeContinuous.setOnClickListener(v -> applyMode("CONTINUOUS"));
+        }
+        if (btnModeDrive != null) {
+            btnModeDrive.setOnClickListener(v -> applyMode("DRIVE_MODE"));
+        }
+        if (btnModeProximity != null) {
+            btnModeProximity.setOnClickListener(v -> applyMode("PROXIMITY_GUARD"));
+        }
 
         // Tap on trip item → restart trip detection if not running
         tripContainer.setOnClickListener(v -> {
@@ -416,6 +533,234 @@ public class StatusOverlayService extends Service {
                 restartTripDetection();
             }
         });
+    }
+
+    /**
+     * Show or hide the expanded action bar.
+     *
+     * Expanding (re)arms the auto-collapse timer; collapsing cancels
+     * it. Also refreshes the selection state so the chip representing
+     * the active mode is highlighted as soon as the bar appears — saves
+     * a poll-tick of latency when the user wants to confirm what they
+     * just picked.
+     */
+    private void setActionBarExpanded(boolean expanded) {
+        actionBarExpanded = expanded;
+        if (actionBar == null) return;
+        actionBar.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        handler.removeCallbacks(autocollapseRunnable);
+        if (expanded) {
+            refreshActionBarSelection();
+            handler.postDelayed(autocollapseRunnable, EXPAND_AUTOCOLLAPSE_MS);
+        }
+    }
+
+    /**
+     * Mark the chip matching {@link #configuredMode} as selected so the
+     * user sees which mode is active at a glance. Called whenever the
+     * action bar is shown and on every UI refresh while it's open so a
+     * mode change applied from the web UI also reflects here.
+     */
+    private void refreshActionBarSelection() {
+        if (btnModeOff == null) return;
+        btnModeOff.setSelected("NONE".equals(configuredMode));
+        btnModeContinuous.setSelected("CONTINUOUS".equals(configuredMode));
+        btnModeDrive.setSelected("DRIVE_MODE".equals(configuredMode));
+        btnModeProximity.setSelected("PROXIMITY_GUARD".equals(configuredMode));
+    }
+
+    /**
+     * Quick-toggle: if recording, stop. If stopped, resume the user's
+     * last non-NONE mode (or CONTINUOUS as a first-run fallback). Used
+     * by the REC long-press shortcut.
+     */
+    private void quickToggleRecording() {
+        // Bail if we don't have a confident view of the daemon's mode.
+        // An empty configuredMode (JSON-fallback path on a daemon
+        // hiccup) used to be treated as "off" and would clobber the
+        // user's actual setting with their last-resume mode. Better
+        // to do nothing — the user can re-tap once the next status
+        // tick has reconciled.
+        if (!daemonReachable || configuredMode == null || configuredMode.isEmpty()) {
+            return;
+        }
+        boolean off = "NONE".equals(configuredMode);
+        if (off) {
+            String resume = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getString(PREF_LAST_NON_NONE_MODE, "CONTINUOUS");
+            applyMode(resume);
+        } else {
+            applyMode("NONE");
+        }
+    }
+
+    /**
+     * Send {@code mode} to the daemon's TCP command channel, persist it
+     * locally as the last user-picked non-NONE mode, and arm fast-poll
+     * so the chip state repaints quickly. Optimistically updates the
+     * local {@code configuredMode} so the selected-state highlight
+     * moves to the new chip in the same frame instead of waiting for
+     * the next status poll.
+     */
+    private void applyMode(String mode) {
+        if (mode == null || mode.isEmpty()) return;
+        // Coalesce duplicate taps. A user mashing the same chip 5×
+        // would otherwise queue 5× TCP jobs on the polling executor,
+        // and a wedged daemon (1.5s connect timeout each) could
+        // starve actual status polls for several seconds. Different-
+        // mode taps still go through — the user is changing their
+        // mind and we want to send the latest pick.
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (mode.equals(inflightModeRequest)
+                && (now - inflightModeRequestMs) < MODE_REQUEST_DEDUP_WINDOW_MS) {
+            return;
+        }
+        inflightModeRequest = mode;
+        inflightModeRequestMs = now;
+        configuredMode = mode;
+        // Stamp the optimistic window. parseStatus respects this for
+        // OPTIMISTIC_MODE_WINDOW_MS so an in-flight tick can't roll us
+        // back to the pre-change daemon value before the daemon has
+        // had a chance to actually apply our setRecordingMode. Once the
+        // daemon catches up (typically <500ms over the local TCP socket)
+        // its echoed configuredMode matches ours and the guard becomes
+        // a no-op.
+        optimisticModeUntilElapsedMs =
+            android.os.SystemClock.elapsedRealtime() + OPTIMISTIC_MODE_WINDOW_MS;
+        if (!"NONE".equals(mode)) {
+            try {
+                getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putString(PREF_LAST_NON_NONE_MODE, mode)
+                        .apply();
+            } catch (Exception ignored) {}
+        }
+        refreshActionBarSelection();
+        sendSetRecordingMode(mode);
+        // Arm a fast-poll window so isRecording / shouldBeRecording
+        // catch up within ~1s instead of waiting for the next 3s tick.
+        // rescheduleImmediatePoll() bumps the generation counter so
+        // any in-flight executor tick will skip its tail-reschedule
+        // (rather than racing with our newly-posted one and producing
+        // two parallel chains).
+        fastPollUntilElapsedMs =
+            android.os.SystemClock.elapsedRealtime() + FAST_POLL_WINDOW_MS;
+        // Re-arm the auto-collapse timer — the user just interacted, so
+        // give them another full window to pick another chip if they
+        // want to switch again. Targeted removeCallbacks so we don't
+        // wipe unrelated runnables (rejection Toast, executor's
+        // queued updateUI post) on the same handler.
+        if (actionBarExpanded) {
+            handler.removeCallbacks(autocollapseRunnable);
+            handler.postDelayed(autocollapseRunnable, EXPAND_AUTOCOLLAPSE_MS);
+        }
+        rescheduleImmediatePoll();
+        // Repaint immediately so the selected-chip highlight moves to
+        // the new mode in this UI frame instead of waiting for the
+        // 1s fast-poll tick.
+        updateUI();
+    }
+
+    /**
+     * TCP command to the in-process daemon. Same wire format as
+     * {@link #restartRecording()}; factored out so {@link #applyMode}
+     * can pass an arbitrary mode string instead of always re-sending
+     * the current one.
+     */
+    private void sendSetRecordingMode(String mode) {
+        executor.execute(() -> {
+            java.net.Socket socket = null;
+            boolean accepted = false;
+            String errorMessage = null;
+            try {
+                // Bounded connect timeout. The default Socket(host,port)
+                // constructor has NO connect timeout, so a wedged daemon
+                // (e.g. mid-shutdown not yet listening) would block this
+                // executor thread indefinitely and starve status polls.
+                socket = new java.net.Socket();
+                socket.connect(
+                    new java.net.InetSocketAddress("127.0.0.1", 19876), 1500);
+                socket.setSoTimeout(3000);
+                JSONObject cmd = new JSONObject();
+                cmd.put("cmd", "setRecordingMode");
+                cmd.put("mode", mode);
+                java.io.OutputStream os = socket.getOutputStream();
+                os.write((cmd.toString() + "\n").getBytes());
+                os.flush();
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(socket.getInputStream()));
+                String response = reader.readLine();
+                Log.i(TAG, "applyMode(" + mode + "): " + response);
+                if (response != null) {
+                    try {
+                        JSONObject json = new JSONObject(response);
+                        accepted = "ok".equals(json.optString("status"));
+                        if (!accepted) {
+                            errorMessage = json.optString("message", "rejected");
+                        }
+                    } catch (Exception parseErr) {
+                        // Daemon returned non-JSON or partial — treat as
+                        // rejected so we don't silently leave an
+                        // optimistic value the daemon never honored.
+                        errorMessage = "bad daemon response";
+                    }
+                } else {
+                    errorMessage = "no daemon response";
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "applyMode(" + mode + ") failed: " + e.getMessage());
+                errorMessage = e.getMessage();
+            } finally {
+                if (socket != null) {
+                    try { socket.close(); } catch (Exception ignored) {}
+                }
+            }
+            // Surface a rejection to the user so the chip selection
+            // doesn't silently revert 1.5s later with no explanation.
+            // Also clear the optimistic window early so the next poll
+            // immediately reflects the actual daemon mode.
+            if (!accepted) {
+                final String hint = errorMessage;
+                optimisticModeUntilElapsedMs = 0;
+                handler.post(() -> {
+                    // Service may have been torn down between when
+                    // the executor task posted this Runnable and when
+                    // the main looper services it. Showing a Toast
+                    // against a destroyed Service / re-arming the
+                    // poll loop on a stopped service is just stale-
+                    // state UX noise.
+                    if (!running.get()) return;
+                    try {
+                        android.widget.Toast.makeText(
+                            StatusOverlayService.this,
+                            "Recording mode change failed"
+                                + (hint != null ? ": " + hint : ""),
+                            android.widget.Toast.LENGTH_SHORT).show();
+                    } catch (Exception ignored) {}
+                    // Kick an immediate poll so the chip reverts to
+                    // the daemon's actual mode in the same UI frame
+                    // as the Toast — without this, the user sees the
+                    // error message but the chip stays highlighted on
+                    // the rejected pick for up to one fast-poll tick.
+                    rescheduleImmediatePoll();
+                });
+            }
+        });
+    }
+
+    /**
+     * Drop any pending pollStatus reschedule and kick a fresh poll
+     * tick. Bumps {@link #pollGeneration} so the in-flight executor
+     * task (if any) skips its own tail-reschedule when it sees the
+     * generation has advanced — without this we'd end up with two
+     * parallel poll chains feeding the UI.
+     *
+     * Safe to call from main thread or executor.
+     */
+    private void rescheduleImmediatePoll() {
+        pollGeneration.incrementAndGet();
+        handler.removeCallbacks(pollRunnable);
+        handler.post(pollRunnable);
     }
 
     private void setupDrag() {
@@ -472,6 +817,15 @@ public class StatusOverlayService extends Service {
 
     private void pollStatus() {
         if (!running.get()) return;
+
+        // Snapshot the generation we entered with. If anything bumps it
+        // before our tail-reschedule (an external rescheduleImmediatePoll
+        // from applyMode / onStartCommand re-entry), we'll skip our own
+        // postDelayed so we don't spawn a parallel poll chain. Without
+        // this, every external re-issue could leave the in-flight tick
+        // about to fire its own postDelayed AFTER the re-issuer has
+        // already removed callbacks — producing two interleaved chains.
+        final int genAtEntry = pollGeneration.get();
 
         executor.execute(() -> {
             // FIX M4: a single forceReload at the top of the tick replaces
@@ -541,13 +895,31 @@ public class StatusOverlayService extends Service {
                 // Fast-poll window: when armed by an ACC edge, run at 1s for
                 // FAST_POLL_WINDOW_MS to catch the daemon-startup race tight.
                 long now = android.os.SystemClock.elapsedRealtime();
-                long interval;
+                final long interval;
                 if (fastPollUntilElapsedMs > now) {
                     interval = FAST_POLL_INTERVAL_MS;
                 } else {
                     interval = accOn ? POLL_INTERVAL_MS : POLL_INTERVAL_ACC_OFF_MS;
                 }
-                handler.postDelayed(this::pollStatus, interval);
+                // Marshal the generation-check + postDelayed onto the
+                // main thread so they serialize against rescheduleImmediatePoll
+                // (which also runs on main). Doing the check on the
+                // executor and the post on the Handler is racy: an
+                // executor-side `pollGeneration.get() == genAtEntry`
+                // check could pass, then main races in between the
+                // check and the postDelayed (incrementing gen, calling
+                // removeCallbacks against an empty queue), and the
+                // executor's subsequent postDelayed enqueues a stale
+                // pollRunnable that no removeCallbacks will ever clear
+                // — producing a parallel poll chain that doubles disk
+                // I/O, /status traffic, and audio reconcile calls
+                // forever after.
+                final int gen = genAtEntry;
+                handler.post(() -> {
+                    if (running.get() && pollGeneration.get() == gen) {
+                        handler.postDelayed(pollRunnable, interval);
+                    }
+                });
             }
         });
     }
@@ -645,6 +1017,13 @@ public class StatusOverlayService extends Service {
         boolean isCapturing = ctrl != null && ctrl.isRunning();
 
         if (shouldCapture && !isCapturing) {
+            // Bail if the service is shutting down. onDestroy can land
+            // between the isCapturing read above and the new-controller
+            // start below — without this guard a fresh AudioRecord
+            // would be created AFTER onDestroy nulled audioController,
+            // and the new mic capture would have no live owner to stop
+            // it (privacy indicator stuck on until process death).
+            if (!running.get()) return;
             // Tear down any dead-but-not-stopped controller before
             // creating a new one. A worker thread that self-exited (drain
             // socket reset, encoder error, etc.) leaves running=false but
@@ -657,8 +1036,22 @@ public class StatusOverlayService extends Service {
                 ctrl.stop();
             }
             ctrl = new com.overdrive.app.audio.AppAudioCaptureController();
-            audioController = ctrl;
             boolean ok = ctrl.start();
+            // Recheck running AFTER start() — onDestroy can land in
+            // the window between our pre-create guard and start()
+            // completing. If that happened, onDestroy already
+            // snapshotted+stopped the previous audioController and
+            // nulled the field; publishing our new ctrl now would
+            // leak it (mic indicator stays on until process death,
+            // since the destroyed Service can't see it). Stop and
+            // bail without publishing.
+            if (!running.get()) {
+                if (ok) {
+                    try { ctrl.stop(); } catch (Exception ignored) {}
+                }
+                return;
+            }
+            audioController = ctrl;
             if (ok) {
                 Log.i(TAG, "Audio capture enabled (mode=" + configuredMode + ")");
                 // Clear any stale failure hint so the MIC pill recovers
@@ -680,10 +1073,19 @@ public class StatusOverlayService extends Service {
 
     private void parseStatus(JSONObject status) {
         try {
+            // Suppress configuredMode overwrites while the user's
+            // optimistic pick is still settling. Without this, an
+            // in-flight tick that started before applyMode() ran would
+            // clobber the user-chosen mode with the daemon's pre-change
+            // value, and the action-chip selection would visibly bounce.
+            boolean honorOptimisticMode =
+                android.os.SystemClock.elapsedRealtime() < optimisticModeUntilElapsedMs;
             // New fields (from updated daemon)
             JSONObject recStatus = status.optJSONObject("recordingStatus");
             if (recStatus != null) {
-                configuredMode = recStatus.optString("configuredMode", "NONE");
+                if (!honorOptimisticMode) {
+                    configuredMode = recStatus.optString("configuredMode", "NONE");
+                }
                 isRecording = recStatus.optBoolean("isRecording", false);
                 currentGear = recStatus.optString("gear", "P");
                 accOn = recStatus.optBoolean("accOn", false);
@@ -694,22 +1096,24 @@ public class StatusOverlayService extends Service {
                 org.json.JSONArray recArray = status.optJSONArray("recording");
                 isRecording = recArray != null && recArray.length() > 0;
                 accOn = status.optBoolean("acc", false);
-                
+
                 // Read configured mode from UnifiedConfigManager.
                 // FIX M4: pollStatus() forceReloads once at the top of the
                 // tick; the cache is hot here so loadConfig() is free.
-                try {
-                    JSONObject recording =
-                        com.overdrive.app.config.UnifiedConfigManager.loadConfig()
-                            .optJSONObject("recording");
-                    if (recording != null) {
-                        configuredMode = recording.optString("mode", "NONE");
+                if (!honorOptimisticMode) {
+                    try {
+                        JSONObject recording =
+                            com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                                .optJSONObject("recording");
+                        if (recording != null) {
+                            configuredMode = recording.optString("mode", "NONE");
+                        }
+                    } catch (Exception configErr) {
+                        Log.w(TAG, "Config read fallback failed: " + configErr.getMessage());
                     }
-                } catch (Exception configErr) {
-                    Log.w(TAG, "Config read fallback failed: " + configErr.getMessage());
                 }
-                
-                // Gear: not available from old daemon status, default to non-P 
+
+                // Gear: not available from old daemon status, default to non-P
                 // if ACC is on (assume driving since we can't know)
                 currentGear = accOn ? "D" : "P";
             }
@@ -743,6 +1147,15 @@ public class StatusOverlayService extends Service {
     // ==================== UI ====================
 
     private void updateUI() {
+        // Bail if the service is being torn down. A poll tick still
+        // mid-flight on the executor when onDestroy lands can race
+        // past the wholesale handler wipe and post(this::updateUI)
+        // afterwards; without this guard updateUI would reach
+        // createOverlay() and leak a TYPE_APPLICATION_OVERLAY surface
+        // into WindowManager that no live service owns — the user
+        // sees a ghost pill they can't dismiss without killing the
+        // app process.
+        if (!running.get()) return;
         // User-facing visibility toggles. Stored in the unified config file
         // (/data/local/tmp/overdrive_config.json) rather than SharedPreferences
         // because both the app UID and the shell/daemon UID need to see the
@@ -766,8 +1179,17 @@ public class StatusOverlayService extends Service {
         }
 
         boolean recConfigured = !"NONE".equals(configuredMode) && !"UNKNOWN".equals(configuredMode);
+        // While the user is interacting with the action bar we keep the
+        // pill alive even when the resolved mode is NONE — otherwise
+        // tapping the OFF chip would tear the pill down before the
+        // 5s auto-collapse window expires, leaving no way to change
+        // their mind. The action bar is implicitly anchored to the
+        // camera-overlay segment, so we only force-show when the user
+        // hasn't disabled that segment in Settings.
+        boolean keepAliveForActionBar = actionBarExpanded && cameraOverlayEnabled;
         boolean anythingToShow = (recConfigured && cameraOverlayEnabled)
-                || (tripEnabled && tripOverlayEnabled);
+                || (tripEnabled && tripOverlayEnabled)
+                || keepAliveForActionBar;
 
         Log.d(TAG, "updateUI: mode=" + configuredMode + " isRec=" + isRecording 
                 + " gear=" + currentGear + " acc=" + accOn 
@@ -785,7 +1207,12 @@ public class StatusOverlayService extends Service {
                 return;
             }
             // Sustained unreachability — hide (but don't destroy) the overlay.
+            // Force-collapse the action bar so the next reappearance
+            // doesn't briefly show stale expanded state. setActionBarExpanded(false)
+            // is null-safe via the actionBar guard inside it and clears
+            // the autocollapse runnable too.
             Log.d(TAG, "updateUI: daemon unreachable for " + consecutivePollFailures + " polls — hiding overlay");
+            setActionBarExpanded(false);
             if (overlayView != null) overlayView.setVisibility(View.GONE);
             return;
         }
@@ -804,6 +1231,10 @@ public class StatusOverlayService extends Service {
         // Hide overlay when ACC is off — car is parked, no need to show status.
         // We keep polling (at a slower rate) so we can show it again when ACC turns on.
         if (!accOn) {
+            // Same rationale as the daemon-unreachable branch: clear the
+            // action bar state so it doesn't pop up half-rendered when
+            // ACC returns.
+            setActionBarExpanded(false);
             if (overlayView != null) overlayView.setVisibility(View.GONE);
             return;
         }
@@ -812,8 +1243,9 @@ public class StatusOverlayService extends Service {
         // Proximity guard should stay visible even when idle/armed (waiting for
         // a radar trigger) — hiding it would make users think the feature is off.
         boolean isProximityMode = "PROXIMITY_GUARD".equals(configuredMode);
-        boolean shouldShowRec = recConfigured && cameraOverlayEnabled
-                && (isRecording || shouldRecordingBeActive() || isProximityMode);
+        boolean shouldShowRec = (recConfigured && cameraOverlayEnabled
+                && (isRecording || shouldRecordingBeActive() || isProximityMode))
+                || keepAliveForActionBar;
         boolean shouldShowTrip = tripEnabled && tripOverlayEnabled;
         // Mic visibility piggybacks on REC visibility. Show whenever audio
         // is armed (configured + recording mode set) so the "armed/idle"
@@ -837,8 +1269,18 @@ public class StatusOverlayService extends Service {
             removeOverlay();
             return;
         }
-        
-        hadContentBefore = true;
+
+        // Latch hadContentBefore only on real, persistent content. The
+        // transient action-bar keepalive must NOT mark "we had real
+        // stuff to show" — otherwise a daemon blip 5s after the bar
+        // collapses would freeze us into the grace window staring at
+        // a stale expanded bar for up to 18s. Real content = a
+        // configured recording mode or trip detection.
+        boolean hasRealContent = (recConfigured && cameraOverlayEnabled)
+                || (tripEnabled && tripOverlayEnabled);
+        if (hasRealContent) {
+            hadContentBefore = true;
+        }
         
         // We have something to show — create overlay window if not yet created
         createOverlay();
@@ -846,9 +1288,17 @@ public class StatusOverlayService extends Service {
         
         overlayView.setVisibility(View.VISIBLE);
 
-        // Recording: show only if configured AND user hasn't toggled the
-        // camera segment off in Settings → Status overlay.
-        if (recConfigured && cameraOverlayEnabled) {
+        // Recording: show if configured AND user hasn't toggled the
+        // camera segment off in Settings → Status overlay; or if the
+        // user just popped the action bar from an OFF state (we paint a
+        // muted "OFF" chip so they have a visible anchor to tap a mode
+        // chip on, instead of the pill blinking out from under them).
+        if (keepAliveForActionBar && !recConfigured) {
+            recContainer.setVisibility(View.VISIBLE);
+            ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
+            tvRecLabel.setText(R.string.overlay_mode_off_label);
+            tvRecLabel.setTextColor(getColor(R.color.status_warning));
+        } else if (recConfigured && cameraOverlayEnabled) {
             recContainer.setVisibility(View.VISIBLE);
 
             // Determine if recording SHOULD be happening right now given mode + gear + ACC
@@ -856,37 +1306,35 @@ public class StatusOverlayService extends Service {
             boolean isProximity = "PROXIMITY_GUARD".equals(configuredMode);
 
             if (isRecording) {
-                // All good — recording as expected.
-                // Proximity mode uses an amber tint + "PROX" label so users can
-                // tell at a glance that this is radar-triggered recording,
-                // not continuous/drive recording.
-                if (isProximity) {
-                    ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_active);
-                    tvRecLabel.setText("PROX");
-                    tvRecLabel.setTextColor(getColor(R.color.status_warning));
-                } else {
-                    ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_active);
-                    tvRecLabel.setText("REC");
-                    tvRecLabel.setTextColor(getColor(R.color.status_success));
-                }
-            } else if (shouldBeRecording) {
-                // Problem — should be recording but isn't
-                if (isProximity) {
-                    ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
-                    tvRecLabel.setText("PROX");
-                    tvRecLabel.setTextColor(getColor(R.color.status_danger));
-                } else {
-                    ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
-                    tvRecLabel.setText("REC");
-                    tvRecLabel.setTextColor(getColor(R.color.status_danger));
-                }
+                // All good — recording as expected. Green for every mode,
+                // including PROXIMITY_GUARD: when a radar trigger has actually
+                // started a clip, the pill goes green so the user can tell at a
+                // glance that recording is live RIGHT NOW. The "PROX" label
+                // still distinguishes radar-triggered recording from
+                // continuous/drive recording; armed-but-idle proximity stays
+                // amber (see the isProximity branch below).
+                ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_active);
+                tvRecLabel.setText(isProximity ? "PROX" : "REC");
+                tvRecLabel.setTextColor(getColor(R.color.status_success));
             } else if (isProximity) {
-                // Proximity guard is armed but not currently recording (no radar trigger).
-                // Show an armed/idle indicator instead of hiding — users want to know
-                // the car is being watched even when nothing has triggered yet.
+                // Proximity guard is armed but not currently recording (no radar
+                // trigger). This is the NORMAL state for most of a drive — radar
+                // mode records only on triggers, so "not recording" is not a
+                // fault. Paint amber (armed/watching), NOT red. Checked BEFORE
+                // shouldBeRecording because shouldRecordingBeActive() returns
+                // true for proximity in any non-P gear, which would otherwise
+                // route the normal armed state into the red "problem" branch
+                // below and light the pill red for the whole drive.
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
                 tvRecLabel.setText("PROX");
                 tvRecLabel.setTextColor(getColor(R.color.status_warning));
+            } else if (shouldBeRecording) {
+                // Problem — a continuous/drive mode should be recording but
+                // isn't. (Proximity is handled above: its not-recording state
+                // is armed/normal, not a fault.)
+                ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
+                tvRecLabel.setText("REC");
+                tvRecLabel.setTextColor(getColor(R.color.status_danger));
             } else {
                 // Not recording, but that's expected (e.g., drive mode in P gear)
                 // Hide the recording indicator since conditions don't require it
@@ -990,6 +1438,16 @@ public class StatusOverlayService extends Service {
             separator.setVisibility(
                 leftSideVisible && tripVisible ? View.VISIBLE : View.GONE);
         }
+
+        // Sync expanded action bar visibility + selection. The expanded
+        // state is owned by the user-input layer (tap on REC chip) but
+        // we still re-read configuredMode here so the highlighted chip
+        // tracks any mode change applied from the web UI while the bar
+        // is open.
+        if (actionBar != null) {
+            actionBar.setVisibility(actionBarExpanded ? View.VISIBLE : View.GONE);
+            if (actionBarExpanded) refreshActionBarSelection();
+        }
     }
 
     // ==================== RESTART ACTIONS ====================
@@ -1033,7 +1491,15 @@ public class StatusOverlayService extends Service {
         executor.execute(() -> {
             java.net.Socket socket = null;
             try {
-                socket = new java.net.Socket("127.0.0.1", 19876);
+                // Bounded connect timeout — same rationale as
+                // sendSetRecordingMode: a wedged daemon (mid-shutdown
+                // not yet listening) would otherwise block this single-
+                // thread executor indefinitely and starve status polls
+                // and any subsequent chip taps for the OS-level TCP
+                // connect timeout (minutes).
+                socket = new java.net.Socket();
+                socket.connect(
+                    new java.net.InetSocketAddress("127.0.0.1", 19876), 1500);
                 socket.setSoTimeout(3000);
 
                 JSONObject cmd = new JSONObject();
@@ -1110,12 +1576,15 @@ public class StatusOverlayService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
+        // Tag with the shared Overdrive group key so DaemonKeepaliveService's
+        // group-summary collapses this entry under a single shade row.
         return new Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle(getString(R.string.status_overlay_notif_title))
                 .setContentText(getString(R.string.status_overlay_notif_text))
                 .setSmallIcon(R.drawable.ic_recording)
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .setGroup(com.overdrive.app.services.DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)
                 .build();
     }
 

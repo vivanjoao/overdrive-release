@@ -20,6 +20,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * PanoramicCameraGpu - GPU Edition with Zero-Copy Pipeline.
@@ -277,7 +278,59 @@ public class PanoramicCameraGpu {
     // SOTA: BYD camera coordinator for cooperative sharing and error recovery
     private BydCameraCoordinator cameraCoordinator;
     private volatile boolean cameraYielded = false;
-    
+
+    // Yield-state re-acquire poller. registerCameraUser() is permanently disabled
+    // (see BydCameraCoordinator), so once we yield to the native AVM app the
+    // event-driven IBYDCameraUser.onCameraAvailable callback never fires. The
+    // GL render loop also early-returns at line 2131 while yielded, so its
+    // frame-stall watchdog can't observe a recovery either. This poller is the
+    // only authoritative re-acquire path: every 5 s while yielded, ping
+    // BydCameraCoordinator.checkNativeAppActive() — its polling-fallback branch
+    // (lines 398-406) calls handleNativeAppClosed → onReacquireCamera when the
+    // native app releases the camera.
+    private volatile Thread yieldPollerThread;
+    private static final long YIELD_POLL_INTERVAL_MS = 5000;
+
+    // audit avc-yield (round 2): when onReacquireCamera's GL-handler runnable
+    // throws (AVMCamera.open transient false, NoSuchMethodError on a reflection
+    // target, attachSurfaceTextureToCamera failing because the BYD HAL is
+    // still finalising the prior native release, etc.) the previous recovery
+    // depended solely on startYieldPoller observing a *future* native-app
+    // transition — but coordinator.yielded was already cleared on the first
+    // transition, so checkNativeAppActive's edge-only handleNativeAppClosed
+    // never re-fires, the poller exits, and pano recording stays dead until
+    // ACC cycle. Schedule explicit backoff retries of startCamera at 2s/5s/
+    // 10s (then give up and self-restart the daemon process the way the GL
+    // watchdog does at line 2400/2767).
+    private static final long[] REACQUIRE_RETRY_DELAYS_MS = new long[] { 2000L, 5000L, 10000L };
+    // audit avc-yield (round 5, finding cross-thread-race): reacquireRetryCount
+    // is read+incremented from the GL-handler retry catch block AND reset from
+    // onReacquireCamera (HAL listener thread). A naive int can lose an
+    // increment if the listener fires reset between the read and the +1 write.
+    // AtomicInteger.compareAndSet(currentAttempt, currentAttempt+1) makes the
+    // increment fail loud (we treat it as concurrent-reset and skip the retry
+    // bump rather than overwriting a fresh 0).
+    private final AtomicInteger reacquireRetryCount = new AtomicInteger(0);
+    // audit avc-yield (round 7, finding pending-retry-not-cancelled): when
+    // a yield-cycle attempt fails we postDelayed a retry runnable on glHandler.
+    // If the yield poller's edge-fire path (onReacquireCamera) succeeds before
+    // the postDelayed fires, the retry will still run and unconditionally
+    // tear down the just-resumed camera (attemptReacquireOnGlThread always
+    // closes cameraObj on entry). Track the pending runnable so we can
+    // removeCallbacks on success or on a fresh poller-driven re-entry.
+    // Also bump pendingReacquireEpoch on success/fresh-cycle so that even if
+    // the cancellation race loses, the epoch-gate at the top of
+    // attemptReacquireOnGlThread short-circuits the stale runnable.
+    private volatile Runnable pendingReacquireRetry = null;
+    private final AtomicInteger pendingReacquireEpoch = new AtomicInteger(0);
+    // audit avc-yield (round 5, finding consumer-recreate-every-attempt):
+    // recreateCameraSurface is only needed once per yield cycle (after the BYD
+    // HAL released the ImageReader Surface). Doing it on every retry attempt
+    // re-allocates GL textures for nothing and risks racing the encoder. Set
+    // by yieldCameraInternal, cleared after the first successful recreate.
+    private volatile boolean consumerNeedsRecreation = false;
+
+
     // Camera health monitor — detects stalled frames and triggers recovery
     private static final long FRAME_STALL_THRESHOLD_MS = 4000;  // 4 seconds without frames (HAL issue)
     // When native app is active, use a longer threshold to avoid false yields
@@ -473,6 +526,30 @@ public class PanoramicCameraGpu {
                     // Contention detected — yield on GL thread
                     logger.info("YIELD: Contention detected — releasing camera for native app");
                     cameraYielded = true;
+                    // audit avc-yield (round 8, finding yield-mid-backoff-cascades-to-exit):
+                    // a Yield #2 arriving mid-backoff for a failed Yield #1 reacquire
+                    // must reset the retry budget and cancel the pending postDelayed
+                    // retry. Otherwise, the stale retry runnable fires after the new
+                    // yield, hits the isCameraYielded gate, throws "treating as
+                    // reacquire failure", bumps the counter further, and at
+                    // attemptIdx=3 cascades to System.exit(0) — converting a
+                    // legitimate native-app re-engagement into a daemon kill.
+                    // Symmetric with onReacquireCamera at line 543/552.
+                    reacquireRetryCount.set(0);
+                    pendingReacquireEpoch.incrementAndGet();
+                    Runnable staleRetry = pendingReacquireRetry;
+                    pendingReacquireRetry = null;
+                    if (staleRetry != null && glHandler != null) {
+                        try {
+                            glHandler.removeCallbacks(staleRetry);
+                            logger.info("Yield: cancelled pending postDelayed "
+                                + "reacquire retry (fresh yield supersedes prior "
+                                + "failed-reacquire backoff)");
+                        } catch (Throwable th) {
+                            logger.warn("Yield: removeCallbacks errored: "
+                                + th.getMessage());
+                        }
+                    }
                     if (glHandler != null) {
                         glHandler.post(() -> yieldCameraInternal());
                     }
@@ -483,38 +560,34 @@ public class PanoramicCameraGpu {
                     // Native app released camera after contention yield — re-acquire
                     logger.info("REACQUIRE: Native app released camera — reopening");
                     cameraYielded = false;
+                    stopYieldPoller();
+                    // audit avc-yield (round 2): reset retry counter at the
+                    // start of every fresh re-acquire — a successful prior
+                    // cycle should not poison the next yield.
+                    reacquireRetryCount.set(0);
+                    // audit avc-yield (round 7, finding pending-retry-not-cancelled):
+                    // the previous attempt may have scheduled a postDelayed retry
+                    // runnable. If we post a fresh immediate attempt now without
+                    // cancelling it, the stale retry will fire ~2s later and tear
+                    // down the just-resumed camera (extra MP4 split + ~1-3s
+                    // recording gap). Cancel + bump epoch so any in-flight
+                    // runnable that survives the removeCallbacks race short-
+                    // circuits at the epoch-gate.
+                    pendingReacquireEpoch.incrementAndGet();
+                    Runnable stale = pendingReacquireRetry;
+                    pendingReacquireRetry = null;
+                    if (stale != null && glHandler != null) {
+                        try {
+                            glHandler.removeCallbacks(stale);
+                            logger.info("Reacquire (poller path): cancelled "
+                                + "pending postDelayed retry before fresh attempt");
+                        } catch (Throwable th) {
+                            logger.warn("Reacquire: removeCallbacks errored: "
+                                + th.getMessage());
+                        }
+                    }
                     if (glHandler != null) {
-                        glHandler.post(() -> {
-                            try {
-                                startCamera();
-                                if (cameraCoordinator != null && cameraObj != null) {
-                                    cameraCoordinator.resetEventCallbackState();
-                                    cameraCoordinator.setupEventCallback(cameraObj);
-                                }
-                                
-                                // Restart encoder drainer thread — it was stopped during
-                                // onPreYield → stopRecording → closeEventRecording.
-                                // Without this, triggerEventRecording creates a muxer but
-                                // no thread dequeues frames from the encoder to write them.
-                                if (encoder != null) {
-                                    encoder.restartDrainerAfterCameraClose();
-                                }
-                                
-                                // SOTA: Notify pipeline to resume recording
-                                if (yieldListener != null) {
-                                    try {
-                                        yieldListener.onPostReacquire();
-                                        logger.info("Post-reacquire: recording resumed");
-                                    } catch (Exception e) {
-                                        logger.warn("Post-reacquire callback error: " + e.getMessage());
-                                    }
-                                }
-                                
-                                logger.info("Camera re-acquired after contention yield");
-                            } catch (Exception e) {
-                                logger.error("Failed to re-acquire camera: " + e.getMessage());
-                            }
-                        });
+                        glHandler.post(() -> attemptReacquireOnGlThread());
                     }
                 }
 
@@ -1283,6 +1356,10 @@ public class PanoramicCameraGpu {
         if (cameraCoordinator != null && cameraCoordinator.isCameraYielded()) {
             logger.info("Camera yielded to native app — skipping open");
             cameraYielded = true;
+            // Defensive: ensure the yield poller is running. yieldCameraInternal
+            // also starts it, but this path can be hit if startCamera is invoked
+            // while the coordinator already reports yielded (e.g. ACC ON race).
+            startYieldPoller();
             return;
         }
 
@@ -2879,8 +2956,369 @@ public class PanoramicCameraGpu {
         if (encoder != null) {
             encoder.restartDrainerAfterCameraClose();
         }
+
+        // audit avc-yield (round 5): mark the consumer (ImageReader Surface)
+        // as needing recreation — the BYD HAL just released our Surface, so
+        // the FIRST reacquire attempt must re-allocate it, but subsequent
+        // backoff retries should reuse the freshly-created consumer.
+        if (!USE_ESCO_SURFACE_TEXTURE_PATH) {
+            consumerNeedsRecreation = true;
+            logger.info("Yield: marked consumerNeedsRecreation=true for next reacquire");
+        }
+
+        // Start the yield-state re-acquire poller. Without this, nothing
+        // observes the native app closing — the IBYDCameraUser callback path
+        // is disabled and the GL frame-stall watchdog can't fire (lastFrameTime
+        // is frozen because the render loop early-returns while yielded).
+        startYieldPoller();
     }
-    
+
+    /**
+     * GL-thread runnable for the camera re-acquire after a contention yield.
+     *
+     * <p>Extracted from the original onReacquireCamera GL-handler runnable so
+     * that on a transient failure (AVMCamera.open returning false, reflection
+     * NoSuchMethodError, attachSurfaceTextureToCamera failing because the BYD
+     * HAL is still finalising the prior native release) we can re-post the
+     * exact same flow with a backoff schedule rather than relying on the
+     * yield poller to observe a second native-app transition — that
+     * transition was already consumed by the first checkNativeAppActive →
+     * handleNativeAppClosed call, so the poller alone could never recover
+     * (audit avc-yield round 2 RESIDUAL).
+     *
+     * <p>Retry schedule: {@link #REACQUIRE_RETRY_DELAYS_MS} (2 s, 5 s, 10 s).
+     * After all retries fail, self-restart the daemon process via
+     * {@code System.exit(0)} the way the GL watchdog does at line 2400 /
+     * 2767 — wrapper script respawns and full cold-boot warmup runs.
+     */
+    private void attemptReacquireOnGlThread() {
+        // audit avc-yield (round 7, finding pending-retry-not-cancelled):
+        // capture the epoch on entry. The scheduling site (failure catch
+        // below) snapshots epoch into a local closure when it postDelayed-
+        // schedules a retry; that wrapper checks the snapshot vs the
+        // current epoch before invoking us. This top-of-method guard is a
+        // belt-and-braces fence in case a caller reaches us via a non-
+        // wrapped post path. Currently no caller does, but we log to
+        // catch regressions.
+        //
+        // audit avc-yield (round 8, finding yield-mid-backoff-cascades-to-exit):
+        // if a fresh yield is in progress (coordinator reports yielded, or
+        // local cameraYielded flag is true), abort silently. Do NOT close
+        // cameraObj, do NOT call startCamera, do NOT bump
+        // reacquireRetryCount, do NOT schedule retries. The yield poller
+        // (started by yieldCameraInternal) is the authoritative recovery
+        // path during yield. This prevents a Yield #1 backoff retry from
+        // colliding with Yield #2 and counter-bumping into System.exit(0).
+        if ((cameraCoordinator != null && cameraCoordinator.isCameraYielded())
+                || cameraYielded) {
+            logger.info("Reacquire: yield-in-progress detected on entry "
+                + "(coordYielded="
+                + (cameraCoordinator != null && cameraCoordinator.isCameraYielded())
+                + ", localYielded=" + cameraYielded
+                + ") — aborting attempt; yield poller owns recovery");
+            return;
+        }
+        try {
+            // audit avc-yield (round 5, finding belt-and-braces-leak): drop the
+            // retryCount>0 gate. If cameraObj is non-null on entry to a fresh
+            // reacquire (e.g. a belt-and-braces poller restart raced with the
+            // first attempt and we re-entered with an already-open handle), we
+            // must always close+null it to avoid leaking a second cameraObj.
+            if (cameraObj != null) {
+                Object stale = cameraObj;
+                cameraObj = null;
+                logger.warn("Reacquire (attempt=" + reacquireRetryCount.get()
+                    + "): clearing stale cameraObj before startCamera (always-close)");
+                try {
+                    closeCameraForPath(stale);
+                } catch (Throwable th) {
+                    logger.warn("Reacquire: closeCameraForPath on stale obj errored: "
+                        + th.getMessage());
+                }
+            }
+
+            // audit avc-yield (round 3, finding 8): on the legacy ImageReader
+            // path the BYD HAL won't deliver continuous frames to a Surface
+            // that was previously connected to a different camera instance —
+            // only the first frame arrives, then the stream freezes (~5s
+            // before the stall watchdog kicks restartCameraAfterError). Mirror
+            // restartCameraAfterError's recreateCameraSurface() step so the
+            // post-yield reacquire is self-healing instead of structurally
+            // dropping ~5-10s of recording every contention cycle.
+            // SurfaceTexture path (dilink4) is gated out at the top of this
+            // file's slice constraints; recreateCameraSurface itself routes
+            // by USE_ESCO_SURFACE_TEXTURE_PATH so it stays safe either way.
+            // audit avc-yield (round 5, finding consumer-recreate-every-attempt):
+            // gate on consumerNeedsRecreation — only the first attempt of a
+            // yield cycle needs the recreate; backoff retries reuse the just-
+            // created consumer.
+            if (!USE_ESCO_SURFACE_TEXTURE_PATH && consumerNeedsRecreation) {
+                try {
+                    logger.info("Reacquire: recreating ImageReader consumer "
+                        + "before reopen (legacy HAL frozen-frame guard)");
+                    recreateCameraSurface();
+                    consumerNeedsRecreation = false;
+                    lastGlThreadHeartbeat = System.currentTimeMillis();
+                } catch (Throwable th) {
+                    logger.warn("Reacquire: recreateCameraSurface failed — "
+                        + "proceeding with stale consumer: " + th.getMessage());
+                }
+            } else if (!USE_ESCO_SURFACE_TEXTURE_PATH) {
+                logger.info("Reacquire: skipping consumer recreate "
+                    + "(consumerNeedsRecreation=false, retry attempt)");
+            }
+
+            startCamera();
+            // audit avc-yield (round 3, finding 10): startCamera early-returns
+            // (no throw) when cameraCoordinator.isCameraYielded() is true,
+            // leaving cameraObj==null. Treat that as failure here so the
+            // backoff/retry path runs instead of silently returning success
+            // with a null camera handle.
+            if (cameraObj == null) {
+                throw new IllegalStateException(
+                    "startCamera returned without opening (cameraObj==null) — "
+                    + "likely yielded gate hit; treating as reacquire failure");
+            }
+            if (cameraCoordinator != null && cameraObj != null) {
+                cameraCoordinator.resetEventCallbackState();
+                cameraCoordinator.setupEventCallback(cameraObj);
+            }
+
+            // Restart encoder drainer thread — it was stopped during
+            // onPreYield → stopRecording → closeEventRecording.
+            // Without this, triggerEventRecording creates a muxer but
+            // no thread dequeues frames from the encoder to write them.
+            if (encoder != null) {
+                encoder.restartDrainerAfterCameraClose();
+            }
+
+            // SOTA: Notify pipeline to resume recording
+            if (yieldListener != null) {
+                try {
+                    yieldListener.onPostReacquire();
+                    logger.info("Post-reacquire: recording resumed");
+                } catch (Exception e) {
+                    logger.warn("Post-reacquire callback error: " + e.getMessage());
+                }
+            }
+
+            // Success — reset retry budget for the next yield cycle.
+            int finalCount = reacquireRetryCount.get();
+            if (finalCount > 0) {
+                logger.info("Camera re-acquired after " + finalCount
+                    + " retry attempt(s)");
+            } else {
+                logger.info("Camera re-acquired after contention yield");
+            }
+            reacquireRetryCount.set(0);
+            // audit avc-yield (round 7, finding pending-retry-not-cancelled):
+            // a prior failed attempt in this cycle may have scheduled a
+            // postDelayed retry. Now that we've succeeded, cancel any pending
+            // retry runnable AND bump the epoch so any runnable that survives
+            // the removeCallbacks race short-circuits at the epoch gate
+            // (avoids spurious double-teardown of the just-resumed camera).
+            pendingReacquireEpoch.incrementAndGet();
+            Runnable staleRetry = pendingReacquireRetry;
+            pendingReacquireRetry = null;
+            if (staleRetry != null && glHandler != null) {
+                try {
+                    glHandler.removeCallbacks(staleRetry);
+                    logger.info("Reacquire success: cancelled pending "
+                        + "postDelayed retry runnable");
+                } catch (Throwable th) {
+                    logger.warn("Reacquire success: removeCallbacks errored: "
+                        + th.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            int attemptIdx = reacquireRetryCount.get();
+            logger.error("Failed to re-acquire camera (attempt " + attemptIdx
+                + "): " + e.getMessage());
+
+            // audit avc-yield (round 8, finding yield-mid-backoff-cascades-to-exit):
+            // belt-and-braces — if a fresh yield landed during the body
+            // above (e.g. native app re-engaged just before we threw the
+            // "yielded gate hit" sentinel), do NOT bump counter and do NOT
+            // schedule a retry. Let the yield poller drive recovery. Without
+            // this, the failure path here would still cascade to System.exit
+            // even if the top-of-method gate raced ahead.
+            if ((cameraCoordinator != null && cameraCoordinator.isCameraYielded())
+                    || cameraYielded) {
+                logger.warn("Reacquire: failure caught while yielded "
+                    + "(coordYielded="
+                    + (cameraCoordinator != null && cameraCoordinator.isCameraYielded())
+                    + ", localYielded=" + cameraYielded
+                    + ") — suppressing retry schedule; yield poller owns recovery");
+                return;
+            }
+
+            if (attemptIdx < REACQUIRE_RETRY_DELAYS_MS.length) {
+                long delay = REACQUIRE_RETRY_DELAYS_MS[attemptIdx];
+                // audit avc-yield (round 5, finding cross-thread-race):
+                // CAS-bump the counter. If a peer thread (onReacquireCamera
+                // listener) already reset to 0, our CAS fails — that's OK,
+                // the reset path will own scheduling.
+                boolean bumped = reacquireRetryCount.compareAndSet(
+                    attemptIdx, attemptIdx + 1);
+                if (!bumped) {
+                    logger.warn("Reacquire: CAS bump failed (attempt=" + attemptIdx
+                        + ", current=" + reacquireRetryCount.get()
+                        + ") — concurrent reset detected, skipping retry schedule");
+                    return;
+                }
+                logger.warn("Reacquire scheduling backoff retry "
+                    + reacquireRetryCount.get() + "/" + REACQUIRE_RETRY_DELAYS_MS.length
+                    + " in " + delay + "ms");
+                if (glHandler != null && running) {
+                    // audit avc-yield (round 7, finding pending-retry-not-cancelled):
+                    // capture epoch snapshot + store runnable handle so a
+                    // poller-driven success path (onReacquireCamera) or a
+                    // sibling success path can cancel us before we re-enter
+                    // and unconditionally tear down the just-resumed camera.
+                    final int scheduledEpoch = pendingReacquireEpoch.get();
+                    Runnable retryRunnable = new Runnable() {
+                        @Override
+                        public void run() {
+                            int currentEpoch = pendingReacquireEpoch.get();
+                            if (currentEpoch != scheduledEpoch) {
+                                logger.info("Reacquire backoff retry: epoch "
+                                    + "mismatch (scheduled=" + scheduledEpoch
+                                    + ", current=" + currentEpoch
+                                    + ") — superseded by poller/success path,"
+                                    + " skipping stale retry");
+                                return;
+                            }
+                            // Clear our own handle before running so a peer
+                            // cancellation observes null instead of stale.
+                            if (pendingReacquireRetry == this) {
+                                pendingReacquireRetry = null;
+                            }
+                            attemptReacquireOnGlThread();
+                        }
+                    };
+                    pendingReacquireRetry = retryRunnable;
+                    glHandler.postDelayed(retryRunnable, delay);
+                } else {
+                    logger.warn("Reacquire: glHandler null or pipeline stopped — "
+                        + "cannot schedule retry");
+                }
+                // Also restart poller as belt-and-braces last-ditch path.
+                // Audit notes this likely won't fire (edge already consumed),
+                // but it costs nothing and protects against the corner case
+                // where the native app re-opens and re-closes the camera
+                // during our backoff window.
+                //
+                // audit avc-yield (round 9, finding
+                // round-8-yield-gate-deadlocks-retry): do NOT set
+                // cameraYielded=true here. The round-8 entry gate at the
+                // top of attemptReacquireOnGlThread aborts when
+                // cameraYielded is true; setting it here would deadlock our
+                // own postDelayed retry runnable (scheduled just above) the
+                // moment it fires. The poller's `while (cameraYielded ...)`
+                // guard means it exits immediately if cameraYielded is
+                // false, which is correct — the postDelayed runnable is the
+                // primary recovery path, the poller is fallback only.
+                logger.info("Reacquire scheduled retry — NOT setting cameraYielded; postDelayed runnable is the primary recovery path");
+                try {
+                    startYieldPoller();
+                } catch (Throwable th) {
+                    logger.warn("Reacquire: poller fallback start errored: "
+                        + th.getMessage());
+                }
+            } else {
+                // All retries exhausted — give up and let the watchdog
+                // wrapper respawn the daemon. Mirrors line 2400/2767 GL
+                // watchdog escape hatch.
+                logger.error("Reacquire: all "
+                    + REACQUIRE_RETRY_DELAYS_MS.length
+                    + " retries exhausted — exiting daemon for wrapper respawn");
+                reacquireRetryCount.set(0);
+                try {
+                    System.exit(0);
+                } catch (Throwable th) {
+                    logger.warn("System.exit(0) failed: " + th.getMessage());
+                }
+                // audit avc-yield (round 5, finding system-exit-failure):
+                // belt-and-braces hard fallback. If System.exit(0) was
+                // intercepted (SecurityManager) or returned without effect,
+                // halt(0) bypasses shutdown hooks entirely. Last-resort
+                // killProcess(myPid) if even halt is blocked.
+                try {
+                    logger.warn("Reacquire: System.exit(0) returned — "
+                        + "invoking Runtime.halt(0) hard fallback");
+                    Runtime.getRuntime().halt(0);
+                } catch (Throwable th) {
+                    logger.warn("Runtime.halt(0) failed: " + th.getMessage());
+                }
+                try {
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                } catch (Throwable th) {
+                    logger.warn("Process.killProcess(myPid) failed: " + th.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Spawns a daemon thread that polls BydCameraCoordinator.checkNativeAppActive()
+     * every 5 s while {@code cameraYielded == true}. checkNativeAppActive's
+     * polling branch fires handleNativeAppClosed → onReacquireCamera when the
+     * native app releases the camera, which clears cameraYielded and re-opens
+     * via the GL handler. The poller exits as soon as cameraYielded flips
+     * false (i.e. the re-acquire path took over) or running flips false (stop).
+     */
+    private void startYieldPoller() {
+        Thread existing = yieldPollerThread;
+        if (existing != null && existing.isAlive()) return;
+        Thread t = new Thread(() -> {
+            logger.info("Yield poller started — will check native app every "
+                + YIELD_POLL_INTERVAL_MS + "ms");
+            while (cameraYielded && running && !Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(YIELD_POLL_INTERVAL_MS);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+                if (!cameraYielded) return;
+                try {
+                    if (cameraCoordinator != null) {
+                        // checkNativeAppActive is the live polling path. When
+                        // the native app releases the camera it internally
+                        // calls handleNativeAppClosed → onReacquireCamera,
+                        // which posts startCamera() to the GL handler and
+                        // clears cameraYielded. Loop will then exit.
+                        boolean active = cameraCoordinator.checkNativeAppActive();
+                        if (!active) {
+                            logger.info("Yield poller: native app no longer active — re-acquire path triggered");
+                            // checkNativeAppActive already fired the re-acquire
+                            // when transitioning active→inactive. Exit; the
+                            // re-acquire callback will null this thread.
+                            return;
+                        }
+                    }
+                } catch (Throwable th) {
+                    logger.warn("Yield poller error: " + th.getMessage());
+                }
+            }
+            logger.info("Yield poller exiting (yielded=" + cameraYielded + ", running=" + running + ")");
+        }, "PanoYieldPoller");
+        t.setDaemon(true);
+        yieldPollerThread = t;
+        t.start();
+    }
+
+    /**
+     * Interrupts and clears the yield poller. Called when cameraYielded flips
+     * false (re-acquire) or when the pipeline is stopped.
+     */
+    private void stopYieldPoller() {
+        Thread t = yieldPollerThread;
+        if (t != null) {
+            t.interrupt();
+            yieldPollerThread = null;
+        }
+    }
+
     /**
      * SOTA: Restarts the camera after a HAL error event or frame stall.
      * 
@@ -2897,6 +3335,28 @@ public class PanoramicCameraGpu {
             return;
         }
         logger.info("Restarting camera after error/stall...");
+
+        // audit avc-yield (round 3, finding 9): a stickily-true coordinator
+        // yielded flag (e.g. left over from a prior cycle whose
+        // active→inactive edge was masked by a binder-error short-circuit at
+        // BydCameraCoordinator.checkNativeAppActive's catch path) would make
+        // startCamera() early-return at line ~1285 without throwing. The open
+        // thread below would then set openSuccess[0]=true with cameraObj==null,
+        // and we'd "successfully" finish a restart with no live camera. Clear
+        // the sticky yield up front: this is the error-recovery path; if a
+        // native app is genuinely active, the very next reacquire poll will
+        // re-set yielded. If it isn't (binder-error stickiness), we recover
+        // immediately instead of waiting for ACC OFF→ON.
+        if (cameraCoordinator != null && cameraCoordinator.isCameraYielded()) {
+            logger.warn("Restart: clearing sticky coordinator yielded flag "
+                + "before reopen (avoid silent startCamera no-op)");
+            try {
+                cameraCoordinator.clearYieldedForRestart();
+            } catch (Throwable th) {
+                logger.warn("Restart: clearYieldedForRestart errored: "
+                    + th.getMessage());
+            }
+        }
 
         try {
             // CRITICAL: Finalize active recording BEFORE closing camera.
@@ -2961,25 +3421,30 @@ public class PanoramicCameraGpu {
             Thread cameraOpenThread = new Thread(() -> {
                 try {
                     startCamera();
-                    openSuccess[0] = true;
+                    // audit avc-yield (round 3, finding 10): startCamera can
+                    // early-return without throwing when the coordinator
+                    // reports yielded; cameraObj==null then "succeeds" by
+                    // accident. Treat success as "did not throw AND cameraObj
+                    // is live" so the outer recovery path actually runs.
+                    openSuccess[0] = (cameraObj != null);
                 } catch (Exception e) {
                     openError[0] = e;
                 }
             }, "CameraReopen");
             cameraOpenThread.start();
-            
+
             // Wait up to 2 seconds for camera to open, updating heartbeat periodically
             long openStart = System.currentTimeMillis();
             long openTimeout = 2000;
-            while (cameraOpenThread.isAlive() && 
+            while (cameraOpenThread.isAlive() &&
                    (System.currentTimeMillis() - openStart) < openTimeout) {
                 Thread.sleep(200);
                 lastGlThreadHeartbeat = System.currentTimeMillis();
             }
-            
+
             if (!openSuccess[0]) {
                 if (cameraOpenThread.isAlive()) {
-                    logger.warn("Camera open timed out after " + openTimeout + 
+                    logger.warn("Camera open timed out after " + openTimeout +
                         "ms — will retry on next stall cycle");
                     // Don't interrupt — let it finish in background, watchdog won't kill us
                     // because heartbeat is still updating
@@ -2987,6 +3452,16 @@ public class PanoramicCameraGpu {
                 }
                 if (openError[0] != null) {
                     throw openError[0];
+                }
+                // audit avc-yield (round 3, finding 10): no throw but
+                // cameraObj is still null — startCamera short-circuited.
+                // Surface the failure so the outer catch logs and the GL
+                // watchdog gets a chance to escalate, instead of pretending
+                // the restart succeeded with a dead camera handle.
+                if (cameraObj == null) {
+                    throw new IllegalStateException(
+                        "startCamera returned without opening (cameraObj==null) — "
+                        + "treating restart as failed");
                 }
             }
             
@@ -3036,6 +3511,9 @@ public class PanoramicCameraGpu {
             watchdogThread.interrupt();
             watchdogThread = null;
         }
+
+        // Stop yield poller (if a yield is in-flight when stop() races in)
+        stopYieldPoller();
         
         // FORTIFY FIX: Stop encoder drainer threads BEFORE closing camera
         if (encoder != null) {

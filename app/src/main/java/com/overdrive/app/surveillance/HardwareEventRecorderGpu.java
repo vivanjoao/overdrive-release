@@ -203,6 +203,15 @@ public class HardwareEventRecorderGpu {
     // on weak-memory ARM cores the trigger could spin the full 2 s on a stale
     // null even after the drainer published the format.
     private volatile MediaFormat savedFormat = null;  // Save format for reuse
+
+    // FIX (audit R5): timestamp of last successful encoded-output dequeue.
+    // RMM's wedge ticker reads this via getLastEncodedFrameMs() to detect
+    // encoder hangs that don't surface through isRunning()/isRecording()
+    // (e.g. MediaCodec drainer alive but no frames coming out). Updated
+    // only on real coded frames (outputBufferIndex >= 0 with bufferInfo.size > 0
+    // and not CODEC_CONFIG); INFO_TRY_AGAIN_LATER and INFO_OUTPUT_FORMAT_CHANGED
+    // do not update it.
+    private volatile long lastEncodedFrameMs = 0L;
     
     // Pre-record ring buffer.
     // SOTA: byte-ring (single contiguous direct ByteBuffer) shared across encoder
@@ -2853,6 +2862,17 @@ public class HardwareEventRecorderGpu {
     }
 
     /**
+     * FIX (audit R5): RMM's wedge ticker calls this through
+     * GpuSurveillancePipeline.getLastEncodedFrameMs() to spot encoder hangs
+     * that don't surface in isRunning()/isRecording(). Returns 0 if no
+     * coded frame has been dequeued yet (e.g. before format-available);
+     * callers must treat 0 as "no signal yet" and skip the wedge check.
+     */
+    public long getLastEncodedFrameMs() {
+        return lastEncodedFrameMs;
+    }
+
+    /**
      * @return true if the pre-record byte ring is allocated and active for
      *         this encoder. False if the encoder is stream-only or if the
      *         byte-ring allocation failed (OOM at boot — see init()'s
@@ -3514,6 +3534,25 @@ public class HardwareEventRecorderGpu {
             logger.warn("Writer aborted — stopping recording, no rotation");
             isWritingToFile = false;
             recording = false;
+            // FIX (audit R2): also propagate the abort up to the wrapper so
+            // GpuMosaicRecorder.recording flips false and StorageManager's
+            // recordingActive sentinel clears. Without this, RMM's wedge
+            // detector continues to read pipeline.isRecording()==true (from
+            // the wrapper) even though the encoder side has already given up,
+            // and the SD-watchdog's pendingOutputDirOverride never gets
+            // consumed because activateMode short-circuits on
+            // !shouldRetryActivation.
+            try {
+                WriterAbortListener cb = writerAbortListener;
+                if (cb != null) {
+                    String reason = writerAbortedErrorMessage != null
+                        ? writerAbortedErrorMessage
+                        : "rotation aborted (writerAbortedCorrupt latched)";
+                    cb.onWriterAborted(reason);
+                }
+            } catch (Throwable cbErr) {
+                logger.warn("WriterAbortListener (rotation path) threw: " + cbErr.getMessage());
+            }
             return 0;
         }
         if (isWritingToFile && segmentStartTime > 0 && drainerRunning && diskWriterRunning
@@ -3653,6 +3692,10 @@ public class HardwareEventRecorderGpu {
                 if (outputBuffer != null && bufferInfo.size > 0) {
                     // FIX H1: a real coded frame — count it for adaptive backoff.
                     framesDrained++;
+                    // FIX (audit R5): stamp last-encoded timestamp for the
+                    // wedge ticker. Real coded frames only (CODEC_CONFIG
+                    // already filtered above).
+                    lastEncodedFrameMs = System.currentTimeMillis();
                     // ALWAYS add to circular buffer (for pre-record) - unless stream-only mode
                     if (usePreRecordBuffer && preRecordBuffer != null) {
                         preRecordBuffer.add(outputBuffer, bufferInfo);

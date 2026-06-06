@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title data-i18n="app.road_sense_title">RoadSense - OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=4"></script>
+    <script src="../shared/app-shell.js"></script>
+    <!--
+      Bottom-tab manifest. Four tabs grouping the RoadSense settings cards:
+        General      — master enable + calibration mode
+        Warnings     — warn enable + mode + lead-time + confidence + per-severity chimes
+        Crowdsource  — independent upload / download toggles + advanced worker URL
+        Data         — destructive delete actions (local + cloud calibrations)
+      All config keys live in the UCM `roadSense` section read by
+      RoadSenseConfig.kt. Cards are tagged via `data-tab` on each <div class="card">.
+    -->
+    <script>
+        window.OT_TABS = [
+            { id: 'general',     label: 'General',     i18n: 'road_sense.tab_general',     svg: '<path d="M12 3v6"/><path d="M12 12h.01"/><path d="M7 21l3-7"/><path d="M17 21l-3-7"/><path d="M12 21v-2"/><path d="M12 17.5v-2"/>' },
+            { id: 'warnings',    label: 'Warnings',    i18n: 'road_sense.tab_warnings',    svg: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
+            { id: 'crowdsource', label: 'Crowdsource', i18n: 'road_sense.tab_crowdsource', svg: '<path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/>' },
+            { id: 'data',        label: 'Data',        i18n: 'road_sense.tab_data',        svg: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>' }
+        ];
+    </script>
+    <script src="../shared/app-tabs.js"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js) -->
+        <div id="app-shell-mount"></div>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+                    </svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="nav.road_sense">RoadSense</span>
+                <div style="width:40px;"></div>
+            </div>
+
+            <header class="page-header">
+                <h1 class="page-title" data-i18n="road_sense.page_title">RoadSense Settings</h1>
+            </header>
+
+            <div class="page-body">
+                <!-- Master Enable -->
+                <div class="card" data-tab="general">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v6"/><path d="M12 12h.01"/><path d="M7 21l3-7"/><path d="M17 21l-3-7"/><path d="M12 21v-2"/><path d="M12 17.5v-2"/></svg>
+                            <span data-i18n="road_sense.master_title">RoadSense</span>
+                        </div>
+                        <span class="status-badge inactive" id="rsStatusBadge" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.master_enable">Enable RoadSense</div>
+                                <div class="setting-desc" data-i18n="road_sense.master_enable_desc">Detects road hazards (bumps, potholes, speed breakers) from motion and GPS, and warns you ahead of known ones. All other RoadSense settings only take effect while this is on.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsEnabled" onchange="RoadSenseSettings.toggleEnabled()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calibration Mode -->
+                <div class="card" data-tab="general">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                            <span data-i18n="road_sense.calibration_title">Calibration Mode</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.calibration_enable">Confirm detections in the overlay</div>
+                                <div class="setting-desc" data-i18n="road_sense.calibration_enable_desc">Shows each detected hazard on the screen overlay with confirm / correct buttons so you can teach RoadSense which detections are real. Use this for a few drives to tune detection for your vehicle, then turn it off.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsCalibrationMode" onchange="RoadSenseSettings.toggleCalibrationMode()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Warnings -->
+                <div class="card" data-tab="warnings">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            <span data-i18n="road_sense.warn_title">Warnings</span>
+                        </div>
+                        <span class="status-badge inactive" id="rsWarnBadge" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.warn_enable">Warn ahead of known hazards</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_enable_desc">Alert you as you approach a hazard RoadSense already knows about on your route.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsWarnEnabled" onchange="RoadSenseSettings.toggleWarnEnabled()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Warn delivery mode: visual / audio / both -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.warn_mode">Warning Style</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_mode_desc">How the warning is delivered when a hazard is ahead.</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="btn-group" id="rsWarnModeBtns">
+                                    <button class="btn-toggle" data-value="visual" onclick="RoadSenseSettings.setWarnMode('visual')" data-i18n="road_sense.warn_mode_visual">Visual</button>
+                                    <button class="btn-toggle" data-value="audio" onclick="RoadSenseSettings.setWarnMode('audio')" data-i18n="road_sense.warn_mode_audio">Audio</button>
+                                    <button class="btn-toggle" data-value="both" onclick="RoadSenseSettings.setWarnMode('both')" data-i18n="road_sense.warn_mode_both">Both</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Lead time -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.warn_lead">Lead Time</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_lead_desc">How many seconds before the hazard the warning fires. Higher gives more reaction time; lower fires closer to the hazard.</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="slider-control">
+                                    <span class="slider-value" id="rsWarnLeadValue">4s</span>
+                                    <input type="range" class="slider" id="rsWarnLeadSlider" min="2" max="8" step="1" value="4" oninput="RoadSenseSettings.updateWarnLead(this.value)">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
+                            <span data-i18n="road_sense.warn_lead_min">2s</span>
+                            <span data-i18n="road_sense.warn_lead_max">8s</span>
+                        </div>
+
+                        <!-- Warn confidence threshold -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.warn_conf">Minimum Confidence</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_conf_desc">Only warn about hazards RoadSense is at least this sure of. 0 warns about everything it knows; higher values suppress low-confidence hazards.</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="slider-control">
+                                    <span class="slider-value" id="rsWarnConfValue">0%</span>
+                                    <input type="range" class="slider" id="rsWarnConfSlider" min="0" max="100" step="1" value="0" oninput="RoadSenseSettings.updateWarnConf(this.value)">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
+                            <span data-i18n="road_sense.warn_conf_min">0%</span>
+                            <span data-i18n="road_sense.warn_conf_max">100%</span>
+                        </div>
+
+                        <!-- Per-severity chime toggles -->
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.warn_severity_title">Warn by Severity</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_severity_desc">Choose which hazard severities trigger a warning. Disable minor ones if you only want alerts for the worst hazards.</div>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="padding:8px 0;">
+                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_minor">Minor</div></div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsSeverityMinor" onchange="RoadSenseSettings.toggleSeverity('minor')">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="padding:8px 0;">
+                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_moderate">Moderate</div></div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsSeverityModerate" onchange="RoadSenseSettings.toggleSeverity('moderate')">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="border-bottom:none;padding:8px 0;">
+                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_severe">Severe</div></div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsSeveritySevere" onchange="RoadSenseSettings.toggleSeverity('severe')">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Crowdsource -->
+                <div class="card" data-tab="crowdsource">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/></svg>
+                            <span data-i18n="road_sense.crowd_title">Crowdsource</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-box-note">
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <div class="info-note" data-i18n="road_sense.crowd_note">By default RoadSense keeps everything on this device. Upload and download are separate — turning one on does not turn on the other.</div>
+                        </div>
+                        <!-- Upload -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.crowd_upload">Upload my detections</div>
+                                <div class="setting-desc" data-i18n="road_sense.crowd_upload_desc">Sends anonymized hazard detections off-device to improve the shared map. Off by default — RoadSense is on-device-only until you enable this.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsCrowdUpload" onchange="RoadSenseSettings.toggleCrowdUpload()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Download -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.crowd_download">Download shared hazards</div>
+                                <div class="setting-desc" data-i18n="road_sense.crowd_download_desc">Pulls hazards reported by other drivers so you get warned about hazards you haven't driven over yet. Off by default.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsCrowdDownload" onchange="RoadSenseSettings.toggleCrowdDownload()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Advanced: worker URL. Long-value field → label/desc on
+                             top, full-width input below (a URL squeezed into the
+                             narrow side control reads cramped and clips). -->
+                        <div class="setting-stack" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.crowd_worker_url">Sync worker URL</div>
+                                <div class="setting-desc" data-i18n="road_sense.crowd_worker_url_desc">Optional. Point upload/download at your own sync worker instead of the default endpoint.</div>
+                            </div>
+                            <input type="url" id="rsSyncWorkerUrl" class="text-input" inputmode="url" placeholder="https://roadsense.example.workers.dev" onchange="RoadSenseSettings.saveWorkerUrl()" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Data -->
+                <div class="card" data-tab="data">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                            <span data-i18n="road_sense.data_title">Calibration Data</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Delete local calibrations -->
+                        <div class="setting-row">
+                            <div class="setting-info" style="flex:1 1 auto;">
+                                <div class="setting-name" data-i18n="road_sense.delete_local_title">Delete local calibrations</div>
+                                <div class="setting-desc" data-i18n="road_sense.delete_local_desc">Removes the hazard detections and calibrations stored on this device. Cannot be undone.</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-danger" id="rsDeleteLocalBtn" onclick="RoadSenseSettings.deleteLocal()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    <span data-i18n="road_sense.delete_local_btn">Delete local</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Delete cloud calibrations -->
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info" style="flex:1 1 auto;">
+                                <div class="setting-name" data-i18n="road_sense.delete_cloud_title">Delete cloud calibrations</div>
+                                <div class="setting-desc" data-i18n="road_sense.delete_cloud_desc">Removes the detections you uploaded from the shared cloud map. Other drivers' data is unaffected. Cannot be undone.</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-danger" id="rsDeleteCloudBtn" onclick="RoadSenseSettings.deleteCloud()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/><line x1="9.5" y1="13.5" x2="14.5" y2="18.5"/><line x1="14.5" y1="13.5" x2="9.5" y2="18.5"/></svg>
+                                    <span data-i18n="road_sense.delete_cloud_btn">Delete cloud</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/core.js"></script>
+    <script src="../shared/update-flow.js"></script>
+    <script src="../shared/road-sense.js"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        BYD.i18n.init().then(function () {
+            BYD.core.init();
+            RoadSenseSettings.init();
+        });
+    </script>
+</body>
+</html>

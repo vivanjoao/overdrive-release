@@ -147,6 +147,40 @@
         <item name="android:textAllCaps">false</item>
     </style>
 
+    <!-- PIN unlock keypad (PinLockActivity). M3 tonal circular key with
+         a soft surface-container fill — bright enough to read in daylight
+         on the BYD panel, calm enough to not visually dominate the dot
+         indicator above. Insets zeroed because the GridLayout cell margin
+         already provides the gap between keys. -->
+    <style name="Widget.Overdrive.M3.PinKey" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:layout_width">@dimen/pin_key_size</item>
+        <item name="android:layout_height">@dimen/pin_key_size</item>
+        <item name="android:layout_margin">@dimen/pin_key_margin</item>
+        <item name="android:textSize">@dimen/pin_key_text_size</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">?attr/colorOnSecondaryContainer</item>
+        <item name="android:fontFamily">sans-serif-light</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">@dimen/pin_key_corner</item>
+        <item name="backgroundTint">?attr/colorSecondaryContainer</item>
+        <item name="rippleColor">?attr/colorOnSecondaryContainer</item>
+    </style>
+
+    <!-- Icon-only action key (backspace). Inherits the tonal-key sizing
+         but draws a centred icon instead of text. iconGravity=textTop +
+         android:gravity=center keeps the glyph centred in the circle
+         (a textStart gravity with empty text would left-align the icon). -->
+    <style name="Widget.Overdrive.M3.PinKey.Action" parent="Widget.Overdrive.M3.PinKey">
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconGravity">textTop</item>
+        <item name="iconPadding">0dp</item>
+        <item name="iconSize">26dp</item>
+        <item name="android:gravity">center</item>
+    </style>
+
     <!-- Toolbar -->
     <style name="Widget.Overdrive.M3.Toolbar" parent="Widget.Material3.Toolbar">
         <item name="android:background">?attr/colorSurface</item>

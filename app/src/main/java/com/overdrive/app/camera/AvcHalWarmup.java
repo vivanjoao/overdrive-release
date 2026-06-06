@@ -79,6 +79,44 @@ public class AvcHalWarmup {
     private volatile Thread keepAliveThread;
     private volatile boolean active = false;
 
+    /**
+     * Tracks consecutive failed launch attempts (instance scope — warmupAndWait
+     * + keep-alive ticks). After {@link #LAUNCH_FAILURE_ESCALATE_THRESHOLD}
+     * consecutive failures we escalate to a force-stop + restart of
+     * com.byd.avc to recover from a wedged HAL co-consumer state.
+     *
+     * <p>Reset to 0 after a successful launch OR after an escalation runs.
+     * Legacy fleet only — dilink4 doesn't launch AVC at all.
+     */
+    private int consecutiveLaunchFailures = 0;
+
+    /**
+     * Counter for static {@link #ensureAvcAlive()} keep-alive callers
+     * (AccSentryDaemon, CameraDaemon mode tick). Static because the method
+     * is static and may be invoked from contexts that don't own an
+     * AvcHalWarmup instance. Same semantics as the instance counter.
+     */
+    private static int staticConsecutiveLaunchFailures = 0;
+
+    /** Threshold for escalating to force-stop + restart. */
+    private static final int LAUNCH_FAILURE_ESCALATE_THRESHOLD = 3;
+
+    /**
+     * Minimum interval between consecutive force-stop + restart escalations
+     * (audit avc-yield "forceRestartAvc self-evicts legitimate co-consumer").
+     * On low-mem-killer pressure, am-start can flake every 180s. Without a
+     * cooldown each escalation force-stops com.byd.avc, which cascades into
+     * pano onCameraError + full close+reopen. 5min cap keeps recovery
+     * possible while preventing churn against a structural flake.
+     */
+    private static final long FORCE_RESTART_COOLDOWN_MS = 5L * 60_000L;
+
+    /** Last forceRestartAvc time (instance scope). 0 = never. */
+    private long lastForceRestartMs = 0L;
+
+    /** Last forceRestartAvcStatic time (static scope). 0 = never. */
+    private static volatile long lastForceRestartStaticMs = 0L;
+
     public AvcHalWarmup() {
     }
 
@@ -110,7 +148,18 @@ public class AvcHalWarmup {
 
         logger.info("Warming up camera HAL via com.byd.avc (waiting " +
             HAL_WARMUP_DELAY_MS + "ms)...");
-        launchAvc();
+        boolean launched = launchAvc();
+        if (launched) {
+            consecutiveLaunchFailures = 0;
+        } else {
+            consecutiveLaunchFailures++;
+            if (consecutiveLaunchFailures >= LAUNCH_FAILURE_ESCALATE_THRESHOLD) {
+                logger.warn("warmupAndWait: " + consecutiveLaunchFailures
+                    + " consecutive AVC launch failures — escalating to force-stop+restart");
+                forceRestartAvc();
+                consecutiveLaunchFailures = 0;
+            }
+        }
 
         try {
             Thread.sleep(HAL_WARMUP_DELAY_MS);
@@ -164,7 +213,18 @@ public class AvcHalWarmup {
                 }
                 logger.info("Keep-alive: re-launching com.byd.avc (accOn=" +
                     AccMonitor.isAccOn() + ")");
-                launchAvc();
+                boolean launched = launchAvc();
+                if (launched) {
+                    consecutiveLaunchFailures = 0;
+                } else {
+                    consecutiveLaunchFailures++;
+                    if (consecutiveLaunchFailures >= LAUNCH_FAILURE_ESCALATE_THRESHOLD) {
+                        logger.warn("Keep-alive: " + consecutiveLaunchFailures
+                            + " consecutive AVC launch failures — escalating to force-stop+restart");
+                        forceRestartAvc();
+                        consecutiveLaunchFailures = 0;
+                    }
+                }
             }
 
             logger.info("AVC keep-alive watchdog stopped");
@@ -203,16 +263,139 @@ public class AvcHalWarmup {
      * Runs as UID 2000 (shell) — has permission to launch activities.
      * Uses FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_NO_ANIMATION to avoid
      * bringing it to the foreground or showing any visual disruption.
+     *
+     * @return true if {@code am start} exited 0, false on any non-zero exit
+     *         OR exception. Used by caller to drive the legacy
+     *         force-stop+restart escalation when AVC wedges its HAL
+     *         co-consumer state.
      */
-    private void launchAvc() {
+    private boolean launchAvc() {
+        // audit avc-yield (round 7, finding stuck-warmup-pins-warmupInFlight):
+        // Process.waitFor() with no timeout can block forever if system_server /
+        // ActivityManagerService is wedged or binder is back-pressured under
+        // memory pressure. Because launchAvc is called inside the warmup
+        // worker thread spawned by RecordingModeManager.activateModeWithWarmup,
+        // a hung waitFor pins warmupInFlight=true forever (finally never runs)
+        // → all subsequent activations / wedge-retries / gear handlers
+        // CAS-coalesce and silently succeed-no-op. The only recovery is
+        // daemon respawn — exactly the wedge type this audit hunts for.
+        // Cap the wait at 5 s and destroyForcibly() on timeout. Worst case:
+        // we report a launch failure (caller's existing failure counter
+        // triggers the legacy force-restart escalation a few ticks later).
+        Process process = null;
         try {
-            Process process = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
-            int exitCode = process.waitFor();
+            process = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
+            boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                logger.warn("am start com.byd.avc did not exit within 5s — "
+                    + "destroyForcibly + treating as failure (avoids "
+                    + "warmupInFlight pin)");
+                try {
+                    process.destroyForcibly();
+                } catch (Throwable th) {
+                    logger.warn("destroyForcibly errored: " + th.getMessage());
+                }
+                return false;
+            }
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
                 logger.warn("am start com.byd.avc exited with code " + exitCode);
+                return false;
             }
+            return true;
         } catch (Exception e) {
             logger.warn("Failed to launch com.byd.avc: " + e.getMessage());
+            if (process != null) {
+                try { process.destroyForcibly(); } catch (Throwable ignored) {}
+            }
+            return false;
+        }
+    }
+
+    /**
+     * LEGACY-ONLY escalation: force-stop com.byd.avc, brief settle, then
+     * relaunch. Used when {@link #consecutiveLaunchFailures} crosses the
+     * threshold — re-poking a wedged process won't unstick it, but a
+     * full kill+respawn forces the system to rebuild the HAL co-consumer
+     * registration cleanly.
+     *
+     * <p>Self-gates on dilink4: dilink4 cooperates with AVC and we never
+     * want to force-stop it there. ensureAvcAlive's dilink4 branch never
+     * increments the failure counter anyway, but the guard makes this
+     * helper safe to call from any context.
+     */
+    private void forceRestartAvc() {
+        boolean isDilink4 = false;
+        try {
+            isDilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+        } catch (Throwable ignored) {}
+        if (isDilink4) {
+            logger.warn("forceRestartAvc: skipped on dilink4 (cooperates with AVC)");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long sinceLast = now - lastForceRestartMs;
+        if (lastForceRestartMs > 0L && sinceLast < FORCE_RESTART_COOLDOWN_MS) {
+            // audit avc-yield: prevent escalation churn under transient
+            // low-mem-killer pressure. Force-stopping com.byd.avc cascades
+            // into pano onCameraError + close+reopen on the live consumer.
+            logger.warn("forceRestartAvc: COOLDOWN — skipped (last escalation "
+                + sinceLast + "ms ago, cooldown="
+                + FORCE_RESTART_COOLDOWN_MS + "ms)");
+            return;
+        }
+        lastForceRestartMs = now;
+        logger.warn("forceRestartAvc: force-stopping com.byd.avc and restarting");
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", "am force-stop com.byd.avc"});
+            p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+            Thread.sleep(500);
+        } catch (Throwable t) {
+            logger.warn("force-stop com.byd.avc failed: " + t.getMessage());
+        }
+        launchAvc();  // restart
+    }
+
+    /**
+     * Static counterpart of {@link #forceRestartAvc()} — same legacy-only
+     * gating + force-stop + relaunch, but reachable from the static
+     * {@link #ensureAvcAlive()} keep-alive path.
+     */
+    private static void forceRestartAvcStatic() {
+        boolean isDilink4 = false;
+        try {
+            isDilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+        } catch (Throwable ignored) {}
+        if (isDilink4) {
+            logger.warn("forceRestartAvcStatic: skipped on dilink4 (cooperates with AVC)");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long sinceLast = now - lastForceRestartStaticMs;
+        if (lastForceRestartStaticMs > 0L && sinceLast < FORCE_RESTART_COOLDOWN_MS) {
+            // audit avc-yield: cooldown gate — see forceRestartAvc().
+            logger.warn("forceRestartAvcStatic: COOLDOWN — skipped (last escalation "
+                + sinceLast + "ms ago, cooldown="
+                + FORCE_RESTART_COOLDOWN_MS + "ms)");
+            return;
+        }
+        lastForceRestartStaticMs = now;
+        logger.warn("forceRestartAvcStatic: force-stopping com.byd.avc and restarting");
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", "am force-stop com.byd.avc"});
+            p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+            Thread.sleep(500);
+        } catch (Throwable t) {
+            logger.warn("force-stop com.byd.avc failed: " + t.getMessage());
+        }
+        try {
+            Process p = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
+            int rc = p.waitFor();
+            if (rc != 0) {
+                logger.warn("forceRestartAvcStatic: am start exited rc=" + rc);
+            }
+        } catch (Exception e) {
+            logger.warn("forceRestartAvcStatic: relaunch failed: " + e.getMessage());
         }
     }
 
@@ -290,20 +473,38 @@ public class AvcHalWarmup {
         // Legacy fleet: original behaviour — relaunch if absent.
         int pid = probeAvcPid();
         if (pid > 0) {
+            // AVC alive: probe success implies the process is at least
+            // running. Reset the failure counter so a transient hiccup
+            // doesn't accumulate toward an unrelated future escalation.
+            staticConsecutiveLaunchFailures = 0;
             return false;
         }
+        boolean launched = false;
         try {
             Process p = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
             int rc = p.waitFor();
             if (rc == 0) {
                 logger.info("AVC keep-alive: re-launched com.byd.avc "
                     + "(was not running)");
-                return true;
+                launched = true;
             } else {
                 logger.warn("AVC keep-alive: am start exited rc=" + rc);
             }
         } catch (Exception e) {
             logger.warn("AVC keep-alive: " + e.getMessage());
+        }
+
+        if (launched) {
+            staticConsecutiveLaunchFailures = 0;
+            return true;
+        }
+
+        staticConsecutiveLaunchFailures++;
+        if (staticConsecutiveLaunchFailures >= LAUNCH_FAILURE_ESCALATE_THRESHOLD) {
+            logger.warn("AVC keep-alive: " + staticConsecutiveLaunchFailures
+                + " consecutive launch failures — escalating to force-stop+restart");
+            forceRestartAvcStatic();
+            staticConsecutiveLaunchFailures = 0;
         }
         return false;
     }

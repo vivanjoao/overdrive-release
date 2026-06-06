@@ -631,6 +631,30 @@ public class BydCameraCoordinator {
     public boolean isEventCallbackActive() { return eventCallbackSet; }
     public void resetEventCallbackState() { eventCallbackSet = false; }
 
+    /**
+     * audit avc-yield (round 3, finding 9): clear sticky yielded /
+     * nativeAppActive flags from the error-recovery path. Required because
+     * checkNativeAppActive's catch branch returns the cached nativeAppActive
+     * value on transient binder errors (line 411), so a missed
+     * active→inactive edge can leave both flags stuck true forever — and
+     * startCamera()'s isCameraYielded() gate then early-returns silently on
+     * every subsequent restart attempt. Caller (restartCameraAfterError) is
+     * actively closing+reopening, so by definition we are no longer yielded;
+     * if the native app is genuinely still holding the camera, the next
+     * polling tick re-sets the flags correctly.
+     */
+    public void clearYieldedForRestart() {
+        boolean wasYielded = yielded;
+        boolean wasActive = nativeAppActive;
+        yielded = false;
+        nativeAppActive = false;
+        if (wasYielded || wasActive) {
+            logger.warn("clearYieldedForRestart: cleared yielded="
+                + wasYielded + " nativeAppActive=" + wasActive
+                + " (error-recovery path)");
+        }
+    }
+
     // ==================== AIDL Discovery ====================
 
     /**

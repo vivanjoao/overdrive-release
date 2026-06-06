@@ -91,6 +91,20 @@ public final class ChargingDetector {
      */
     private static final long ENGINE_POWER_FRESHNESS_MS = 15_000L;
 
+    /**
+     * Output-edge debounce. The session's "charging" verdict is frequently
+     * held by a single layer (e.g. L2 Power.isCharging() on a PHEV whose BMS
+     * is stuck at 15 IDLE while AC charging). When that layer's reflective
+     * call momentarily fails or returns a sentinel, its input goes null for
+     * one cycle and {@link #recompute} would briefly resolve to NOT_CHARGING,
+     * firing a spurious stopped+started pair — the "charging started keeps
+     * re-triggering" symptom. We require an ON->OFF verdict to persist this
+     * long before committing it. At the ~5s collect cadence this rides out a
+     * 1-2 cycle dropout. A genuine physical unplug (edge-unplug) bypasses the
+     * debounce and stops immediately.
+     */
+    private static final long OFF_EDGE_DEBOUNCE_MS = 12_000L;
+
     // ===== State =====
 
     private static final ChargingDetector INSTANCE = new ChargingDetector();
@@ -152,6 +166,15 @@ public final class ChargingDetector {
     private long fusedAtMs = 0L;
     /** Which layer last decided the fused state. For diagnostic logging only. */
     private String fusedSource = "init";
+
+    /**
+     * When a recompute first resolves ON->OFF for a non-unplug reason, we
+     * record the timestamp here instead of committing the flip immediately.
+     * The OFF only commits once it has persisted {@link #OFF_EDGE_DEBOUNCE_MS}
+     * (see recompute). 0 = no pending OFF. Reset the moment any layer resolves
+     * back to charging, so a transient dropout never fires a stopped edge.
+     */
+    private long pendingOffSinceMs = 0L;
 
     private ChargingDetector() {}
 
@@ -396,6 +419,34 @@ public final class ChargingDetector {
         // Update L3 hysteresis counter regardless of which layer fired —
         // this keeps it primed in case L1/L2 go ambiguous.
         updateL3Hysteresis(now);
+
+        // Output-edge debounce on ON->OFF. Without this, a single cycle where
+        // the holding layer's input briefly drops (L2 reflection returns null,
+        // BMS poll skips, etc.) collapses the verdict to OFF and immediately
+        // back to ON next cycle, firing a spurious stopped+started pair. We
+        // hold a tentative OFF for OFF_EDGE_DEBOUNCE_MS and only commit it if
+        // it persists. A genuine unplug (edge-unplug) is authoritative and
+        // bypasses the debounce entirely.
+        boolean unplugDriven = "edge-unplug".equals(source);
+        if (next || unplugDriven) {
+            // Resolved back to charging (or a real unplug): no pending OFF.
+            pendingOffSinceMs = 0L;
+        } else if (prev) {
+            // prev ON, this recompute resolved OFF for a non-unplug reason.
+            // Start (or continue) the debounce window; keep reporting ON until
+            // the OFF has persisted long enough to be trusted.
+            if (pendingOffSinceMs == 0L) {
+                pendingOffSinceMs = now;
+            }
+            if (now - pendingOffSinceMs < OFF_EDGE_DEBOUNCE_MS) {
+                next = true;          // suppress the flip for now
+                source = fusedSource; // keep prior source; don't churn logs
+            } else {
+                // Window elapsed — commit the OFF (next stays false) and clear
+                // the marker so a future session's debounce starts fresh.
+                pendingOffSinceMs = 0L;
+            }
+        }
 
         fusedCharging = next;
         fusedAtMs = now;

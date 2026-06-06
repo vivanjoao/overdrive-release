@@ -120,4 +120,69 @@
 
     </LinearLayout>
 
+    <!-- Expanded action bar: appears when the user taps the REC chip,
+         lets them switch recording mode without opening the app.
+         Auto-collapses after EXPAND_AUTOCOLLAPSE_MS of no interaction.
+         The currently-active mode chip is selected=true so the user
+         sees at-a-glance which mode they're in. -->
+    <LinearLayout
+        android:id="@+id/actionBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="14dp"
+            android:layout_marginEnd="8dp"
+            android:background="@color/border_default" />
+
+        <ImageView
+            android:id="@+id/btnModeOff"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:padding="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/overlay_action_chip_background"
+            android:src="@drawable/ic_overlay_mode_off"
+            android:tint="@color/overlay_action_chip_tint"
+            android:contentDescription="@string/overlay_mode_off_cd" />
+
+        <ImageView
+            android:id="@+id/btnModeContinuous"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:padding="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/overlay_action_chip_background"
+            android:src="@drawable/ic_overlay_mode_continuous"
+            android:tint="@color/overlay_action_chip_tint"
+            android:contentDescription="@string/overlay_mode_continuous_cd" />
+
+        <ImageView
+            android:id="@+id/btnModeDrive"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:padding="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/overlay_action_chip_background"
+            android:src="@drawable/ic_overlay_mode_drive"
+            android:tint="@color/overlay_action_chip_tint"
+            android:contentDescription="@string/overlay_mode_drive_cd" />
+
+        <ImageView
+            android:id="@+id/btnModeProximity"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:padding="4dp"
+            android:background="@drawable/overlay_action_chip_background"
+            android:src="@drawable/ic_overlay_mode_proximity"
+            android:tint="@color/overlay_action_chip_tint"
+            android:contentDescription="@string/overlay_mode_proximity_cd" />
+
+    </LinearLayout>
+
 </LinearLayout>

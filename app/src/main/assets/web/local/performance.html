@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.performance_title">Performance - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=3"></script>
+    <script src="../shared/theme.js?v=4"></script>
     <script src="../shared/app-shell.js"></script>
     <!--
       Bottom-tab manifest — performance dashboard splits into 4 tabs
@@ -26,7 +26,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css">
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <style>
@@ -709,8 +709,13 @@
                             </div>
                         </div>
                         <div class="metric-value"><span id="cpuValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle"><span data-i18n="performance.card_app_label">App</span>: <span id="cpuAppValue">--</span>%</div>
+                        <div class="metric-subtitle"><span data-i18n="performance.card_app_label">App</span>: <span id="cpuAppValue">--</span>% <span style="opacity:0.6">device</span></div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="cpuBar" style="width: 0%"></div></div>
+                        <!-- top-style (per-core) readout for cross-checking with a live `top`.
+                             100% = one fully-busy core; ceiling = cores × 100 (e.g. 800% on 8 cores). -->
+                        <div class="metric-subtitle" style="font-family:'JetBrains Mono',monospace;font-size:11px;opacity:0.7;margin-top:4px">
+                            top · app <span id="cpuTopApp">--</span>% · sys <span id="cpuTopSys">--</span>% · <span id="cpuCores">--</span> cores (max <span id="cpuTopMax">--</span>%)
+                        </div>
                         <div class="stats-row">
                             <div class="stat-item">
                                 <span class="stat-label" data-i18n="performance.card_frequency">Frequency</span>
@@ -999,7 +1004,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/performance.js?v=2"></script>
+    <script src="../shared/performance.js?v=5"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

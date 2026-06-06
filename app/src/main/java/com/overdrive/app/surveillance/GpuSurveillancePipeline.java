@@ -103,6 +103,12 @@ public class GpuSurveillancePipeline {
     // otherwise we race the encoder release with init() allocating a new
     // one. Guarded by the same monitor as {@code running}.
     private volatile boolean stopping = false;
+    // True while {@link #start(boolean)} is in progress but not yet
+    // verified — set at entry, cleared once camera open is verified
+    // (running=true) or on failure. Blocks concurrent start() without
+    // publishing running=true prematurely; this is what keeps
+    // isRunning() honest if the camera GL-thread runnable throws.
+    private volatile boolean starting = false;
     // volatile because the cold-start storage-retry thread (RecStorageRetry)
     // reads this without holding the pipeline monitor; without volatile the
     // retry thread can observe a stale `false` after stopRecording() flipped
@@ -123,6 +129,44 @@ public class GpuSurveillancePipeline {
     // Deferred recording: stored when startRecording() is called before encoder is ready
     private volatile java.io.File pendingRecordingDir = null;
     private volatile String pendingRecordingPrefix = null;
+
+    // FIX (audit R3, Findings 3+6): the active normal-recording session's
+    // outputDir + prefix. Captured at the top of pipeline.startRecording() and
+    // cleared by stopRecording(). onPostReacquire() (camera-yield resume) uses
+    // these so it can re-enter pipeline.startRecording(dir, prefix) — the only
+    // path that gates on encoder.isFormatAvailable() and runs the storage
+    // probe + scheduleStorageReadyRetry. Without this, a yield mid-recording
+    // would call recorder.startRecording() bare, silent-no-op when the
+    // encoder hadn't republished its format yet, and wedge for the rest of
+    // the drive (no thread re-polls during ACC=ON).
+    private volatile java.io.File activeRecordingDir = null;
+    private volatile String activeRecordingPrefix = null;
+
+    // FIX (audit R1, RESIDUAL): segment-rotation timestamp. Stamped by
+    // GpuMosaicRecorder's file-closed callback when a normal segment
+    // rotates. RecordingModeManager's wedge ticker reads this via
+    // getLastSegmentRotateMs() and skips its wedge check for 5s after a
+    // rotation, so the natural isRecording()=false flicker between
+    // segments doesn't trigger a phantom wedgeDetected re-activation.
+    private volatile long lastSegmentRotateMs = 0L;
+
+    // FIX (audit R5): pipeline generation counter. Incremented on every
+    // stop() and start() to invalidate background retry threads scheduled
+    // against an earlier lifecycle. RecStorageRetry / RecStorageSlowRetry
+    // capture this at schedule time and bail when a teardown-then-restart
+    // cycle has rotated the value out from under them — the new pipeline
+    // will reschedule its own retry if it still needs one.
+    private final java.util.concurrent.atomic.AtomicLong pipelineGen =
+        new java.util.concurrent.atomic.AtomicLong(0L);
+
+    // FIX (audit R6): cache the resolved camera profile's per-quadrant strip-X
+    // offsets so reinitializeEncoder()'s defensive `new GpuMosaicRecorder()`
+    // (recorder=null branch) can rebuild with the correct viewport dims.
+    // Without this, that branch falls back to the no-arg constructor which
+    // uses DEFAULT_VIEWPORT_WIDTH/HEIGHT (2560x1920) and null offsets — a
+    // mismatch on Tang (encoderHeight=1440) that would corrupt the encoder
+    // feed. Captured during init() once the camera profile resolves.
+    private volatile float[] lastQuadrantStripOffsetX = null;
     
     /**
      * Creates the GPU surveillance pipeline.
@@ -222,6 +266,19 @@ public class GpuSurveillancePipeline {
         // Update config first
         config.setCustomBitrate(bitrate);
 
+        // FIX (audit R7): gate against concurrent stop() teardown. reconfigLock
+        // serializes apply* against each other but NOT against stop(); stop()'s
+        // teardown body runs outside its synchronized block. Without this gate,
+        // apply* sees encoder!=null, then stop() nulls it under our feet, and
+        // reinitializeEncoder()'s defensive null-checks half-rebuild a fresh
+        // encoder bound to no recorder. Persisting the config above is fine
+        // (RMM's next activation re-reads it); skip the live reconfig.
+        if (!running || stopping) {
+            logger.warn("Bitrate change persisted to config but skipping live apply "
+                + "(running=" + running + ", stopping=" + stopping + ")");
+            return;
+        }
+
         if (encoder == null) {
             logger.info("Bitrate setting saved (encoder not initialized yet): " + (bitrate / 1_000_000) + " Mbps");
             return;
@@ -245,6 +302,18 @@ public class GpuSurveillancePipeline {
                 bitrateController.setImmediateBitrate(bitrate);
             }
             logger.info("Bitrate change applied: " + (bitrate / 1_000_000) + " Mbps");
+            // FIX (audit R5): inline-success paths previously didn't kick off
+            // any deferred recording. If a recording start arrived during a
+            // cold encoder window and got deferred to pendingRecordingPrefix,
+            // and then the user's first interaction was to change bitrate,
+            // the deferred start would sit until the next external trigger.
+            // checkPendingRecording is idempotent (no-ops if pending is null
+            // or already recording), so call it opportunistically.
+            if (pendingRecordingPrefix != null) {
+                logger.info("Inline bitrate success — kicking deferred recording check");
+                try { checkPendingRecording(); }
+                catch (Throwable t) { logger.warn("Deferred-recording kick failed: " + t.getMessage()); }
+            }
             return;
         } catch (Exception e) {
             logger.error("Inline bitrate change failed, falling back to encoder reinit: " + e.getMessage());
@@ -274,11 +343,51 @@ public class GpuSurveillancePipeline {
                     logger.info("Restarting surveillance mode with new bitrate");
                     enableSurveillance();
                 } else if (wasNormalRecording) {
-                    logger.info("Restarting normal recording with new bitrate");
-                    startRecording();
+                    // FIX (audit R6): preserve session prefix/dir across the
+                    // bitrate-fallback reinit. Mirror onPostReacquire's pendingPrefix
+                    // -> activePrefix -> "cam" preference so session-identity is
+                    // not silently regressed to default ("cam_*.mp4") on reinit.
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        logger.info("Restarting normal recording with new bitrate (prefix="
+                            + restartPrefix + ")");
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        logger.info("Restarting normal recording with new bitrate (no captured prefix — default 'cam')");
+                        startRecording();
+                    }
                 } else if (recordingMode || pendingRecordingPrefix != null) {
-                    logger.info("Restarting deferred recording with new bitrate");
-                    startRecording();
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        logger.info("Restarting deferred recording with new bitrate (prefix="
+                            + restartPrefix + ")");
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        logger.info("Restarting deferred recording with new bitrate (no captured prefix — default 'cam')");
+                        startRecording();
+                    }
                 }
             }
 
@@ -286,18 +395,24 @@ public class GpuSurveillancePipeline {
 
         } catch (Exception e) {
             logger.error("Failed to apply bitrate change: " + e.getMessage(), e);
+            // FIX (audit R4, Findings 1+2): reinitializeEncoder() may have nulled
+            // the encoder field after releasing it but BEFORE the new encoder
+            // bound to the recorder, leaving the recorder pointed at a dead
+            // encoder. Calling startRecording() now would register a format-
+            // available listener on a released encoder that never fires —
+            // wedging recording for the rest of the ACC=ON window. Force a
+            // full pipeline.stop() so RMM's next tick rebuilds from scratch.
+            logger.warn("Forcing pipeline stop after bitrate-reinit failure — "
+                + "RMM will rebuild on next activation");
             try {
-                if (wasSurveillance) {
-                    enableSurveillance();
-                } else if (wasNormalRecording || recordingMode || pendingRecordingPrefix != null) {
-                    startRecording();
-                }
-            } catch (Exception e2) {
-                logger.error("Failed to recover after bitrate change error", e2);
+                stop();
+            } catch (Throwable t) {
+                logger.warn("Failed to stop pipeline after bitrate change error: "
+                    + t.getMessage());
             }
         }
     }
-    
+
     /**
      * Applies a recording FPS change at runtime. Persists the new fps to
      * UnifiedConfigManager (camera.targetFps), propagates it to the camera
@@ -335,6 +450,14 @@ public class GpuSurveillancePipeline {
             logger.warn("Failed to persist targetFps: " + e.getMessage());
         }
 
+        // FIX (audit R7): gate against concurrent stop() teardown. See
+        // applyBitrateChangeLocked for the full rationale — same race window.
+        if (!running || stopping) {
+            logger.warn("FPS change persisted to config but skipping live apply "
+                + "(running=" + running + ", stopping=" + stopping + ")");
+            return;
+        }
+
         // Propagate to camera so the HAL emission rate also tracks the new target.
         if (camera != null) {
             camera.setTargetFps(clamped);
@@ -370,21 +493,65 @@ public class GpuSurveillancePipeline {
                 if (wasSurveillance) {
                     enableSurveillance();
                 } else if (wasNormalRecording) {
-                    startRecording();
+                    // FIX (audit R6): preserve session prefix/dir across reinit.
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        logger.info("FPS reinit: resuming normal recording (prefix="
+                            + restartPrefix + ")");
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        logger.info("FPS reinit: resuming normal recording (no captured prefix — default 'cam')");
+                        startRecording();
+                    }
                 } else if (recordingMode || pendingRecordingPrefix != null) {
                     // Deferred-recording window — see applyBitrateChangeLocked
                     // for the full reasoning.
-                    startRecording();
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        logger.info("FPS reinit: resuming deferred recording (prefix="
+                            + restartPrefix + ")");
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        logger.info("FPS reinit: resuming deferred recording (no captured prefix — default 'cam')");
+                        startRecording();
+                    }
                 }
             }
             logger.info("FPS change applied successfully: " + clamped + " fps");
         } catch (Exception e) {
             logger.error("Failed to apply FPS change: " + e.getMessage(), e);
+            // FIX (audit R4, Findings 1+2): see applyBitrateChangeLocked catch
+            // for full reasoning. Force pipeline.stop() instead of calling
+            // startRecording() against a stale-encoder recorder.
+            logger.warn("Forcing pipeline stop after FPS-reinit failure — "
+                + "RMM will rebuild on next activation");
             try {
-                if (wasSurveillance) enableSurveillance();
-                else if (wasNormalRecording || recordingMode || pendingRecordingPrefix != null) startRecording();
-            } catch (Exception e2) {
-                logger.error("Failed to recover after FPS change error", e2);
+                stop();
+            } catch (Throwable t) {
+                logger.warn("Failed to stop pipeline after FPS change error: "
+                    + t.getMessage());
             }
         }
     }
@@ -403,7 +570,15 @@ public class GpuSurveillancePipeline {
     private void applyCodecChangeLocked(GpuPipelineConfig.VideoCodec codec) {
         // Store the new codec setting
         config.setVideoCodec(codec);
-        
+
+        // FIX (audit R7): gate against concurrent stop() teardown. See
+        // applyBitrateChangeLocked for the full rationale — same race window.
+        if (!running || stopping) {
+            logger.warn("Codec change persisted to config but skipping live apply "
+                + "(running=" + running + ", stopping=" + stopping + ")");
+            return;
+        }
+
         // If encoder doesn't exist yet, just save the setting
         if (encoder == null) {
             logger.info("Codec changed to: " + codec.displayName + " - will apply when encoder initializes");
@@ -443,12 +618,49 @@ public class GpuSurveillancePipeline {
                     logger.info("Restarting surveillance mode with new codec");
                     enableSurveillance();
                 } else if (wasNormalRecording) {
-                    logger.info("Restarting normal recording with new codec");
-                    startRecording();
+                    // FIX (audit R6): preserve session prefix/dir across reinit.
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        logger.info("Codec reinit: resuming normal recording (prefix="
+                            + restartPrefix + ")");
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        logger.info("Codec reinit: resuming normal recording (no captured prefix — default 'cam')");
+                        startRecording();
+                    }
                 } else if (recordingMode || pendingRecordingPrefix != null) {
                     // Deferred-recording window — see applyBitrateChangeLocked.
-                    logger.info("Restarting deferred recording with new codec");
-                    startRecording();
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        logger.info("Codec reinit: resuming deferred recording (prefix="
+                            + restartPrefix + ")");
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        logger.info("Codec reinit: resuming deferred recording (no captured prefix — default 'cam')");
+                        startRecording();
+                    }
                 }
             }
 
@@ -456,15 +668,19 @@ public class GpuSurveillancePipeline {
 
         } catch (Exception e) {
             logger.error("Failed to apply codec change: " + e.getMessage(), e);
-            // Try to recover by restarting what was running
+            // FIX (audit R4, Findings 1+2): see applyBitrateChangeLocked catch
+            // for full reasoning. Force pipeline.stop() instead of calling
+            // startRecording() against a stale-encoder recorder; the prior
+            // recovery path registered a format-available listener on the
+            // released encoder which never fires, wedging recording for the
+            // rest of the ACC=ON window.
+            logger.warn("Forcing pipeline stop after codec-reinit failure — "
+                + "RMM will rebuild on next activation");
             try {
-                if (wasSurveillance) {
-                    enableSurveillance();
-                } else if (wasNormalRecording || recordingMode || pendingRecordingPrefix != null) {
-                    startRecording();
-                }
-            } catch (Exception e2) {
-                logger.error("Failed to recover after codec change error", e2);
+                stop();
+            } catch (Throwable t) {
+                logger.warn("Failed to stop pipeline after codec change error: "
+                    + t.getMessage());
             }
         }
     }
@@ -535,6 +751,16 @@ public class GpuSurveillancePipeline {
                 if (camera != null) camera.setTargetFps(clampedFps);
             }
 
+            // FIX (audit R7): gate against concurrent stop() teardown. Config
+            // persistence above is fine (RMM re-reads on next activation); skip
+            // the live reconfig so we don't half-rebuild against a torn-down
+            // encoder/recorder.
+            if (!running || stopping) {
+                logger.warn("Batched apply: settings persisted but skipping live apply "
+                    + "(running=" + running + ", stopping=" + stopping + ")");
+                return;
+            }
+
             if (encoder == null) {
                 logger.info("Batched apply: encoder not yet initialized — settings persisted, will apply on init");
                 return;
@@ -569,6 +795,13 @@ public class GpuSurveillancePipeline {
                 if (newBitrate <= 0 && clampedFps <= 0) {
                     logger.info("Batched apply: nothing changed");
                 }
+                // FIX (audit R5): inline-success — kick deferred recording.
+                // Idempotent if no pending or already recording.
+                if (pendingRecordingPrefix != null) {
+                    logger.info("Batched inline success — kicking deferred recording check");
+                    try { checkPendingRecording(); }
+                    catch (Throwable t) { logger.warn("Deferred-recording kick failed: " + t.getMessage()); }
+                }
                 return;
             }
 
@@ -598,20 +831,64 @@ public class GpuSurveillancePipeline {
                     if (wasSurveillance) {
                         enableSurveillance();
                     } else if (wasNormalRecording) {
-                        startRecording();
+                        // FIX (audit R6): preserve session prefix/dir across reinit.
+                        java.io.File restartDir;
+                        String restartPrefix;
+                        if (pendingRecordingPrefix != null) {
+                            restartDir = pendingRecordingDir;
+                            restartPrefix = pendingRecordingPrefix;
+                        } else if (activeRecordingPrefix != null) {
+                            restartDir = activeRecordingDir;
+                            restartPrefix = activeRecordingPrefix;
+                        } else {
+                            restartDir = null;
+                            restartPrefix = null;
+                        }
+                        if (restartPrefix != null) {
+                            logger.info("Batched apply: resuming normal recording (prefix="
+                                + restartPrefix + ")");
+                            startRecording(restartDir, restartPrefix);
+                        } else {
+                            logger.info("Batched apply: resuming normal recording (no captured prefix — default 'cam')");
+                            startRecording();
+                        }
                     } else if (recordingMode || pendingRecordingPrefix != null) {
                         // Deferred-recording window — see applyBitrateChangeLocked.
-                        startRecording();
+                        java.io.File restartDir;
+                        String restartPrefix;
+                        if (pendingRecordingPrefix != null) {
+                            restartDir = pendingRecordingDir;
+                            restartPrefix = pendingRecordingPrefix;
+                        } else if (activeRecordingPrefix != null) {
+                            restartDir = activeRecordingDir;
+                            restartPrefix = activeRecordingPrefix;
+                        } else {
+                            restartDir = null;
+                            restartPrefix = null;
+                        }
+                        if (restartPrefix != null) {
+                            logger.info("Batched apply: resuming deferred recording (prefix="
+                                + restartPrefix + ")");
+                            startRecording(restartDir, restartPrefix);
+                        } else {
+                            logger.info("Batched apply: resuming deferred recording (no captured prefix — default 'cam')");
+                            startRecording();
+                        }
                     }
                 }
                 logger.info("Batched apply: codec reinit complete");
             } catch (Exception e) {
                 logger.error("Batched apply failed: " + e.getMessage(), e);
+                // FIX (audit R4, Findings 1+2): see applyBitrateChangeLocked
+                // catch for full reasoning. Force pipeline.stop() so the
+                // recorder isn't left bound to a released encoder with a
+                // dead format-available listener.
+                logger.warn("Forcing pipeline stop after batched-reinit failure — "
+                    + "RMM will rebuild on next activation");
                 try {
-                    if (wasSurveillance) enableSurveillance();
-                    else if (wasNormalRecording || recordingMode || pendingRecordingPrefix != null) startRecording();
-                } catch (Exception e2) {
-                    logger.error("Batched apply: recovery failed", e2);
+                    stop();
+                } catch (Throwable t) {
+                    logger.warn("Batched apply: stop failed: " + t.getMessage());
                 }
             }
         }
@@ -709,7 +986,35 @@ public class GpuSurveillancePipeline {
             (codecMimeType.contains("hevc") ? "H.265" : "H.264") +
             " @ " + fps + "fps, " + (bitrate / 1_000_000) + " Mbps");
 
-        encoder = new HardwareEventRecorderGpu(encoderWidth, encoderHeight, fps, bitrate, codecMimeType);
+        // FIX (audit R4, Findings 1+2): on encoder allocation failure, ensure
+        // both the encoder field AND the recorder's internal encoder reference
+        // are cleared so the caller's catch (which now calls stop()) sees a
+        // coherent torn-down state. Without this, a throw here leaves the
+        // recorder bound to the released-and-nulled encoder, and stop()
+        // would then try to flushAndClose against a NULL encoder field while
+        // recorder.encoder still points at a freed instance.
+        try {
+            encoder = new HardwareEventRecorderGpu(encoderWidth, encoderHeight, fps, bitrate, codecMimeType);
+        } catch (Throwable t) {
+            logger.warn("New encoder allocation failed — clearing recorder's stale "
+                + "encoder ref so caller can stop() cleanly: " + t.getMessage());
+            encoder = null;
+            // Best-effort: drop the recorder's internal encoder ref by releasing
+            // its surface again (the prior releaseEncoderSurface() covered the
+            // GL surface; this path now has no live encoder to bind to).
+            if (recorder != null) {
+                try {
+                    final GpuMosaicRecorder snapRec = recorder;
+                    if (camera != null && camera.getGlHandler() != null) {
+                        camera.getGlHandler().post(() -> {
+                            try { snapRec.releaseEncoderSurface(); }
+                            catch (Throwable ignored) {}
+                        });
+                    }
+                } catch (Throwable ignored) {}
+            }
+            throw t instanceof Exception ? (Exception) t : new RuntimeException(t);
+        }
         // On encoder reinit (codec change), restore the pre-record window
         // from the source-of-truth config for the ACTIVE recording mode.
         // Without mode-awareness, a codec change while in PROXIMITY_GUARD
@@ -779,7 +1084,29 @@ public class GpuSurveillancePipeline {
                 try {
                     // Recreate recorder if needed
                     if (recorder == null) {
-                        recorder = new GpuMosaicRecorder();
+                        // FIX (audit R6): use the cached profile-driven offsets
+                        // + actual encoderWidth/encoderHeight instead of the
+                        // no-arg constructor's DEFAULT_VIEWPORT_*. Without this,
+                        // a Tang trim (encoderHeight=1440) would silently regress
+                        // to 2560x1920 and corrupt encoder strip slicing. Falls
+                        // through to no-arg only when init() has not yet captured
+                        // a profile (cold-start race; should never happen on
+                        // this code path because reinit only runs after init).
+                        if (lastQuadrantStripOffsetX != null) {
+                            logger.info("Reinit: rebuilding recorder with cached profile offsets ("
+                                + encoderWidth + "x" + encoderHeight + ")");
+                            recorder = new GpuMosaicRecorder(
+                                lastQuadrantStripOffsetX, encoderWidth, encoderHeight);
+                        } else {
+                            logger.warn("Reinit: no cached profile offsets — falling back to no-arg "
+                                + "GpuMosaicRecorder (Tang trims may be miss-sized)");
+                            recorder = new GpuMosaicRecorder();
+                        }
+                        // FIX (audit R1, RESIDUAL): re-wire segment-rotated
+                        // listener after a fresh recorder allocation so RMM
+                        // wedge-ticker grace-windowing keeps working post-
+                        // encoder-reinit.
+                        recorder.setSegmentRotatedListener(this::noteSegmentRotated);
                     }
                     recorder.init(camera.getEglCore(), encoder);
                     logger.info("Recorder reinitialized on GL thread");
@@ -972,11 +1299,18 @@ public class GpuSurveillancePipeline {
             com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
         float[] quadrantStripOffsetX = resolvedCamera.getQuadrantStripOffsetX();
         float[] quadrantCornerOffsetsXY = resolvedCamera.getQuadrantCornerOffsetsXY();
+        // FIX (audit R6): cache for reinitializeEncoder()'s recorder=null branch.
+        this.lastQuadrantStripOffsetX = quadrantStripOffsetX;
 
         // 2. Create GPU mosaic recorder (shared) with profile-driven viewport
         // and per-quadrant offsets. Tang gets 2560x1440 instead of 2560x1920.
         recorder = new GpuMosaicRecorder(quadrantStripOffsetX, encoderWidth, encoderHeight);
         // Note: recorder.init() will be called after EGL context is created by camera
+
+        // FIX (audit R1, RESIDUAL): stamp lastSegmentRotateMs on every
+        // segment close so RecordingModeManager's wedge ticker can grace-
+        // window the between-segments isRecording()=false flicker.
+        recorder.setSegmentRotatedListener(this::noteSegmentRotated);
 
         // Wire up telemetry collector to new recorder if available
         if (telemetryCollector != null) {
@@ -1240,10 +1574,16 @@ public class GpuSurveillancePipeline {
      * @throws Exception if start fails
      */
     public void start(boolean autoStartRecording) throws Exception {
-        // CRITICAL: Set running flag FIRST to prevent race conditions
-        // Multiple threads may call start() concurrently (HTTP + WebSocket)
+        // CRITICAL: claim the start-in-progress slot to prevent race
+        // conditions. Multiple threads may call start() concurrently
+        // (HTTP + WebSocket). We use `starting` to block concurrent starts
+        // WITHOUT yet publishing running=true — that flag is only flipped
+        // once the camera GL-thread runnable confirms successful open.
+        // This way pipeline.isRunning() doesn't lie if camera open throws
+        // asynchronously and RecordingModeManager's `if (!isRunning())`
+        // gates correctly retry on the next trigger.
         synchronized (this) {
-            if (running) {
+            if (running || starting) {
                 logger.warn( "Already running");
                 return;
             }
@@ -1254,7 +1594,12 @@ public class GpuSurveillancePipeline {
                 logger.warn("Refusing start() — pipeline is mid-stop");
                 return;
             }
-            running = true;  // Set immediately to block concurrent starts
+            starting = true;  // Block concurrent starts; running stays false
+                              // until camera open is verified.
+            // FIX (audit R5): bump generation on start so a retry scheduled
+            // by a previous lifecycle that's still hanging around exits.
+            long newGen = pipelineGen.incrementAndGet();
+            logger.info("Pipeline generation bumped on start: " + newGen);
         }
         
         try {
@@ -1332,10 +1677,44 @@ public class GpuSurveillancePipeline {
                         }
                         logger.info("Post-reacquire: surveillance mode restored");
                     } else if (currentMode == Mode.NORMAL_RECORDING || recordingMode) {
-                        // Normal recording mode — restart recording
+                        // Normal recording mode — restart recording.
+                        // FIX (audit R3, Findings 3+6): re-enter the pipeline-level
+                        // entrypoint (which gates on encoder.isFormatAvailable(),
+                        // runs the storage probe, and schedules format-available /
+                        // cold-start retry on miss) instead of calling
+                        // recorder.startRecording() bare. A bare call silent-no-ops
+                        // when the encoder hasn't republished its output format
+                        // post-flushAndClose or when the volume returns transient
+                        // EBUSY, leaving the pipeline wedged for the rest of the
+                        // ACC=ON window. Prefer pendingRecordingPrefix (cold-start
+                        // deferred case) over the captured active session.
                         if (recorder != null && !recorder.isRecording()) {
-                            recorder.startRecording();
-                            logger.info("Post-reacquire: normal recording resumed");
+                            java.io.File resumeDir;
+                            String resumePrefix;
+                            if (pendingRecordingPrefix != null) {
+                                resumeDir = pendingRecordingDir;
+                                resumePrefix = pendingRecordingPrefix;
+                                logger.info("Post-reacquire: resuming via pending request "
+                                    + "(prefix=" + resumePrefix + ")");
+                            } else if (activeRecordingPrefix != null) {
+                                resumeDir = activeRecordingDir;
+                                resumePrefix = activeRecordingPrefix;
+                                logger.info("Post-reacquire: resuming active session "
+                                    + "(prefix=" + resumePrefix + ", dir="
+                                    + (resumeDir != null ? resumeDir.getName() : "default") + ")");
+                            } else {
+                                resumeDir = null;
+                                resumePrefix = "cam";
+                                logger.warn("Post-reacquire: no captured session — "
+                                    + "falling back to default (prefix=cam)");
+                            }
+                            try {
+                                startRecording(resumeDir, resumePrefix);
+                                logger.info("Post-reacquire: normal recording resumed via pipeline.startRecording");
+                            } catch (Throwable t) {
+                                logger.warn("Post-reacquire: pipeline.startRecording threw — "
+                                    + t.getMessage());
+                            }
                         }
                     }
                 }
@@ -1349,7 +1728,29 @@ public class GpuSurveillancePipeline {
             // showed every startRecording() returning formatAvailable=false
             // when this sleep was skipped on dilink4 — recording never started.
             Thread.sleep(1500);
-            
+
+            // Verify the camera GL-thread runnable actually completed without
+            // throwing. PanoramicCameraGpu.start() posts initializeGl +
+            // startCamera onto the GL handler and returns immediately; if that
+            // runnable throws (camera open failure, EGL init failure), the
+            // camera's `running` field stays false. Without this gate, the
+            // pipeline would publish running=true and isRunning() would lie —
+            // every subsequent RecordingModeManager retry would see "already
+            // running" and skip, wedging recording for the rest of the drive.
+            if (camera == null || !camera.isRunning()) {
+                logger.warn("start(): camera.isRunning() false after warmup window — "
+                    + "treating start as failed");
+                try { if (camera != null) camera.stop(); } catch (Throwable ignored) {}
+                // running stays false; starting cleared in catch below.
+                throw new IllegalStateException(
+                    "Camera failed to reach running state within warmup window");
+            }
+
+            // Camera open verified — publish running=true so isRunning() is honest.
+            synchronized (this) {
+                running = true;
+            }
+
             // Set callback to start recording when recorder is ready
             if (autoStartRecording) {
                 recordingMode = true;
@@ -1384,19 +1785,143 @@ public class GpuSurveillancePipeline {
             // DON'T auto-enable streaming - enable on-demand when client requests
             // Streaming will be enabled via enableStreaming() when HTTP client connects
             // enableStreaming() already auto-starts the pipeline if not running.
-            
+
             // DON'T auto-enable surveillance - let caller decide
             // Surveillance should only be enabled when explicitly requested
             // sentry.enable();  // REMOVED - caller must explicitly enable
-            
+
+            // FIX (audit R4, Finding 6): if a startRecording() request landed
+            // during the narrow window between a prior pipeline.stop() and
+            // this start() (recorder==null branch in startRecording), the
+            // intent is captured in pendingRecordingPrefix but no listener
+            // was registered against any encoder (none existed). Now that
+            // init()/start() has built a fresh encoder + recorder, rebind
+            // the orphan request: register a one-shot format-available
+            // listener so the new encoder's first frame triggers
+            // checkPendingRecording(). Without this, the wedge persists
+            // until either RMM's wedge ticker re-issues startRecording()
+            // (slow self-heal, may be >30s) or the caller invokes again.
+            if (pendingRecordingPrefix != null && encoder != null) {
+                logger.info("start(): rebinding orphan deferred-recording request "
+                    + "to fresh encoder (prefix=" + pendingRecordingPrefix + ")");
+                encoder.setFormatAvailableListener(() -> {
+                    new Thread(() -> {
+                        try {
+                            checkPendingRecording();
+                        } catch (Exception e) {
+                            logger.warn("Deferred recording start (post-start rebind) failed: "
+                                + e.getMessage());
+                        }
+                    }, "PendingRecKickoffStart").start();
+                });
+            }
+
             logger.info( "GPU pipeline started (streaming on-demand, surveillance NOT auto-enabled)");
-        
+
         } catch (Exception e) {
-            // Reset running flag on failure so retry is possible
+            // Reset flags on failure so retry is possible. Both `running`
+            // and `starting` must be cleared — running may have been
+            // published just above (post-verify) before a later step threw,
+            // and starting was claimed at entry to block concurrent starts.
             synchronized (this) {
                 running = false;
+                starting = false;
             }
+            // FIX (audit R1): release ALL fields allocated by init() so the
+            // next start() retry runs init() against null refs and doesn't
+            // overwrite half-built encoder/recorder/downscaler/sentry/camera
+            // refs (memory leak + EGL leak). encoder has its own guard at
+            // init():894, but recorder/downscaler/sentry/camera get
+            // overwritten without releasing on the retry path.
+            logger.warn("start() failed — releasing partial init state for clean retry: "
+                + e.getMessage());
+            try {
+                if (camera != null) {
+                    try { camera.stop(); } catch (Throwable t) {
+                        logger.warn("start() rollback: camera.stop failed: " + t.getMessage());
+                    }
+                    camera = null;
+                }
+            } catch (Throwable ignored) {}
+            try {
+                if (sentry != null) {
+                    try { sentry.disable(); } catch (Throwable ignored) {}
+                    try { sentry.release(); } catch (Throwable t) {
+                        logger.warn("start() rollback: sentry.release failed: " + t.getMessage());
+                    }
+                    sentry = null;
+                }
+            } catch (Throwable ignored) {}
+            try {
+                if (downscaler != null) {
+                    try { downscaler.release(); } catch (Throwable t) {
+                        logger.warn("start() rollback: downscaler.release failed: " + t.getMessage());
+                    }
+                    downscaler = null;
+                }
+            } catch (Throwable ignored) {}
+            try {
+                if (recorder != null) {
+                    try { recorder.release(); } catch (Throwable t) {
+                        logger.warn("start() rollback: recorder.release failed: " + t.getMessage());
+                    }
+                    recorder = null;
+                }
+            } catch (Throwable ignored) {}
+            try {
+                if (encoder != null) {
+                    try { encoder.release(); } catch (Throwable t) {
+                        logger.warn("start() rollback: encoder.release failed: " + t.getMessage());
+                    }
+                    encoder = null;
+                }
+            } catch (Throwable ignored) {}
+            // FIX (audit R7): release the AdaptiveBitrateController that init()
+            // allocated at line 1489. Without this, every start()-failure cycle
+            // leaks the prior controller's handler thread, and the next init()
+            // overwrites the field reference. Self-healing today via repeated
+            // start failures, so logged as warn — explicit cleanup is cheap.
+            try {
+                if (bitrateController != null) {
+                    logger.warn("start() rollback: releasing bitrateController");
+                    try { bitrateController.release(); } catch (Throwable t) {
+                        logger.warn("start() rollback: bitrateController.release failed: " + t.getMessage());
+                    }
+                    bitrateController = null;
+                }
+            } catch (Throwable ignored) {}
+            initialized = false;
+            // FIX (audit R4, Finding 4): clear pending/active recording state
+            // so an orphan request doesn't survive into the next start() with
+            // no listener attached. The recorder/encoder allocated by the
+            // previous init() were just released above, so any format-
+            // available listener registered against the prior encoder is dead;
+            // a stale pendingRecordingPrefix would otherwise sit until either
+            // the camera-probe callback fires (skipped on validated configs)
+            // or RMM's wedge ticker eventually re-activates. Clearing here
+            // forces RMM's next tick to re-issue startRecording() against the
+            // freshly-built pipeline, which DOES register a fresh listener.
+            if (pendingRecordingPrefix != null || activeRecordingPrefix != null
+                    || recordingMode) {
+                logger.warn("start() rollback: clearing pending/active recording state "
+                    + "(pending=" + pendingRecordingPrefix
+                    + ", active=" + activeRecordingPrefix
+                    + ", recordingMode=" + recordingMode + ")");
+            }
+            pendingRecordingDir = null;
+            pendingRecordingPrefix = null;
+            activeRecordingDir = null;
+            activeRecordingPrefix = null;
+            recordingMode = false;
+            currentMode = Mode.IDLE;
             throw e;
+        } finally {
+            // On the success path, clear `starting` once start() returns.
+            // (On the failure path the catch above already cleared it; this
+            // is idempotent.)
+            synchronized (this) {
+                starting = false;
+            }
         }
     }
     
@@ -1417,6 +1942,10 @@ public class GpuSurveillancePipeline {
             }
             running = false;
             stopping = true;
+            // FIX (audit R5): bump generation so any in-flight storage retry
+            // captured an older value and exits before touching torn-down state.
+            long newGen = pipelineGen.incrementAndGet();
+            logger.info("Pipeline generation bumped on stop: " + newGen);
         }
 
         try {
@@ -1425,76 +1954,108 @@ public class GpuSurveillancePipeline {
             // Clear any pending deferred recording
             pendingRecordingDir = null;
             pendingRecordingPrefix = null;
+            // FIX (audit R3, Findings 3+6): drop active-session memory on full
+            // pipeline teardown; nothing to resume after this point.
+            activeRecordingDir = null;
+            activeRecordingPrefix = null;
             recordingMode = false;
             // Cancel the cold-start storage retry too. Without this, a
             // RecStorageRetry thread can outlive a full pipeline teardown,
             // call recorder.startRecording on a half-released encoder, and
             // either crash the daemon or resurrect a phantom recording on a
             // recorder that's about to be nulled.
-            cancelStorageReadyRetry();
+            try { cancelStorageReadyRetry(); }
+            catch (Throwable t) { logger.warn("stop: cancelStorageReadyRetry failed: " + t.getMessage()); }
 
-        // Reset mode so status API reflects that we're not in any active mode
-        currentMode = Mode.IDLE;
-        
-        // Stop recording first to finalize file
-        if (recorder != null && recorder.isRecording()) {
-            recorder.stopRecording();
-        }
-        
-        // Disable streaming — stream encoder/scaler hold EGL surfaces that will be
-        // destroyed when the camera stops. They must be released before camera.stop().
-        if (streamingEnabled) {
-            disableStreaming();
-        }
+            // Reset mode so status API reflects that we're not in any active mode
+            currentMode = Mode.IDLE;
 
-        // Disable surveillance
-        if (sentry != null) {
-            sentry.disable();
-        }
-
-        // OEM Dashcam pipeline shares pano's eglDisplay via EGLCore.createShared.
-        // Calling pano camera.stop() (which terminates the display) before OEM
-        // tears down would leave OEM's render loop sampling against a dead
-        // EGLDisplay — every subsequent eglMakeCurrent / eglSwapBuffers fails
-        // silently with EGL_BAD_DISPLAY and the OEM encoder produces black
-        // frames. Tear OEM down here so its EGL release runs against a still-
-        // valid parent display.
-        try {
-            com.overdrive.app.camera.OemDashcamPipeline oem =
-                com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
-            if (oem != null && oem.isRunning()) {
-                logger.info("Stopping OEM Dashcam pipeline before pano camera tear-down "
-                    + "(shared eglDisplay)");
-                try { oem.stopRecording(); } catch (Throwable ignored) {}
-                try { oem.stop(); } catch (Throwable ignored) {}
-                com.overdrive.app.daemon.CameraDaemon.setOemDashcamPipeline(null);
+            // Stop recording first to finalize file
+            try {
+                if (recorder != null && recorder.isRecording()) {
+                    recorder.stopRecording();
+                }
+            } catch (Throwable t) {
+                logger.warn("stop: recorder.stopRecording failed: " + t.getMessage());
             }
-        } catch (Throwable t) {
-            logger.warn("OEM pre-pano-stop teardown failed: " + t.getMessage());
-        }
 
-        // Stop camera (this releases EGL context and surfaces)
-        if (camera != null) {
-            camera.stop();
-        }
-        
-        // CRITICAL: Release recorder and encoder since EGL context is gone
-        // They must be recreated on next start()
-        if (recorder != null) {
-            recorder.release();
-            recorder = null;
-        }
-        
-        if (encoder != null) {
-            encoder.release();
-            encoder = null;
-        }
-        
-            // Mark as not initialized so init() can be called again
-            initialized = false;
+            // Disable streaming — stream encoder/scaler hold EGL surfaces that will be
+            // destroyed when the camera stops. They must be released before camera.stop().
+            try {
+                if (streamingEnabled) {
+                    disableStreaming();
+                }
+            } catch (Throwable t) {
+                logger.warn("stop: disableStreaming failed: " + t.getMessage());
+            }
+
+            // Disable surveillance
+            try {
+                if (sentry != null) {
+                    sentry.disable();
+                }
+            } catch (Throwable t) {
+                logger.warn("stop: sentry.disable failed: " + t.getMessage());
+            }
+
+            // OEM Dashcam pipeline shares pano's eglDisplay via EGLCore.createShared.
+            // Calling pano camera.stop() (which terminates the display) before OEM
+            // tears down would leave OEM's render loop sampling against a dead
+            // EGLDisplay — every subsequent eglMakeCurrent / eglSwapBuffers fails
+            // silently with EGL_BAD_DISPLAY and the OEM encoder produces black
+            // frames. Tear OEM down here so its EGL release runs against a still-
+            // valid parent display.
+            try {
+                com.overdrive.app.camera.OemDashcamPipeline oem =
+                    com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
+                if (oem != null && oem.isRunning()) {
+                    logger.info("Stopping OEM Dashcam pipeline before pano camera tear-down "
+                        + "(shared eglDisplay)");
+                    try { oem.stopRecording(); } catch (Throwable ignored) {}
+                    try { oem.stop(); } catch (Throwable ignored) {}
+                    com.overdrive.app.daemon.CameraDaemon.setOemDashcamPipeline(null);
+                }
+            } catch (Throwable t) {
+                logger.warn("OEM pre-pano-stop teardown failed: " + t.getMessage());
+            }
+
+            // Stop camera (this releases EGL context and surfaces)
+            try {
+                if (camera != null) {
+                    camera.stop();
+                }
+            } catch (Throwable t) {
+                logger.warn("stop: camera.stop failed: " + t.getMessage());
+            }
+
+            // CRITICAL: Release recorder and encoder since EGL context is gone
+            // They must be recreated on next start()
+            try {
+                if (recorder != null) {
+                    recorder.release();
+                }
+            } catch (Throwable t) {
+                logger.warn("stop: recorder.release failed: " + t.getMessage());
+            }
+
+            try {
+                if (encoder != null) {
+                    encoder.release();
+                }
+            } catch (Throwable t) {
+                logger.warn("stop: encoder.release failed: " + t.getMessage());
+            }
 
             logger.info( "GPU pipeline stopped");
         } finally {
+            // Guarantee the pipeline lands in a clean, fully-deinitialized
+            // state regardless of which teardown step threw — otherwise a
+            // partial throw leaves initialized=true with stale refs and
+            // every subsequent start() short-circuits past init() into a
+            // half-released encoder / recorder.
+            recorder = null;
+            encoder = null;
+            initialized = false;
             // Clear stopping flag so concurrent start() can proceed.
             synchronized (this) {
                 stopping = false;
@@ -1639,6 +2200,12 @@ public class GpuSurveillancePipeline {
                 if (snapRecorder.isRecording()) {
                     currentMode = Mode.NORMAL_RECORDING;
                     recordingMode = true;
+                    // FIX (audit R3, Findings 3+6): remember the active session so
+                    // onPostReacquire (camera-yield resume) can re-enter
+                    // pipeline.startRecording with the same dir/prefix instead of
+                    // calling recorder.startRecording() bare.
+                    activeRecordingDir = outputDir;
+                    activeRecordingPrefix = prefix;
                     snapRecorder.setOverlayRecordingModeAllowed(true);
                     if (telemetryCollector != null) {
                         telemetryCollector.setOverlayRecordingActive(true);
@@ -1716,18 +2283,74 @@ public class GpuSurveillancePipeline {
         if (pendingRecordingPrefix == null) return;
         if (recorder == null || recorder.getEncoder() == null) return;
         if (!recorder.getEncoder().isFormatAvailable()) return;
-        
-        java.io.File dir = pendingRecordingDir;
-        String prefix = pendingRecordingPrefix;
+
+        // FIX (audit R7): atomically capture pendingDir/prefix while holding
+        // the same monitor stopRecording uses. Without this, a concurrent
+        // stopRecording() (RMM mode change) can clear the fields between our
+        // null check above and the capture below — the listener thread reads
+        // a non-null value AFTER stopRecording has already called
+        // recorder.stopRecording(), then issues a fresh recorder.startRecording
+        // against the just-stopped recorder. The synchronized re-check + capture
+        // means stopRecording's clear is observed atomically.
+        java.io.File dir;
+        String prefix;
+        // FIX (audit MEDIUM): also snapshot recorder + encoder under the same
+        // monitor so a concurrent pipeline.stop() (idle-shutdown, ACC OFF, RMM
+        // OFF) that nulls the recorder/encoder fields in its finally-block
+        // can't NPE us between the capture below and the deferred
+        // recorder.startRecording / isRecording calls further down. Mirrors
+        // the snapshot pattern at :2173-2176 in startRecording's outer entry.
+        final GpuMosaicRecorder localRecorder;
+        final HardwareEventRecorderGpu localEncoder;
+        synchronized (this) {
+            if (pendingRecordingPrefix == null) {
+                logger.warn("checkPendingRecording: pending cleared between null-check and capture (concurrent stopRecording) — skipping");
+                return;
+            }
+            dir = pendingRecordingDir;
+            prefix = pendingRecordingPrefix;
+            localRecorder = recorder;
+            localEncoder = (recorder != null) ? recorder.getEncoder() : null;
+        }
+        if (localRecorder == null || localEncoder == null) {
+            logger.info("checkPendingRecording: recorder/encoder torn down before kickoff — skipping");
+            return;
+        }
+
+        // FIX (audit R6): probe storage write-readiness BEFORE the inner
+        // recorder.startRecording(), mirroring the synchronous startRecording()
+        // path's pre-flight probe at line 1954. The deferred path historically
+        // skipped this probe, inheriting the inner call's risk of blocking
+        // indefinitely on a half-mounted USB volume (mkdirs / ensureRecordingsSpace
+        // / new MediaMuxer can hang). On probe failure, re-arm pending state and
+        // schedule the storage-ready retry instead of pinning the
+        // PendingRecKickoff thread.
+        java.io.File probeDir = (dir != null) ? dir
+                : StorageManager.getInstance().getRecordingsDir();
+        if (!isStorageWriteReady(probeDir)) {
+            logger.warn("Deferred start: storage volume not write-ready (probe failed/timed out) — "
+                + "rescheduling retry instead of issuing inner recorder.startRecording");
+            // Keep pending state intact (do not null) so retry has the args.
+            pendingRecordingDir = dir;
+            pendingRecordingPrefix = prefix;
+            recordingMode = true;
+            scheduleStorageReadyRetry(dir, prefix);
+            return;
+        }
+
         pendingRecordingDir = null;
         pendingRecordingPrefix = null;
-        
+
         logger.info("Encoder now ready — starting deferred recording");
-        recorder.startRecording(dir, prefix);
-        if (recorder.isRecording()) {
+        localRecorder.startRecording(dir, prefix);
+        if (localRecorder.isRecording()) {
             currentMode = Mode.NORMAL_RECORDING;
             recordingMode = true;
-            recorder.setOverlayRecordingModeAllowed(true);
+            // FIX (audit R3, Findings 3+6): remember the active session so a
+            // subsequent camera yield can resume via pipeline.startRecording.
+            activeRecordingDir = dir;
+            activeRecordingPrefix = prefix;
+            localRecorder.setOverlayRecordingModeAllowed(true);
             if (telemetryCollector != null) {
                 telemetryCollector.setOverlayRecordingActive(true);
                 telemetryCollector.startPolling();
@@ -1759,14 +2382,22 @@ public class GpuSurveillancePipeline {
     // (e.g. gear D->P), so it can never resurrect a recording after the driver
     // has parked.
     private volatile Thread storageRetryThread;
+    private volatile Thread storageSlowRetryThread;
+    private volatile boolean slowRetryRunning = false;
     private static final long STORAGE_RETRY_INTERVAL_MS = 2000L;
     private static final long STORAGE_RETRY_TIMEOUT_MS = 60_000L;
+    private static final long STORAGE_SLOW_RETRY_INTERVAL_MS = 30_000L;
     private static final long STORAGE_PROBE_TIMEOUT_MS = 1500L;
 
     private synchronized void scheduleStorageReadyRetry(java.io.File outputDir, String prefix) {
         if (storageRetryThread != null && storageRetryThread.isAlive()) {
             return;  // a retry is already in flight
         }
+        // FIX (audit R5): pin retry to current pipeline generation. Compound
+        // state checks (recorder snapshot + isFormatAvailable + storage probe)
+        // can straddle a stop()-then-start() and silently mutate the new
+        // pipeline. Generation gate is the single check that catches that.
+        final long capturedGen = pipelineGen.get();
         storageRetryThread = new Thread(() -> {
             long deadline = System.currentTimeMillis() + STORAGE_RETRY_TIMEOUT_MS;
             int attempt = 0;
@@ -1775,6 +2406,23 @@ public class GpuSurveillancePipeline {
                     Thread.sleep(STORAGE_RETRY_INTERVAL_MS);
                 } catch (InterruptedException e) {
                     return;  // cancelled (stopRecording / success)
+                }
+                // FIX (audit R5): generation gate — bail if pipeline cycled.
+                if (pipelineGen.get() != capturedGen) {
+                    logger.info("Storage-ready retry: pipeline generation rotated ("
+                        + capturedGen + "→" + pipelineGen.get() + ") — exiting");
+                    return;
+                }
+                // FIX (audit R1): re-check the pipeline lifecycle on every
+                // wake. The cancel path (cancelStorageReadyRetry) issues an
+                // interrupt, but the real stop signal arrives only after the
+                // 1500ms isStorageWriteReady probe finishes. By the time the
+                // loop body would dereference recorder/encoder, stop() may
+                // already have nulled them. Refuse to proceed if the pipeline
+                // is mid-stop or no longer running.
+                if (stopping || !running) {
+                    logger.info("Storage-ready retry: pipeline stopped — exiting");
+                    return;
                 }
                 // Bail if the request was cancelled (gear change) or already
                 // satisfied by another path.
@@ -1789,14 +2437,30 @@ public class GpuSurveillancePipeline {
                     StorageManager.getInstance().ensureStorageReady(false);
                     java.io.File probeDir = (outputDir != null) ? outputDir
                             : StorageManager.getInstance().getRecordingsDir();
-                    if (recorder != null && recorder.getEncoder() != null
-                            && recorder.getEncoder().isFormatAvailable()
+                    // FIX (audit R1): snapshot recorder + re-verify pipeline is
+                    // running BEFORE startRecording so a concurrent stop() that
+                    // nulled recorder/encoder mid-probe can't drop us into
+                    // half-built muxer.tmp + zombie recording=true state.
+                    GpuMosaicRecorder snapRec = recorder;
+                    if (stopping || !running || snapRec == null) {
+                        logger.info("Storage-ready retry: pipeline torn down mid-probe — exiting");
+                        return;
+                    }
+                    if (snapRec.getEncoder() != null
+                            && snapRec.getEncoder().isFormatAvailable()
                             && isStorageWriteReady(probeDir)) {
-                        recorder.startRecording(outputDir, prefix);
-                        if (recorder.isRecording()) {
+                        snapRec.startRecording(outputDir, prefix);
+                        if (snapRec.isRecording()) {
                             currentMode = Mode.NORMAL_RECORDING;
                             recordingMode = true;
-                            recorder.setOverlayRecordingModeAllowed(true);
+                            // FIX (audit R4, Finding 5): mirror startRecording's
+                            // success path — capture active session so a later
+                            // camera-yield resume (onPostReacquire) can re-enter
+                            // pipeline.startRecording with the correct dir/prefix
+                            // instead of falling back to the default "cam"/null.
+                            activeRecordingDir = outputDir;
+                            activeRecordingPrefix = prefix;
+                            snapRec.setOverlayRecordingModeAllowed(true);
                             if (telemetryCollector != null) {
                                 telemetryCollector.setOverlayRecordingActive(true);
                                 telemetryCollector.startPolling();
@@ -1805,7 +2469,24 @@ public class GpuSurveillancePipeline {
                             pendingRecordingPrefix = null;
                             logger.info("Normal recording started on storage retry #" + attempt
                                 + " (dir=" + (outputDir != null ? outputDir.getName() : "default")
-                                + ", prefix=" + prefix + ")");
+                                + ", prefix=" + prefix + ", active session captured)");
+                            // FIX (audit R1): notify RMM so modeActive gets
+                            // re-evaluated. Without this, RMM still has
+                            // modeActive=false from the original cold-start
+                            // failure, so the next ticker fires
+                            // activateModeWithWarmup → pipeline.stopRecording
+                            // → kills the recording we just started.
+                            try {
+                                com.overdrive.app.recording.RecordingModeManager rmm =
+                                    com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                if (rmm != null) {
+                                    rmm.resyncFromHardware("storage-retry-success");
+                                    logger.info("RMM resynced after storage-retry success");
+                                }
+                            } catch (Throwable t) {
+                                logger.warn("RMM resync after storage-retry failed: "
+                                    + t.getMessage());
+                            }
                             return;
                         }
                     }
@@ -1815,18 +2496,162 @@ public class GpuSurveillancePipeline {
                     logger.warn("Storage-ready retry #" + attempt + " error: " + e.getMessage());
                 }
             }
-            logger.warn("Storage-ready retry gave up after "
-                + (STORAGE_RETRY_TIMEOUT_MS / 1000) + "s — USB never became write-ready");
+            logger.warn("Storage retry hit " + (STORAGE_RETRY_TIMEOUT_MS / 1000)
+                + "s timeout — switching to slow-retry every "
+                + (STORAGE_SLOW_RETRY_INTERVAL_MS / 1000) + "s");
+            // Hand off to the slow-retry loop. Without this, the daemon would
+            // sit in a "modeActive=true, pipeline running, NOT recording"
+            // zombie state forever — pendingRecordingPrefix/recordingMode are
+            // still set, but no thread is checking storage anymore. The slow
+            // retry runs at a much lower cadence (30s) so it's effectively
+            // free, and auto-cancels on stop()/release()/stopRecording() via
+            // the slowRetryRunning flag.
+            scheduleStorageSlowRetry(outputDir, prefix);
         }, "RecStorageRetry");
         storageRetryThread.setDaemon(true);
         storageRetryThread.start();
     }
 
+    /**
+     * Slow-retry tail of the cold-start storage retry. Activates when the
+     * 60s fast-retry give-up fires, and re-checks storage every 30s. On
+     * success (storage ready AND pendingRecordingPrefix still set), it
+     * runs the same start-recording logic as the fast retry. Auto-cancels
+     * via {@link #slowRetryRunning} when:
+     *   - the user changes mode (pendingRecordingPrefix becomes null),
+     *   - recording starts via any path,
+     *   - the pipeline is stopped/released,
+     *   - {@link #cancelStorageReadyRetry()} is called.
+     *
+     * Bounded by the slowRetryRunning sentinel — there is no hard time
+     * cap because the wedge being recovered (USB never mounted, SD never
+     * came back, fs corruption that eventually heals) can persist for an
+     * arbitrary fraction of the drive. The cost of an idle 30s tick is
+     * a single ensureStorageReady(false) call and a write probe, which is
+     * a few ms on a healthy volume.
+     */
+    private synchronized void scheduleStorageSlowRetry(java.io.File outputDir, String prefix) {
+        if (storageSlowRetryThread != null && storageSlowRetryThread.isAlive()) {
+            return;  // a slow retry is already in flight
+        }
+        slowRetryRunning = true;
+        // FIX (audit R5): pin slow retry to current pipeline generation too.
+        final long capturedGen = pipelineGen.get();
+        storageSlowRetryThread = new Thread(() -> {
+            int attempt = 0;
+            while (slowRetryRunning) {
+                try {
+                    Thread.sleep(STORAGE_SLOW_RETRY_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    return;  // cancelled (stop / release / stopRecording / success)
+                }
+                if (!slowRetryRunning) return;
+                // FIX (audit R5): generation gate.
+                if (pipelineGen.get() != capturedGen) {
+                    logger.info("Slow-retry: pipeline generation rotated ("
+                        + capturedGen + "→" + pipelineGen.get() + ") — exiting");
+                    return;
+                }
+                // FIX (audit R1): re-check pipeline lifecycle on every wake.
+                if (stopping || !running) {
+                    logger.info("Slow-retry: pipeline stopped — exiting");
+                    return;
+                }
+                // Bail if the request was cancelled (gear change / mode
+                // change cleared the pending intent) or already satisfied.
+                if (pendingRecordingPrefix == null && !recordingMode) {
+                    logger.info("Slow-retry: pending intent cleared — exiting");
+                    return;
+                }
+                if (recorder != null && recorder.isRecording()) {
+                    logger.info("Slow-retry: recording already started — exiting");
+                    return;
+                }
+                attempt++;
+                try {
+                    StorageManager.getInstance().ensureStorageReady(false);
+                    java.io.File probeDir = (outputDir != null) ? outputDir
+                            : StorageManager.getInstance().getRecordingsDir();
+                    // FIX (audit R1): snapshot recorder + re-verify pipeline
+                    // is running before startRecording (concurrent-stop NPE
+                    // / zombie-recording guard).
+                    GpuMosaicRecorder snapRec = recorder;
+                    if (stopping || !running || snapRec == null) {
+                        logger.info("Slow-retry: pipeline torn down mid-probe — exiting");
+                        return;
+                    }
+                    if (snapRec.getEncoder() != null
+                            && snapRec.getEncoder().isFormatAvailable()
+                            && isStorageWriteReady(probeDir)) {
+                        snapRec.startRecording(outputDir, prefix);
+                        if (snapRec.isRecording()) {
+                            currentMode = Mode.NORMAL_RECORDING;
+                            recordingMode = true;
+                            // FIX (audit R4, Finding 5): mirror startRecording's
+                            // success path — capture active session so a later
+                            // camera-yield resume can re-enter pipeline.start
+                            // Recording with the correct dir/prefix instead of
+                            // falling back to default.
+                            activeRecordingDir = outputDir;
+                            activeRecordingPrefix = prefix;
+                            snapRec.setOverlayRecordingModeAllowed(true);
+                            if (telemetryCollector != null) {
+                                telemetryCollector.setOverlayRecordingActive(true);
+                                telemetryCollector.startPolling();
+                            }
+                            pendingRecordingDir = null;
+                            pendingRecordingPrefix = null;
+                            logger.info("Normal recording started on storage SLOW-retry #"
+                                + attempt
+                                + " (dir=" + (outputDir != null ? outputDir.getName() : "default")
+                                + ", prefix=" + prefix + ", active session captured)");
+                            // FIX (audit R1): notify RMM after slow-retry success
+                            // so modeActive gets re-evaluated and the resync
+                            // ticker doesn't tear down the just-started recording.
+                            try {
+                                com.overdrive.app.recording.RecordingModeManager rmm =
+                                    com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                if (rmm != null) {
+                                    rmm.resyncFromHardware("storage-slow-retry-success");
+                                    logger.info("RMM resynced after slow-retry success");
+                                }
+                            } catch (Throwable t) {
+                                logger.warn("RMM resync after slow-retry failed: "
+                                    + t.getMessage());
+                            }
+                            slowRetryRunning = false;
+                            return;
+                        }
+                    }
+                    logger.info("Storage slow-retry #" + attempt
+                        + ": still not write-ready, will retry in "
+                        + (STORAGE_SLOW_RETRY_INTERVAL_MS / 1000) + "s");
+                } catch (Exception e) {
+                    logger.warn("Storage slow-retry #" + attempt + " error: " + e.getMessage());
+                }
+            }
+        }, "RecStorageSlowRetry");
+        storageSlowRetryThread.setDaemon(true);
+        storageSlowRetryThread.start();
+    }
+
     private synchronized void cancelStorageReadyRetry() {
+        // Cancel both the fast retry and the slow-retry tail. Either or
+        // both may be alive depending on how far through the cold-start
+        // recovery we are. Setting slowRetryRunning=false is the primary
+        // exit signal for the slow loop; the interrupt below additionally
+        // unblocks a sleeping slow-retry thread so the cancel returns
+        // promptly rather than after the next 30s tick.
+        slowRetryRunning = false;
         Thread t = storageRetryThread;
         if (t != null) {
             t.interrupt();
             storageRetryThread = null;
+        }
+        Thread st = storageSlowRetryThread;
+        if (st != null) {
+            st.interrupt();
+            storageSlowRetryThread = null;
         }
     }
 
@@ -1891,9 +2716,21 @@ public class GpuSurveillancePipeline {
         // encoder isn't ready yet. If a gear change (D→N/P) triggers stopRecording()
         // before the encoder is ready, the pending request survives and fires later —
         // starting recording in the wrong gear state. Clearing it here prevents that.
-        pendingRecordingDir = null;
-        pendingRecordingPrefix = null;
-        recordingMode = false;
+        // FIX (audit R7): clear under `synchronized (this)` so a concurrent
+        // checkPendingRecording (encoder format-available listener thread) sees
+        // the clear atomically — without this, the listener can capture a
+        // non-null prefix AFTER recorder.stopRecording has run and start a
+        // ghost recording against the freshly-stopped recorder.
+        synchronized (this) {
+            pendingRecordingDir = null;
+            pendingRecordingPrefix = null;
+            // FIX (audit R3, Findings 3+6): drop active-session memory; a yield
+            // after this point should NOT auto-resume because the user/RMM has
+            // explicitly stopped.
+            activeRecordingDir = null;
+            activeRecordingPrefix = null;
+            recordingMode = false;
+        }
         cancelStorageReadyRetry();
 
         if (recorder != null) {
@@ -1981,49 +2818,106 @@ public class GpuSurveillancePipeline {
     public void onAccOn() {
         logger.info("ACC ON detected - stopping surveillance and finalizing recordings");
 
-        // First, stop any active recording immediately (synchronous)
-        if (recorder != null && recorder.isRecording()) {
-            logger.info("Stopping active recording before ACC transition");
-            recorder.stopRecording();
-        }
-
-        // Also flush and close the encoder to ensure file is finalized
-        if (encoder != null && encoder.isWritingToFile()) {
-            logger.info("Flushing encoder before ACC transition");
-            encoder.flushAndClose();
-        }
-
-        // Now disable surveillance mode
-        if (currentMode == Mode.SURVEILLANCE) {
-            disableSurveillance();
-        }
-
-        // Also stop normal recording if active
-        if (currentMode == Mode.NORMAL_RECORDING) {
-            stopRecording();
-        }
-
-        // ESCO-PARITY: dilink4 never closes the AVMCamera handle. esco's
-        // PanoCameraRecord stays alive across ACC ON; the BYD native AVC app
-        // attaches as a co-consumer of the AVM HAL daemon (gl/C5920a.java
-        // observerSet) and shares the producer surface naturally.
-        // reopenCamera() does a full close+reopen of our AVMCamera handle,
-        // which on byd_apa firmware drops mosaic mode and leaves the next
-        // open with all-zero frames — exactly what the user reports.
-        //
-        // Legacy fleet keeps the original "release and reopen as secondary
-        // consumer" behaviour because that's how non-byd_apa HALs share.
-        boolean dilink4 = false;
         try {
-            dilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
-        } catch (Throwable ignored) {}
-        if (camera != null && running && !dilink4) {
-            camera.reopenCamera();
-            logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
-        } else if (dilink4) {
-            logger.info("ACC ON transition complete - dilink4 keeps camera alive (esco-parity, no reopen)");
-        } else {
-            logger.info("ACC ON transition complete - all recordings finalized");
+            // First, stop any active recording immediately (synchronous)
+            if (recorder != null && recorder.isRecording()) {
+                logger.info("Stopping active recording before ACC transition");
+                recorder.stopRecording();
+            }
+
+            // Also flush and close the encoder to ensure file is finalized
+            if (encoder != null && encoder.isWritingToFile()) {
+                logger.info("Flushing encoder before ACC transition");
+                encoder.flushAndClose();
+            }
+
+            // Now disable surveillance mode
+            if (currentMode == Mode.SURVEILLANCE) {
+                disableSurveillance();
+                // FIX (audit R5): a surveillance trigger that landed between
+                // the initial recorder.stopRecording above and sentry.disable
+                // here can re-arm the recorder. disableSurveillance only
+                // tears down the sentry listener; an event that already
+                // crossed the threshold and called recorder.startRecording
+                // is still alive. Drain it now, before camera.reopenCamera —
+                // otherwise reopenCamera nukes the producer surface mid-write
+                // and the segment finalizes corrupted.
+                if (recorder != null && recorder.isRecording()) {
+                    logger.warn("onAccOn: surveillance re-armed recorder during stop window — "
+                        + "draining before camera reopen");
+                    try { recorder.stopRecording(); }
+                    catch (Throwable t) { logger.warn("onAccOn: post-disable drain failed: " + t.getMessage()); }
+                }
+            }
+
+            // Also stop normal recording if active
+            if (currentMode == Mode.NORMAL_RECORDING) {
+                stopRecording();
+            }
+
+            // FIX (audit R5): clear deferred-recording state unconditionally.
+            // currentMode could be SURVEILLANCE or IDLE here (above branches
+            // only handle NORMAL_RECORDING via stopRecording — which clears
+            // these — and SURVEILLANCE via disableSurveillance — which does
+            // NOT). A pending intent left over from cold-start could
+            // otherwise resurrect a recording after camera reopen, against
+            // RMM's intent. RMM re-issues post-ACC if the new mode demands.
+            if (pendingRecordingDir != null || pendingRecordingPrefix != null
+                    || recordingMode) {
+                logger.info("onAccOn: clearing residual deferred-recording state "
+                    + "(pending=" + pendingRecordingPrefix
+                    + ", recordingMode=" + recordingMode + ")");
+                pendingRecordingDir = null;
+                pendingRecordingPrefix = null;
+                recordingMode = false;
+            }
+            try { cancelStorageReadyRetry(); }
+            catch (Throwable t) { logger.warn("onAccOn: cancelStorageReadyRetry failed: " + t.getMessage()); }
+
+            // Reset config-side recording mode back to NORMAL so the next
+            // startRecording() doesn't apply SENTRY-tier bitrate left over
+            // from a prior surveillance session. Done before camera reopen
+            // so the transition lands in a fully consistent state.
+            try {
+                config.setRecordingMode(GpuPipelineConfig.RecordingMode.NORMAL);
+            } catch (Throwable t) {
+                logger.warn("onAccOn: config.setRecordingMode(NORMAL) failed: " + t.getMessage());
+            }
+
+            // ESCO-PARITY: dilink4 never closes the AVMCamera handle. esco's
+            // PanoCameraRecord stays alive across ACC ON; the BYD native AVC app
+            // attaches as a co-consumer of the AVM HAL daemon (gl/C5920a.java
+            // observerSet) and shares the producer surface naturally.
+            // reopenCamera() does a full close+reopen of our AVMCamera handle,
+            // which on byd_apa firmware drops mosaic mode and leaves the next
+            // open with all-zero frames — exactly what the user reports.
+            //
+            // Legacy fleet keeps the original "release and reopen as secondary
+            // consumer" behaviour because that's how non-byd_apa HALs share.
+            boolean dilink4 = false;
+            try {
+                dilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+            } catch (Throwable ignored) {}
+            if (camera != null && running && !dilink4) {
+                camera.reopenCamera();
+                logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
+            } else if (dilink4) {
+                logger.info("ACC ON transition complete - dilink4 keeps camera alive (esco-parity, no reopen)");
+            } else {
+                logger.info("ACC ON transition complete - all recordings finalized");
+            }
+        } catch (Throwable t) {
+            // Any failure mid-transition leaves the pipeline in a half-mutated
+            // state (currentMode flipped, running=true, dead camera handle).
+            // Force a full stop so the next caller sees a clean slate and can
+            // do a fresh start() — better to drop a few frames than to wedge
+            // recording for the rest of the drive.
+            logger.error("onAccOn failed mid-transition — forcing full stop to recover: "
+                + t.getMessage());
+            try { stop(); } catch (Throwable t2) {
+                logger.warn("Recovery stop also failed: " + t2.getMessage());
+            }
+            throw t instanceof RuntimeException ? (RuntimeException) t : new RuntimeException(t);
         }
     }
     
@@ -2310,7 +3204,14 @@ public class GpuSurveillancePipeline {
                             //     recording yet) — without this the pipeline would tear
                             //     down between trigger windows and the next event would
                             //     silently no-op against a null recorder.
-                            boolean pendingRec = pendingRecordingDir != null;
+                            // FIX (audit R1): use pendingRecordingPrefix, not
+                            // pendingRecordingDir. startRecording(null, "cam") is
+                            // the default-dir CONTINUOUS path — it sets prefix
+                            // but leaves dir null, so the old guard always
+                            // evaluated false and the WS-idle teardown would
+                            // tear the pipeline down out from under a deferred
+                            // recording that hadn't yet landed.
+                            boolean pendingRec = pendingRecordingPrefix != null;
                             // ESCO-PARITY: dilink4 keeps the pipeline alive
                             // unconditionally — esco's PanoCameraRecord is
                             // started at boot and never stopped on stream-
@@ -2664,10 +3565,24 @@ public class GpuSurveillancePipeline {
     public boolean isRecordingMode() {
         return recordingMode;
     }
-    
+
+    /**
+     * Current deferred-record prefix, or {@code null} if no record is pending.
+     * Surfaced for {@link com.overdrive.app.recording.RecordingModeManager} so
+     * its resync ticker can distinguish "modeActive=true but pipeline isn't
+     * actually writing frames AND isn't waiting on a deferred-record path"
+     * (which is genuinely wedged and warrants a re-activation) from "modeActive
+     * but a deferred record is still in flight" (which is a normal transient
+     * state and should not retrigger). Volatile field already; this is just a
+     * read-through getter.
+     */
+    public String getPendingRecordingPrefix() {
+        return pendingRecordingPrefix;
+    }
+
     /**
      * Checks if initialized.
-     * 
+     *
      * @return true if initialized
      */
     public boolean isInitialized() {
@@ -2719,13 +3634,46 @@ public class GpuSurveillancePipeline {
     
     /**
      * Gets the surveillance engine.
-     * 
+     *
      * @return SurveillanceEngineGpu instance
      */
     public SurveillanceEngineGpu getSentry() {
         return sentry;
     }
-    
+
+    /**
+     * Gets the pano mosaic recorder. Used by the storage watchdog to
+     * re-poke the recorder's output dir after a hot SD/USB remount, so
+     * future segments land on the freshly-mounted volume rather than the
+     * stale (vanished) mount point captured at startRecording time.
+     *
+     * @return the active {@link GpuMosaicRecorder}, or {@code null} when
+     *         the pipeline has not yet created one (pre-init / post-release).
+     */
+    /**
+     * Last time GpuMosaicRecorder closed a recording file (segment rotation
+     * or final stop). Read by RecordingModeManager's wedge ticker so a
+     * normal segment-boundary isRecording()=false flicker doesn't get
+     * misread as a wedge that needs re-activation.
+     *
+     * @return wallclock millis of last file-closed callback, 0 if none yet.
+     */
+    public long getLastSegmentRotateMs() {
+        return lastSegmentRotateMs;
+    }
+
+    /**
+     * Stamps the segment-rotation timestamp. Called from GpuMosaicRecorder's
+     * file-closed callback.
+     */
+    void noteSegmentRotated() {
+        lastSegmentRotateMs = System.currentTimeMillis();
+    }
+
+    public GpuMosaicRecorder getRecorder() {
+        return recorder;
+    }
+
     /**
      * Gets the adaptive bitrate controller.
      * 
@@ -2751,6 +3699,21 @@ public class GpuSurveillancePipeline {
      */
     public boolean isNormalRecordingMode() {
         return currentMode == Mode.NORMAL_RECORDING;
+    }
+
+    /**
+     * FIX (audit R5): expose the encoder's last-encoded-frame timestamp so
+     * RMM's wedge ticker can detect encoder hangs that don't surface in
+     * isRunning()/isRecording(). Returns 0 when the encoder is null, has
+     * not been initialized, or has not produced a coded frame yet — caller
+     * must treat 0 as "no signal" (skip the wedge check). Returns the wall
+     * clock time (System.currentTimeMillis) of the last
+     * dequeueOutputBuffer that yielded a real coded frame.
+     */
+    public long getLastEncodedFrameMs() {
+        HardwareEventRecorderGpu enc = encoder;
+        if (enc == null) return 0L;
+        return enc.getLastEncodedFrameMs();
     }
     
     /**

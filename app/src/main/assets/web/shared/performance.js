@@ -620,16 +620,50 @@ BYD.performance = {
         
         // Update CPU metrics
         if (data.cpu) {
-            this.updateMetric('cpuValue', data.cpu.system, '');
-            this.updateMetric('cpuAppValue', data.cpu.app, '');
-            this.updateBar('cpuBar', data.cpu.app);  // Show app CPU on bar
+            // The CPU card shows TWO representations so neither is ambiguous:
+            //
+            //   PRIMARY (headline + bar + graph): WHOLE-DEVICE % (0-100, 100% =
+            //   the entire machine). Intuitive — app ≤ system always, the bar
+            //   can't peg, and a viewer reads "how much of my head unit is
+            //   busy". This is the big number.
+            //
+            //   SECONDARY (mono "top ·" line): TOP-STYLE per-core % (100% = one
+            //   core, ceiling = cores × 100) so it cross-checks against a live
+            //   `top`. The core count and the cores×100 ceiling are shown
+            //   explicitly so "app 320%" can't confuse anyone.
+            //
+            // cores is auto-detected daemon-side; default 1 (no scaling) for
+            // older daemons that don't send it, preserving prior behaviour.
+            var cores = data.cpu.cores || 1;
+
+            // Whole-device (primary). data.cpu.app arrives per-core, so ÷cores.
+            var appWholeDevice = data.cpu.app / cores;
+            var systemWholeDevice = data.cpu.system; // already 0-100
+
+            // Top-style (secondary). data.cpu.system is whole-device, so ×cores.
+            var systemPerCore = data.cpu.system * cores;
+
+            // Primary headline + bar + status — all whole-device 0-100.
+            this.updateMetric('cpuValue', systemWholeDevice, '');   // system, % of device
+            this.updateMetric('cpuAppValue', appWholeDevice, '');   // app, % of device
+            this.updateBar('cpuBar', appWholeDevice);
             this.updateMetric('cpuFreq', data.cpu.freqMhz, ' MHz');
             this.updateMetric('cpuTemp', data.cpu.tempC, '°C');
-            this.setCardStatus('cpuCard', data.cpu.app);  // Status based on app CPU
-            
-            // Update history
-            this.pushHistory('cpuSystem', data.cpu.system);
-            this.pushHistory('cpuApp', data.cpu.app);
+            this.setCardStatus('cpuCard', appWholeDevice);
+
+            // Secondary top-style line — matches `top`, with explicit context.
+            this.updateMetric('cpuTopApp', data.cpu.app, '');       // per-core, matches `top`
+            this.updateMetric('cpuTopSys', systemPerCore, '');      // per-core
+            var topEl = document.getElementById('cpuCores');
+            if (topEl) topEl.textContent = cores;
+            var maxEl = document.getElementById('cpuTopMax');
+            if (maxEl) maxEl.textContent = cores * 100;
+
+            // Chart shares a fixed 0-100 axis (drawLine maps value/100), so push
+            // whole-device values — system line never clips, both series
+            // directly comparable, app sits below system as it physically must.
+            this.pushHistory('cpuSystem', systemWholeDevice);
+            this.pushHistory('cpuApp', appWholeDevice);
         }
         
         // Update Memory metrics

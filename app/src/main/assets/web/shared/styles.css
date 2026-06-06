@@ -537,6 +537,43 @@ input, select { font-family: inherit; }
 
 .card + .card { margin-top: 24px; }
 
+/* RoadSense: a dependent card whose master switch is OFF. Dimmed + non-interactive
+   so its toggles don't read as live while they have no effect (the master_enable
+   gate). Controls are also `disabled` in JS; this is the visual half. The card
+   title/badge stay legible enough to read what the section is. */
+.card.rs-gated {
+    opacity: 0.45;
+    filter: saturate(0.6);
+    pointer-events: none;
+    transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+/* Single-line text/url input, design-system styled (the RoadSense worker-URL
+   field uses this; previously the class was undefined so it rendered with raw
+   browser chrome). Matches the elevated-surface + brand-accent focus language of
+   the rest of the app. */
+.text-input {
+    width: 100%;
+    min-width: 200px;
+    box-sizing: border-box;
+    padding: 11px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.text-input::placeholder { color: var(--text-muted); }
+.text-input:hover { border-color: var(--brand-primary); }
+.text-input:focus {
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px var(--brand-primary-translucent, rgba(87, 199, 255, 0.18));
+}
+.text-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .card-header {
     padding: 20px 24px;
     border-bottom: 1px solid var(--border-subtle);
@@ -577,6 +614,18 @@ input, select { font-family: inherit; }
 }
 
 .setting-row:last-child { border-bottom: none; }
+
+/* Vertical variant of .setting-row for long-value controls (e.g. a URL field):
+   label/description on top, full-width input below — same padding/divider so it
+   sits flush with the flex rows above it. */
+.setting-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.setting-stack:last-child { border-bottom: none; }
 
 .setting-info { flex: 1; min-width: 0; }
 
@@ -1273,6 +1322,11 @@ select.md-input ~ .md-label {
 .status-badge.inactive {
     background: var(--bg-elevated);
     color: var(--text-muted);
+}
+
+.status-badge.errored {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
 }
 
 /* === TIMELINE === */
@@ -3253,6 +3307,14 @@ select.md-input ~ .md-label {
     .mode-selector { grid-template-columns: 1fr; }
 }
 
+/* Hydration dim — until loadOemDashcam clears aria-busy, the picker
+ * looks "loading" rather than "currently set to Off". Avoids a visible
+ * flash from Off → actual saved mode on slow links. */
+.mode-selector[aria-busy="true"] .mode-card {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
 .mode-option {
     cursor: pointer;
     display: block;
@@ -3837,3 +3899,4 @@ select.md-input ~ .md-label {
     margin-top: 6px;
     line-height: 1.35;
 }
+

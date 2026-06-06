@@ -26,6 +26,14 @@ public class AccMonitor {
     // This prevents false "acc: true" in status when daemon restarts
     private static volatile boolean accOn = false;
 
+    // Distinguishes "we received an authoritative IPC from AccSentryDaemon"
+    // from "we're at the default ACC=false". RecordingModeManager's hardware
+    // fallback uses this to decide whether AccMonitor's state is trustworthy
+    // — without it, a CameraDaemon restart leaves accOn=false (default) and
+    // the recording pipeline can't tell that apart from a real ACC OFF, so
+    // it stays unrecorded for the rest of the drive.
+    private static volatile boolean accOnAuthoritative = false;
+
     // Track the last sentinel state we logged (FAKE_OK=4, INVALID=255, or
     // out-of-range value), so we log only on transitions. Without this,
     // a persistently broken HAL would emit ~2880 "powerLevel=INVALID" lines
@@ -83,11 +91,29 @@ public class AccMonitor {
     }
 
     /**
+     * True iff setAccState() has been called at least once since process
+     * start — i.e. we have an authoritative reading from AccSentryDaemon
+     * via IPC. False means accOn is still at its (false) default and
+     * callers should NOT treat it as "ACC is OFF" — it could be either.
+     *
+     * Used by RecordingModeManager.queryAccStateFromHardware to gate its
+     * fallback path: when AccMonitor isn't authoritative, the RMM probes
+     * the HAL directly instead of trusting the default.
+     */
+    public static boolean isAccStateAuthoritative() {
+        return accOnAuthoritative;
+    }
+
+    /**
      * Called by SurveillanceEngine IPC when AccSentryDaemon sends ACC state.
      */
     public static void setAccState(boolean isAccOn) {
         accOn = isAccOn;
         inSentryMode = !isAccOn;
+        // First IPC marks the state authoritative; stays authoritative for
+        // the rest of the process lifetime (subsequent IPCs just refresh
+        // the value).
+        accOnAuthoritative = true;
         CameraDaemon.log("ACC state updated via IPC: accOn=" + isAccOn + ", sentryMode=" + inSentryMode);
     }
 
@@ -123,17 +149,68 @@ public class AccMonitor {
             // last IPC from AccSentryDaemon is more reliable than a HAL
             // bluff. Return true (sentry) only if we're confident ACC=OFF.
             if (level < 0 || level > 3) {
-                // Log only when entering a new sentinel state; otherwise a
-                // persistently broken HAL would flood the log at the probe
-                // interval. Reset the sentinel tracker once we observe a
-                // real value again (handled in the success branch below).
-                if (lastLoggedSentinel != level) {
-                    CameraDaemon.log("AccMonitor: hardware probe powerLevel="
-                        + (level == 4 ? "FAKE_OK" : (level == 255 ? "INVALID" : "UNKNOWN(" + level + ")"))
-                        + " — keeping prior accOn=" + accOn);
-                    lastLoggedSentinel = level;
+                // Short retry loop with backoff before treating sentinel as
+                // authoritative. Prior-audit found that boot-time probes
+                // (CameraDaemon post-init drain at ~line 678 and boot
+                // recovery at ~line 970) hit a sentinel reading + cold
+                // AccMonitor cache (accOn defaults to false), then fell
+                // through to "return !accOn" = true = ACC OFF. That
+                // dispatched a false ACC-OFF mid-drive, dropping pano
+                // CONTINUOUS / DRIVE_MODE recording. Retry up to 2
+                // additional times × 200 ms — transient HAL bluffs settle
+                // within ~400 ms in practice (matches the 200-500 ms
+                // ignition transient window already documented in
+                // AccSentryDaemon's heartbeat).
+                int retryLevel = level;
+                for (int attempt = 0; attempt < 2 && (retryLevel < 0 || retryLevel > 3); attempt++) {
+                    try {
+                        Thread.sleep(200L);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    try {
+                        retryLevel = (Integer) bodyworkGetPowerLevelCache.invoke(device);
+                    } catch (Exception probeEx) {
+                        // Keep retryLevel at its prior sentinel; outer
+                        // catch handles any reflection failure on the
+                        // first invoke. A transient invoke failure here
+                        // just means we exit the retry loop with a
+                        // sentinel and apply the conservative branch.
+                        break;
+                    }
                 }
-                return !accOn;
+                if (retryLevel >= 0 && retryLevel <= 3) {
+                    CameraDaemon.log("AccMonitor: hardware probe sentinel="
+                        + (level == 4 ? "FAKE_OK" : (level == 255 ? "INVALID" : "UNKNOWN(" + level + ")"))
+                        + " settled to level=" + retryLevel + " after retry");
+                    level = retryLevel;
+                    // Fall through to the real-reading branch below.
+                } else {
+                    // Log only when entering a new sentinel state; otherwise a
+                    // persistently broken HAL would flood the log at the probe
+                    // interval. Reset the sentinel tracker once we observe a
+                    // real value again (handled in the success branch below).
+                    if (lastLoggedSentinel != level) {
+                        CameraDaemon.log("AccMonitor: hardware probe powerLevel="
+                            + (level == 4 ? "FAKE_OK" : (level == 255 ? "INVALID" : "UNKNOWN(" + level + ")"))
+                            + " — keeping prior accOn=" + accOn
+                            + " authoritative=" + accOnAuthoritative);
+                        lastLoggedSentinel = level;
+                    }
+                    // When we have NO authoritative state yet (cold cache,
+                    // accOn=false default), the "!accOn" return would
+                    // falsely claim ACC=OFF on a HAL bluff. Refuse to
+                    // claim sentry in that case — return false (ACC ON,
+                    // safe default that keeps recording alive). Only
+                    // trust the prior state when an authoritative IPC
+                    // has already established it.
+                    if (!accOnAuthoritative) {
+                        CameraDaemon.log("AccMonitor: sentinel + cold cache — returning ACC ON (safe default, not sentry)");
+                        return false;
+                    }
+                    return !accOn;
+                }
             }
             // Real reading — clear the sentinel tracker so the next sentinel
             // (if any) gets logged. Also log the recovery once.

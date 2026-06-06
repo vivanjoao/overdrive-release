@@ -335,6 +335,24 @@ public class SurveillanceIpcServer implements Runnable {
                     response.put("success", true);
                     break;
 
+                // ==================== ROADSENSE ====================
+                // Batched IMU frames from the app-side RoadSense sidecar (D-023).
+                // Feed straight into the daemon-side RoadSenseController pipeline.
+                case com.overdrive.app.roadsense.detect.ImuFrameCodec.COMMAND: { // "IMU_BATCH"
+                    int n = 0;
+                    com.overdrive.app.roadsense.RoadSenseController rs =
+                            com.overdrive.app.daemon.CameraDaemon.getRoadSense();
+                    if (rs != null) {
+                        // The server already parsed the line into `request`; the
+                        // codec decodes from the same JSON. request.toString()
+                        // round-trips cleanly at the ~10 batches/sec rate.
+                        n = rs.onImuBatch(request.toString());
+                    }
+                    response.put("success", true);
+                    response.put("samples", n);
+                    break;
+                }
+
                 // ==================== ABRP COMMANDS ====================
                 case "SET_ABRP_CONFIG":
                     handleSetAbrpConfig(request, response);

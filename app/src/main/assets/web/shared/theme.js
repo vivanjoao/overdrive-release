@@ -233,6 +233,28 @@
         wrap.style.top = wrap.style.bottom = wrap.style.left = wrap.style.right = '';
         wrap.style.transform = '';
 
+        // Ensure we have a MutationObserver watching for footer-bar /
+        // mobile-nav appearing AFTER first mount. Without this, on
+        // pages like recording.html / trips.html / surveillance.html
+        // the footer-bar is added by per-page JS after DOMContentLoaded
+        // — well after mountPicker runs — so the first applyPickerAnchor
+        // sees no sticky bar and falls through to the bottom-right
+        // default. The picker then visibly sits on top of the Apply
+        // Changes button until the user hard-refreshes (which by chance
+        // races the page-JS to mount the footer first).
+        if (!wrap._domObs) {
+            wrap._domObs = new MutationObserver(function () {
+                // Coalesce — many pages add multiple sticky elements in
+                // quick succession during init. 80ms throttle matches the
+                // resize debounce.
+                if (wrap._domObsTimer) clearTimeout(wrap._domObsTimer);
+                wrap._domObsTimer = setTimeout(function () {
+                    applyPickerAnchor(wrap);
+                }, 80);
+            });
+            wrap._domObs.observe(document.body, { childList: true, subtree: true });
+        }
+
         // Vehicle Control — keep on the RIGHT (per design), but stay clear
         // of the 3D Surround button at top:56-100 and the vc-bar tab panel
         // at bottom (which has an expandable panel that grows up to ~200px
@@ -266,14 +288,18 @@
 
         // Events / Trips / Notifications / Recording / Surveillance — these
         // are scrollable list/form pages with a top filter bar and (on mobile)
-        // a bottom mobile-nav OR a sticky `.footer-bar` Apply-Changes panel.
-        // The footer-bar grows with `padding-bottom: calc(12px + 40px + safe-area)`
-        // on mobile (~108px tall, taller than the prior hardcoded 80px floor),
-        // which means the FAB landed INSIDE the footer-bar overlapping the
-        // Apply Changes button. Measure the actual rendered footer/nav height
-        // and clear it by 12px so the picker always sits above whatever
-        // sticky chrome the page has.
-        var stickyBottom = document.querySelector('.footer-bar, .mobile-nav, .tab-bar');
+        // a bottom mobile-nav OR a sticky `.footer-bar` Apply-Changes panel
+        // OR the bottom-tabs bar from app-tabs.js (which also hosts the
+        // relocated Apply button via .bottom-tab-action). The footer-bar
+        // grows with `padding-bottom: calc(12px + 40px + safe-area)` on
+        // mobile (~108px tall), which means the FAB landed INSIDE the
+        // footer-bar overlapping the Apply Changes button. Same risk on
+        // pages with .bottom-tabs (recording/surveillance/events/trips):
+        // the picker falls through to default bottom-right and lands ON
+        // TOP of the Apply slot inside the tab bar. Match either chrome
+        // and measure its actual rendered height + 12px clearance so the
+        // picker always sits above whatever sticky chrome the page has.
+        var stickyBottom = document.querySelector('.footer-bar, .mobile-nav, .tab-bar, .bottom-tabs');
         if (stickyBottom) {
             var stickyH = stickyBottom.getBoundingClientRect().height || 0;
             // Defensive minimum — if the bar hasn't laid out yet (zero
@@ -418,6 +444,63 @@
     window.BYD.theme.applyIcons = function () {
         var v = document.documentElement.getAttribute('data-theme');
         applyThemeIcons(v === 'light' ? 'light' : 'dark');
+    };
+
+    // ─── Step 7: Leaflet tile-layer theming ─────────────────────────────
+    // Live View map + Trips route maps + best/worst comparison map all use
+    // CartoCDN raster tiles. CartoCDN exposes a matching dark-grey style at
+    // the same endpoint shape, so theming is a URL swap on data-theme flips.
+    // Both styles share the abcd subdomain set, maxZoom 20, and retina
+    // ({r}) hints — the only difference is the style segment.
+    //   dark : dark_all        — flat dark-grey basemap (Google-Maps-dark
+    //                            lookalike) for in-app dark theme
+    //   light: rastertiles/voyager — colourful Google-Maps-light lookalike
+    //                            (the long-standing default)
+    var TILE_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+    var TILE_LIGHT = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+    function tileUrlForTheme() {
+        var v = document.documentElement.getAttribute('data-theme');
+        return v === 'light' ? TILE_LIGHT : TILE_DARK;
+    }
+    /**
+     * Attach a CartoCDN tile layer to a Leaflet map and keep it in sync with
+     * the current theme. Caller still owns the map; this just handles the
+     * layer's lifecycle. Returns the initial layer in case the caller needs
+     * to introspect it.
+     *
+     * Re-swap path: a single MutationObserver on <html data-theme> removes
+     * the old layer and adds a new one. The map keeps the same zoom/centre
+     * because we never touch the view — only the tile pyramid changes.
+     *
+     * Bound to the map's `remove` event so the observer stops firing once
+     * the map is destroyed (Trips tears down + recreates the route map on
+     * every trip-detail drill-in).
+     */
+    window.BYD.theme.attachMapTiles = function (map) {
+        if (!map || typeof L === 'undefined') return null;
+        var currentUrl = tileUrlForTheme();
+        var layer = L.tileLayer(currentUrl, { maxZoom: 20, subdomains: 'abcd' });
+        layer.addTo(map);
+        // Gate the swap on URL change. The Android WebView's onPageFinished
+        // re-stamps `data-theme` to the same value the bootstrap already set
+        // (belt-and-suspenders — see theme.js step 1 + WebViewFragment.kt
+        // INJECT_JS), which fires this observer redundantly. Without the
+        // short-circuit every Live View / Trips page-load drops the freshly-
+        // mounted tile layer and re-fetches identical tiles, producing a
+        // brief grid flash on the head unit's slow mobile data.
+        var obs = new MutationObserver(function () {
+            var next = tileUrlForTheme();
+            if (next === currentUrl) return;
+            currentUrl = next;
+            try {
+                if (map.hasLayer(layer)) map.removeLayer(layer);
+                layer = L.tileLayer(next, { maxZoom: 20, subdomains: 'abcd' });
+                layer.addTo(map);
+            } catch (e) { /* map may be mid-teardown — ignore */ }
+        });
+        obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+        map.on('remove', function () { obs.disconnect(); });
+        return layer;
     };
 
     // Initial apply (favicon only — brand-logo imgs may not exist yet) and

@@ -123,6 +123,14 @@ public class CameraDaemon {
     // Pending ACC OFF state: if ACC goes off before GPU pipeline is ready,
     // queue the request and apply it once the pipeline initializes
     private static volatile boolean pendingAccOff = false;
+    // Pending ACC ON state: symmetric counterpart so an ACC ON IPC that
+    // arrives before the GPU pipeline is ready isn't silently dropped. The
+    // drain at end of initSurveillance fires onAccStateChanged(false) once
+    // the pipeline is non-null, seeding RecordingModeManager so pano
+    // recording starts cleanly on cold-boot when ACC is already ON.
+    // Mutually exclusive with pendingAccOff — setting one always clears the
+    // other so the drain order is unambiguous.
+    private static volatile boolean pendingAccOn = false;
 
     // DiLink 4 post-ACC-OFF camera-open grace duration. esco hardcodes 60 s
     // (FlameoutService p111dh/C4995i.java:407 m22726w(60_000L)). Earlier
@@ -206,13 +214,57 @@ public class CameraDaemon {
 
     // ==================== TELEMETRY DATA COLLECTOR ====================
     private static volatile com.overdrive.app.telemetry.TelemetryDataCollector telemetryDataCollector;
-    
+
+    // ==================== ROADSENSE ====================
+    // Daemon-side road-hazard detection brain (D-019/D-023). Reuses the already-
+    // initialized BydDataCollector + GpsMonitor singletons; the app-side IMU
+    // sidecar feeds it via the IMU_BATCH IPC command (see handleCommand). Driven
+    // by the daemon housekeeping tick (onVehicleStatePoll + onWarningTick).
+    private static volatile com.overdrive.app.roadsense.RoadSenseController roadSense;
+
+    /** Accessor for the IPC server's IMU_BATCH case. */
+    public static com.overdrive.app.roadsense.RoadSenseController getRoadSense() { return roadSense; }
+
     // ==================== SHARED APP CONTEXT ====================
     // Volatile: written at boot AND re-published on ACC ON via
     // reinitContextDependentComponents (different thread). Without volatile,
     // the re-publication has no happens-before guarantee for arbitrary
     // readers (HTTP, monitors, IPC).
     private static volatile android.content.Context sharedAppContext = null;
+
+    // ==================== INIT-SURVEILLANCE RETRY (audit R2) ====================
+    // Cold-boot transients (AssetManager cookie=0, GpuSurveillancePipeline
+    // init throwing on a HAL race, DaemonBootstrap.getContext() crash during
+    // framework warm-up) can leave gpuPipeline=null with no retry path —
+    // pano recording stays dead until manual daemon kill / reboot. Schedule
+    // a bounded exponential-backoff retry from the catch block; gated by a
+    // CAS so concurrent callers don't queue duplicate retries.
+    private static final java.util.concurrent.atomic.AtomicBoolean initSurveillanceRetryInFlight =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final java.util.concurrent.atomic.AtomicInteger initSurveillanceRetryAttempts =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    // FIX (audit R8, finding "initSurveillance retry budget exhaustion"):
+    // dropped MAX_RETRIES cap. A bounded cap leaves pano permanently dead
+    // when transient HAL flakes outlive the 155s budget — same principle as
+    // the user memory rule "no retry cap on any watchdog". Backoff steps
+    // 5s/30s/120s/300s and then stays at 300s (5 min) forever; success
+    // short-circuits the retry, so unbounded retry is safe here.
+    private static final long[] INIT_SURVEILLANCE_RETRY_DELAYS_MS =
+        { 5_000L, 30_000L, 120_000L, 300_000L };
+    private static final long INIT_SURVEILLANCE_RETRY_MAX_DELAY_MS = 300_000L;
+
+    // ==================== SHARED-CONTEXT WATCHDOG (audit R2) ====================
+    // When initSurveillance() succeeds in constructing gpuPipeline but
+    // sharedAppContext was null, RecordingModeManager is never created and
+    // the boot probe queues pendingAccOn/Off without firing them. Spawn a
+    // one-shot poll thread that watches for sharedAppContext to become
+    // valid (e.g. system_server warm-up completes), then drives
+    // reinitContextDependentComponents() to construct rmm and drain the
+    // queue. CAS-guarded so we never spawn two of these.
+    private static final java.util.concurrent.atomic.AtomicBoolean contextWatchdogInFlight =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final long CONTEXT_WATCHDOG_POLL_INTERVAL_MS = 2_000L;
+    private static final long CONTEXT_WATCHDOG_MAX_DURATION_MS = 60_000L;
     
     /** Get the shared app context (for use by other components in this process). */
     public static android.content.Context getAppContext() { return sharedAppContext; }
@@ -287,6 +339,55 @@ public class CameraDaemon {
                 recordingModeManager = new com.overdrive.app.recording.RecordingModeManager(
                     sharedAppContext, gpuPipeline);
                 log("ACC ON: RecordingModeManager created with valid context");
+
+                // FIX (audit R1, finding "Boot probe vs initSurveillance early-return
+                // when sharedAppContext null"): drain queued pendingAccOn/Off into the
+                // freshly-created rmm. Without this, the boot-time queue (drains at
+                // initSurveillance + boot-probe at :898) sits stagnant until the
+                // user toggles ACC again. Mirrors the dispatch shape used by the
+                // initSurveillance drains; gpuPipeline is non-null in this branch.
+                try {
+                    if (pendingAccOn) {
+                        log("ACC ON: replaying pending ACC ON to newly-created rmm");
+                        pendingAccOn = false;
+                        recordingModeManager.onAccStateChanged(true);
+                        // FIX (audit R7, finding "reinitContextDependentComponents
+                        // drain bypasses daemon-level ACC-ON side-effects"):
+                        // the daemon-level onAccStateChanged(true) path also
+                        // starts GearMonitor and forwards current gear so
+                        // DRIVE_MODE recording can fire on gear changes. The
+                        // direct rmm replay above skips that, so DRIVE_MODE
+                        // would be wedged until the next AccSentry 30 s
+                        // heartbeat re-runs the full daemon chain. Start
+                        // GearMonitor and replay current gear here so
+                        // DRIVE_MODE recording is live immediately.
+                        try {
+                            com.overdrive.app.monitor.GearMonitor gm =
+                                com.overdrive.app.monitor.GearMonitor.getInstance();
+                            if (!gm.isRunning()) {
+                                try {
+                                    gm.start();
+                                    log("ACC ON drain: GearMonitor started (was not running)");
+                                } catch (Exception e) {
+                                    log("ACC ON drain: GearMonitor start failed: " + e.getMessage());
+                                }
+                            }
+                            if (gm.isRunning()) {
+                                int curGear = gm.getCurrentGear();
+                                log("ACC ON drain: replaying current gear=" + curGear + " to rmm");
+                                recordingModeManager.onGearChanged(curGear);
+                            }
+                        } catch (Throwable gt) {
+                            log("WARN: GearMonitor drain on context-recreate failed: " + gt.getMessage());
+                        }
+                    } else if (pendingAccOff) {
+                        log("ACC ON: replaying pending ACC OFF to newly-created rmm");
+                        pendingAccOff = false;
+                        recordingModeManager.onAccStateChanged(false);
+                    }
+                } catch (Throwable t) {
+                    log("WARN: rmm drain on context-recreate failed: " + t.getMessage());
+                }
             } catch (Exception e) {
                 log("ACC ON: RecordingModeManager creation failed: " + e.getMessage());
             }
@@ -612,18 +713,75 @@ public class CameraDaemon {
         // the config object is in sync and handles any settings that need runtime application
         applyPersistedSettings();
 
+        // FIX (audit R1): drains were reading AccMonitor.isAccOn() which
+        // defaults to false BEFORE the AccMonitor::start IPC seed and BEFORE
+        // the recovery HW probe at :883. On daemon restart with ACC actually
+        // ON, the race-guard branch silently discarded pendingAccOn. Probe
+        // hardware directly here so the guard reflects ground truth, not the
+        // uninitialised AccMonitor cache. probeAccState returns accIsOff
+        // (true == OFF); invert for accIsOn semantics used below.
+        //
+        // FIX (audit R4): probeAccState's sentinel branch returns `!accOn`,
+        // and at daemon boot accOn defaults to false → sentinel reading
+        // (powerLevel=4 FAKE_OK or 255 INVALID) lies "ACC OFF" and the
+        // pendingAccOn drain at :727 gets discarded falsely. Loop the probe
+        // up to 3× 200ms so transient HAL bluffs settle to a real reading
+        // before we treat probeAccState as authoritative.
+        boolean hwAccIsOff_drain = probeAccStateWithBackoff("drain");
+        boolean hwAccIsOn_drain = !hwAccIsOff_drain;
+
         // If ACC went OFF before pipeline was ready, apply it now
         // RACE CONDITION FIX: Also verify ACC is still OFF before applying.
         // If ACC turned ON during pipeline init, the pending state is stale.
-        if (pendingAccOff && gpuPipeline != null) {
-            if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) {
-                log("Applying pending ACC OFF surveillance request...");
+        //
+        // FIX (audit R1, finding "Boot probe vs initSurveillance early-return
+        // when sharedAppContext null"): also gate the drain on
+        // recordingModeManager != null. initSurveillance() can leave gpuPipeline
+        // non-null while rmm is null when sharedAppContext could not be created
+        // (system_server transient at daemon respawn). Without this gate the
+        // drain would clear pendingAccOff/On and call onAccStateChanged on a
+        // pipeline whose rmm is still null — the side-effects fire but no
+        // recording gets started, and the flag is lost so the boot probe at
+        // :898 can't recover it. Preserve the pending flag so the boot probe
+        // (and any future rmm-init re-entry) can replay it.
+        if (pendingAccOff && gpuPipeline != null && recordingModeManager != null) {
+            if (!hwAccIsOn_drain) {
+                log("Applying pending ACC OFF surveillance request (HW-probed)...");
                 pendingAccOff = false;
                 onAccStateChanged(true);
             } else {
-                log("Pending ACC OFF discarded — ACC is now ON (race condition guard)");
+                log("Pending ACC OFF discarded — HW probe shows ACC ON (race condition guard)");
                 pendingAccOff = false;
             }
+        } else if (pendingAccOff && gpuPipeline != null && recordingModeManager == null) {
+            log("WARN: Pending ACC OFF preserved — recordingModeManager null "
+                + "(initSurveillance early-return); deferring to boot probe / re-init");
+        }
+
+        // Symmetric drain: if an ACC ON IPC was queued while gpuPipeline was
+        // null (cold-boot dispatch ordering), fire it now so RecordingModeManager
+        // gets seeded and pano recording starts. Mirrors the ACC OFF drain
+        // above with the inverse hardware-state guard. gpuPipeline is non-null
+        // here, so onAccStateChanged takes the full dispatch path (no recursion
+        // back into this branch).
+        //
+        // FIX (audit R1, same finding as ACC OFF drain): preserve pendingAccOn
+        // when rmm is null. Otherwise dispatch's :3173 "recordingModeManager
+        // null on ACC ON — recording disabled" warning fires and the queued ON
+        // state is lost; the boot probe's `!pendingAccOn` gate at :903 then
+        // evaluates true on stale data and the recovery seed never fires.
+        if (pendingAccOn && gpuPipeline != null && recordingModeManager != null) {
+            if (hwAccIsOn_drain) {
+                log("Applying pending ACC ON request (HW-probed)...");
+                pendingAccOn = false;
+                onAccStateChanged(false);
+            } else {
+                log("Pending ACC ON discarded — HW probe shows ACC OFF (race condition guard)");
+                pendingAccOn = false;
+            }
+        } else if (pendingAccOn && gpuPipeline != null && recordingModeManager == null) {
+            log("WARN: Pending ACC ON preserved — recordingModeManager null "
+                + "(initSurveillance early-return); deferring to boot probe / re-init");
         }
         
         // tcpServer / httpServer / ipcServer threads were spawned at the very top
@@ -637,6 +795,17 @@ public class CameraDaemon {
 
         // Initialize Safe Location Manager (geofence zones)
         com.overdrive.app.surveillance.SafeLocationManager.getInstance().init();
+
+        // RoadSense: daemon-side road-hazard detection (D-019/D-023). BydDataCollector
+        // + GpsMonitor are up by now (initGpsMonitor above; collector re-init on ACC ON),
+        // which RoadSense reuses (D-020). Never let it block daemon boot.
+        try {
+            roadSense = new com.overdrive.app.roadsense.RoadSenseController(sharedAppContext);
+            roadSense.start();
+            log("RoadSense controller started");
+        } catch (Throwable t) {
+            log("RoadSense start failed: " + t.getMessage());
+        }
 
         // Pre-warm the geocode cache so the first recording's place
         // resolution is a synchronous in-memory hit instead of a 2.5 MB
@@ -855,10 +1024,48 @@ public class CameraDaemon {
         // AccSentryDaemon won't re-send the ACC OFF command. Reading the hardware
         // directly has zero dependency on AccSentryDaemon.
         try {
-            boolean accIsOff = com.overdrive.app.monitor.AccMonitor.probeAccState(sharedAppContext);
+            // FIX (audit R4): use the same backoff probe as the drain path —
+            // a single sentinel reading at boot can falsely report ACC OFF
+            // because AccMonitor.accOn defaults to false and probeAccState
+            // returns `!accOn` on sentinel power levels. Looping settles
+            // transient HAL bluffs before we drop pano CONTINUOUS / DRIVE_MODE
+            // mid-drive into a false sentry entry.
+            boolean accIsOff = probeAccStateWithBackoff("recovery");
             if (accIsOff) {
                 log("RECOVERY: Hardware probe shows ACC OFF — entering sentry mode");
                 onAccStateChanged(true);  // true = accIsOff
+            } else if (!pendingAccOn
+                    && recordingModeManager != null
+                    && !recordingModeManager.isAccOn()) {
+                // Symmetric ACC ON recovery: daemon restarted while car is on.
+                // RecordingModeManager hasn't been seeded by an ACC IPC, so the
+                // recording-mode dispatcher won't start CONTINUOUS / DRIVE_MODE
+                // pano recording until the user toggles ACC. Seed it directly.
+                // pendingAccOn guard avoids fighting the initSurveillance drain
+                // when the IPC arrived during init.
+                //
+                // FIX (audit R5): route through CameraDaemon.onAccStateChanged
+                // (accIsOff=false) instead of seeding RMM directly. Direct seed
+                // bypassed the dedup cache + full ACC ON side-effect chain
+                // (AccMonitor.setAccState, surveillance disable, gear monitor
+                // restart). lastDispatchedAccIsOff is null on cold boot, so the
+                // dedup short-circuit can't fire and the full chain runs once.
+                log("RECOVERY: Hardware probe shows ACC ON — dispatching full ACC ON chain");
+                onAccStateChanged(false);
+            } else if (!accIsOff && recordingModeManager == null) {
+                // FIX (audit R1): initSurveillance early-returned with
+                // sharedAppContext null, leaving rmm uncreated. The previous
+                // boot probe had no branch for this — ACC ON went undelivered
+                // until the user toggled ACC. Queue pendingAccOn so the next
+                // ACC IPC handler (or the re-init path inside the ACC ON
+                // hook) seeds the manager and dispatches recording start.
+                // Also seed AccMonitor so downstream consumers don't read
+                // the false default before any IPC arrives.
+                log("RECOVERY: Hardware probe shows ACC ON but RMM null — "
+                    + "queuing pendingAccOn for delayed seed");
+                com.overdrive.app.monitor.AccMonitor.setAccState(true);
+                pendingAccOn = true;
+                pendingAccOff = false;
             }
         } catch (Exception e) {
             log("ACC hardware probe error: " + e.getMessage());
@@ -1195,6 +1402,75 @@ public class CameraDaemon {
         cameraActiveHeartbeatThread = null;
     }
 
+    /**
+     * FIX (audit R4): wrap AccMonitor.probeAccState in a 3× 200ms backoff
+     * loop. probeAccState returns `!accOn` on sentinel HAL readings (powerLevel
+     * = 4 FAKE_OK or 255 INVALID), and at daemon boot accOn defaults to false,
+     * so a single sentinel read falsely reports "ACC OFF" — dropping pano
+     * CONTINUOUS / DRIVE_MODE recording into sentry mid-drive.
+     *
+     * Loops up to 3 attempts, 200ms apart, treating the first non-sentinel
+     * reading as authoritative. We can't see the raw power level from here
+     * (probeAccState is a boolean API) so we use a stability heuristic: if
+     * three successive readings agree, we trust the result. If they ever
+     * disagree, we keep the last reading (HAL is converging) and warn.
+     *
+     * Returns the same boolean as probeAccState (true == ACC OFF). On
+     * exception, falls back to the AccMonitor cache as before.
+     */
+    private static boolean probeAccStateWithBackoff(String tag) {
+        boolean lastReading = false;
+        boolean firstReadingSet = false;
+        int agreementCount = 0;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                boolean reading = com.overdrive.app.monitor.AccMonitor
+                    .probeAccState(sharedAppContext);
+                if (!firstReadingSet) {
+                    lastReading = reading;
+                    firstReadingSet = true;
+                    agreementCount = 1;
+                } else if (reading == lastReading) {
+                    agreementCount++;
+                } else {
+                    log("WARN: ACC HW probe (" + tag + ") disagreed across attempts "
+                        + "(was=" + lastReading + " now=" + reading + " attempt="
+                        + attempt + ") — keeping latest");
+                    lastReading = reading;
+                    agreementCount = 1;
+                }
+                // Two agreeing reads is enough to short-circuit.
+                if (agreementCount >= 2) {
+                    if (attempt > 0) {
+                        log("ACC HW probe (" + tag + ") settled to accIsOff="
+                            + lastReading + " after " + (attempt + 1) + " attempts");
+                    }
+                    return lastReading;
+                }
+            } catch (Throwable t) {
+                log("WARN: ACC HW probe (" + tag + ") attempt " + attempt
+                    + " failed: " + t.getMessage());
+            }
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if (!firstReadingSet) {
+            // Every attempt threw — fall back to AccMonitor cache (same
+            // behaviour as the prior single-attempt catch branch).
+            boolean cacheFallback = !com.overdrive.app.monitor.AccMonitor.isAccOn();
+            log("WARN: ACC HW probe (" + tag + ") all attempts failed — "
+                + "falling back to AccMonitor cache accIsOff=" + cacheFallback);
+            return cacheFallback;
+        }
+        log("WARN: ACC HW probe (" + tag + ") never reached agreement after 3 attempts; "
+            + "using last reading accIsOff=" + lastReading);
+        return lastReading;
+    }
+
     private static boolean isDilink4ModeActive() {
         try {
             org.json.JSONObject c = com.overdrive.app.config.UnifiedConfigManager
@@ -1376,6 +1652,12 @@ public class CameraDaemon {
         // Cancel PermissionGranter to stop orphaned pm grant processes
         PermissionGranter.cancel();
         
+        // Stop RoadSense (releases IMU sidecar, stores, warning audio). Early so
+        // its warning-tick can't fire against tearing-down state.
+        if (roadSense != null) {
+            try { roadSense.stop(); } catch (Exception e) { log("RoadSense stop error: " + e.getMessage()); }
+        }
+
         // Stop RecordingModeManager BEFORE the pipeline so its periodic
         // resync ticker can't fire one more activateMode() call against a
         // tearing-down pipeline. Idempotent w.r.t. modeActive bookkeeping;
@@ -2205,8 +2487,19 @@ public class CameraDaemon {
                 }
             } else {
                 log("WARNING: Could not create app context for RecordingModeManager");
+                // FIX (audit R2, finding "Boot recovery probe leaves
+                // pendingAccOn dangling when sharedAppContext is null at
+                // init"): without a watchdog, rmm stays null until the user
+                // toggles ACC AND the OFF→ON IPCs are not deduped. Spawn a
+                // bounded poll thread that watches for sharedAppContext to
+                // become valid, then drives reinitContextDependentComponents
+                // to create rmm and drain pendingAccOn/Off.
+                scheduleSharedContextWatchdog();
             }
-            
+            // Successful init — reset retry counter so a future restart-style
+            // re-entry starts from attempt 0.
+            initSurveillanceRetryAttempts.set(0);
+
         } catch (Exception e) {
             log("ERROR: GPU Surveillance init failed: " + e.getMessage());
             log("ERROR: Exception type: " + e.getClass().getName());
@@ -2216,7 +2509,166 @@ public class CameraDaemon {
             // Print stack trace to logcat
             e.printStackTrace();
             gpuPipeline = null;
+            // FIX (audit R2, finding "initSurveillance() exception → permanent
+            // gpuPipeline=null with no retry path"): kick a bounded
+            // exponential-backoff retry on a background thread. Without this,
+            // every subsequent IPC takes the gpuPipeline-null queue branch,
+            // the post-init drain never fires, and pano recording stays dead
+            // until manual daemon restart or reboot.
+            scheduleInitSurveillanceRetry();
         }
+    }
+
+    /**
+     * FIX (audit R2): bounded retry of initSurveillance() after a transient
+     * cold-boot failure. CAS-guarded so concurrent callers don't queue
+     * duplicates; surfaces final failure via log and the gpuPipeline-null
+     * branch the existing /api/status / IPC paths already cope with.
+     */
+    private static void scheduleInitSurveillanceRetry() {
+        if (!initSurveillanceRetryInFlight.compareAndSet(false, true)) {
+            log("initSurveillance retry already in flight — skipping duplicate schedule");
+            return;
+        }
+        final int attempt = initSurveillanceRetryAttempts.get();
+        // FIX (audit R8): no budget cap. Use the explicit step table for the
+        // first few attempts, then clamp to INIT_SURVEILLANCE_RETRY_MAX_DELAY_MS
+        // forever. Success short-circuits via the gpuPipeline!=null check.
+        final long delayMs;
+        if (attempt < INIT_SURVEILLANCE_RETRY_DELAYS_MS.length) {
+            delayMs = INIT_SURVEILLANCE_RETRY_DELAYS_MS[attempt];
+        } else {
+            delayMs = INIT_SURVEILLANCE_RETRY_MAX_DELAY_MS;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                log("initSurveillance retry: attempt " + (attempt + 1)
+                    + " scheduled in " + delayMs + "ms (uncapped)");
+                try { Thread.sleep(delayMs); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (gpuPipeline != null) {
+                    log("initSurveillance retry: gpuPipeline already non-null — skipping retry");
+                    return;
+                }
+                initSurveillanceRetryAttempts.incrementAndGet();
+                log("initSurveillance retry: invoking initSurveillance() (attempt "
+                    + (attempt + 1) + ")");
+                initSurveillance();
+                if (gpuPipeline != null) {
+                    log("initSurveillance retry: SUCCESS on attempt " + (attempt + 1)
+                        + " — draining pending ACC state");
+                    // Replay any queued ACC state through the post-init drain
+                    // shape used at end of main(). Cannot call drain
+                    // directly (it lives inline in main()), so re-enter the
+                    // dispatch path: pendingAccOn/Off is read by the boot
+                    // probe shape we mirror here.
+                    //
+                    // FIX (audit R8, finding "retry replay path lacks HW guard"):
+                    // up to several minutes elapse during retries; HW state can
+                    // flip without an IPC reaching us in that window. HW-probe
+                    // before replay so we don't seed RMM with a stale flag.
+                    // Mirrors the main() drain shape at lines 731-769.
+                    try {
+                        boolean hwAccIsOff_replay = probeAccStateWithBackoff("retry-replay");
+                        boolean hwAccIsOn_replay = !hwAccIsOff_replay;
+                        if (pendingAccOff && recordingModeManager != null) {
+                            if (hwAccIsOff_replay) {
+                                log("initSurveillance retry: replaying pending ACC OFF (HW-probed)");
+                                pendingAccOff = false;
+                                onAccStateChanged(true);
+                            } else {
+                                log("initSurveillance retry: pending ACC OFF discarded — HW probe shows ACC ON");
+                                pendingAccOff = false;
+                            }
+                        } else if (pendingAccOn && recordingModeManager != null) {
+                            if (hwAccIsOn_replay) {
+                                log("initSurveillance retry: replaying pending ACC ON (HW-probed)");
+                                pendingAccOn = false;
+                                onAccStateChanged(false);
+                            } else {
+                                log("initSurveillance retry: pending ACC ON discarded — HW probe shows ACC OFF");
+                                pendingAccOn = false;
+                            }
+                        }
+                    } catch (Throwable th) {
+                        log("WARN: initSurveillance retry replay failed: " + th.getMessage());
+                    }
+                }
+            } finally {
+                initSurveillanceRetryInFlight.set(false);
+                // FIX (audit R8): re-arm forever as long as initSurveillance
+                // hasn't succeeded. Eventual HAL recovery (hours later) can
+                // still self-heal pano without daemon restart.
+                if (gpuPipeline == null) {
+                    log("initSurveillance retry: still null — re-arming next attempt (uncapped)");
+                    scheduleInitSurveillanceRetry();
+                }
+            }
+        }, "InitSurveillanceRetry");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * FIX (audit R2): one-shot bounded poll thread that waits for
+     * sharedAppContext to become valid and then drives
+     * reinitContextDependentComponents(), which itself drains
+     * pendingAccOn/Off into a freshly-created RecordingModeManager.
+     * CAS-guarded against duplicates. Bails after CONTEXT_WATCHDOG_MAX_DURATION_MS.
+     */
+    private static void scheduleSharedContextWatchdog() {
+        if (!contextWatchdogInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            log("sharedAppContext watchdog: starting (poll="
+                + CONTEXT_WATCHDOG_POLL_INTERVAL_MS + "ms, max="
+                + CONTEXT_WATCHDOG_MAX_DURATION_MS + "ms)");
+            long deadline = System.currentTimeMillis() + CONTEXT_WATCHDOG_MAX_DURATION_MS;
+            try {
+                while (System.currentTimeMillis() < deadline) {
+                    if (sharedAppContext == null) {
+                        try {
+                            android.content.Context ctx = createAppContext();
+                            if (ctx != null && !isContextBrokenFor(ctx)) {
+                                sharedAppContext = ctx;
+                                log("sharedAppContext watchdog: context created — "
+                                    + "invoking reinitContextDependentComponents to drain queue");
+                                reinitContextDependentComponents();
+                                return;
+                            }
+                        } catch (Throwable th) {
+                            log("sharedAppContext watchdog: createAppContext threw: "
+                                + th.getMessage());
+                        }
+                    } else if (recordingModeManager == null && gpuPipeline != null) {
+                        // Context appeared via another path — finish the
+                        // job by running the rmm-creation drain.
+                        log("sharedAppContext watchdog: context now non-null but rmm null — "
+                            + "invoking reinitContextDependentComponents");
+                        reinitContextDependentComponents();
+                        return;
+                    } else {
+                        // rmm already exists — nothing left to do.
+                        return;
+                    }
+                    try { Thread.sleep(CONTEXT_WATCHDOG_POLL_INTERVAL_MS); }
+                    catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                log("WARN: sharedAppContext watchdog: timed out after "
+                    + CONTEXT_WATCHDOG_MAX_DURATION_MS + "ms — rmm still null, "
+                    + "next ACC IPC will retry via existing isContextBroken path");
+            } finally {
+                contextWatchdogInFlight.set(false);
+            }
+        }, "SharedContextWatchdog");
+        t.setDaemon(true);
+        t.start();
     }
     
     /**
@@ -2243,7 +2695,13 @@ public class CameraDaemon {
         try {
             if (gpuPipeline == null) {
                 log("GPU pipeline not ready — queuing surveillance enable for when pipeline initializes");
+                // FIX (audit R5): mirror dispatch-path discipline at :3124-3130.
+                // pendingAccOff and pendingAccOn are mutually exclusive; setting
+                // one MUST clear the other or a stale ACC ON queued from an
+                // earlier path can survive into the post-init drain and fire
+                // an unwanted ACC ON after we just queued ACC OFF here.
                 pendingAccOff = true;
+                pendingAccOn = false;
                 return;
             }
 
@@ -2674,7 +3132,40 @@ public class CameraDaemon {
      * ACC OFF (sentry mode): Start pipeline with surveillance enabled
      * ACC ON (normal mode): Stop pipeline completely to save power
      */
+    // FIX (audit R1): equality short-circuit. AccSentry heartbeat publishes
+    // the cached ACC state every 30 s; without dedup each tick re-runs the
+    // full side-effect chain (cleanupDoorLockGate, surveillanceEnabled reset,
+    // OEM recalc, trip analytics, etc.). Track the last dispatched ACC state
+    // so duplicate IPCs no-op. Boxed Boolean (-1/null sentinel) so the very
+    // first call is never elided. Volatile for cross-thread reads from IPC +
+    // heartbeat threads.
+    private static volatile Boolean lastDispatchedAccIsOff = null;
+
     public static void onAccStateChanged(boolean accIsOff) {
+        // FIX (audit R1): drop redundant heartbeat re-dispatches. We still let
+        // the very first dispatch through (lastDispatchedAccIsOff == null) and
+        // any state change (Boolean.equals false). Down-stream consumers
+        // (RecordingModeManager, OEM resolver) already short-circuit on their
+        // own caches but the work to GET there (DB writes, snapshot capture,
+        // GearMonitor restart, etc.) is non-trivial and not all idempotent.
+        if (lastDispatchedAccIsOff != null && lastDispatchedAccIsOff.booleanValue() == accIsOff) {
+            log("onAccStateChanged: no-op (already " + (accIsOff ? "OFF" : "ON")
+                + ", duplicate IPC / heartbeat)");
+            // Still refresh AccMonitor so any consumer reading the cache sees
+            // the asserted value — this is cheap and idempotent.
+            com.overdrive.app.monitor.AccMonitor.setAccState(!accIsOff);
+            return;
+        }
+        // FIX (audit R2, finding "Dedup short-circuit eats drain dispatch when
+        // IPC queued during init"): do NOT mark this state as "dispatched"
+        // yet. If gpuPipeline is null, we'll only enqueue pendingAccOn/Off and
+        // bail; the post-init drain at :673/:699 then re-enters this method
+        // and would otherwise hit the dedup guard above and short-circuit
+        // before fully running side-effects (RMM seed, OEM recalc, context
+        // recreate, sentry segment finalize). Move the cache update to AFTER
+        // the queuing branch so a queued IPC + later drain runs the full
+        // dispatch chain exactly once.
+
         // Update AccMonitor state for HTTP API responses
         com.overdrive.app.monitor.AccMonitor.setAccState(!accIsOff);
 
@@ -2726,13 +3217,21 @@ public class CameraDaemon {
             if (accIsOff) {
                 log("ACC OFF but GPU pipeline not ready — queuing for when pipeline initializes");
                 pendingAccOff = true;
+                pendingAccOn = false;
             } else {
-                log("ACC ON but GPU pipeline not ready — clearing pending state");
+                log("ACC ON but GPU pipeline not ready — queuing for when pipeline initializes");
+                pendingAccOn = true;
                 pendingAccOff = false;
             }
+            // NOTE: leave lastDispatchedAccIsOff unset so the post-init drain
+            // can re-enter this method and run the full side-effect chain.
             return;
         }
-        
+
+        // Mark this state as fully dispatched only AFTER passing the
+        // gpuPipeline-null queuing branch. See dedup comment above.
+        lastDispatchedAccIsOff = Boolean.valueOf(accIsOff);
+
         log("ACC state changed: " + (accIsOff ? "OFF (entering sentry)" : "ON (exiting sentry)"));
         
         if (accIsOff) {
@@ -3040,14 +3539,58 @@ public class CameraDaemon {
                 try {
                     gpuPipeline.onAccOn();
                 } catch (Exception e) {
-                    log("gpuPipeline.onAccOn() error: " + e.getMessage());
+                    log("gpuPipeline.onAccOn() error: " + e.getMessage()
+                        + " — forcing pipeline.stop() to clear wedge state");
+                    // Compensating teardown: a half-failed surveillance->normal
+                    // transition leaves running=true with a dead camera handle,
+                    // and the next pipeline.start() short-circuits because
+                    // isRunning() returns true. Force stop() so the next
+                    // recordingModeManager.onAccStateChanged(true) below sees a
+                    // cleanly-stopped pipeline and runs a fresh start(false).
+                    try {
+                        gpuPipeline.stop();
+                    } catch (Throwable t) {
+                        log("Compensating pipeline.stop() also failed: " + t.getMessage());
+                    }
+                    // FIX (audit R7, finding "Dedup cache set before side-effects
+                    // complete"): we set lastDispatchedAccIsOff=ACC_ON above
+                    // BEFORE running this side-effect chain. If onAccOn() threw
+                    // and the compensating stop ran, the pipeline is now down
+                    // but the dedup cache says "ACC ON fully dispatched". The
+                    // next AccSentry 30s heartbeat would no-op via the dedup
+                    // guard at the top of this method and pano CONTINUOUS /
+                    // DRIVE_MODE recording would stay dead until a manual ACC
+                    // cycle. Null the cache so the next heartbeat re-enters
+                    // and reruns the full chain (including
+                    // recordingModeManager.onAccStateChanged(true) / RMM
+                    // wedge-resync) against the now-cleanly-stopped pipeline.
+                    log("WARN: clearing lastDispatchedAccIsOff so next ACC heartbeat re-runs full ACC ON dispatch");
+                    lastDispatchedAccIsOff = null;
                 }
             }
 
             // Notify RecordingModeManager — it handles starting recording mode
             log("ACC ON - notifying RecordingModeManager...");
             if (recordingModeManager != null) {
-                recordingModeManager.onAccStateChanged(true);
+                // FIX (audit R8, finding "notifyAccState treats {success:false}
+                // IPC reply as success → seeds dedup against a partial-apply"):
+                // recordingModeManager.onAccStateChanged(true) can throw under
+                // pipeline wedge / HAL flake. The outer ACC-ON else branch
+                // here lacks an outer try/catch, so the IPC reply path
+                // (SurveillanceIpcServer outer try) returns success:false and
+                // AccSentry's heartbeat dedup seeds against a partial apply.
+                // Mirror the gpuPipeline.onAccOn() compensating teardown:
+                // null lastDispatchedAccIsOff so the next AccSentry heartbeat
+                // re-runs the full chain instead of being suppressed by the
+                // dedup guard at the top of this method.
+                try {
+                    recordingModeManager.onAccStateChanged(true);
+                } catch (Throwable t) {
+                    log("WARN: recordingModeManager.onAccStateChanged(true) threw: "
+                        + t.getMessage()
+                        + " — clearing lastDispatchedAccIsOff so next ACC heartbeat re-runs");
+                    lastDispatchedAccIsOff = null;
+                }
             }
             // OEM Dashcam ACC-on hook. The ACC boundary itself is a state
             // transition for the two-axis resolver — recording-axis modes only
@@ -3066,13 +3609,27 @@ public class CameraDaemon {
                 log("OEM Dashcam ACC ON dispatch failed: " + t.getMessage());
             }
             if (recordingModeManager == null) {
-                // Fallback: Stop pipeline completely to save power (legacy behavior).
-                // gpuPipeline.onAccOn() already ran above; just tear down.
-                log("Stopping pipeline (ACC ON - saving power)...");
-                if (gpuPipeline != null) {
-                    gpuPipeline.stop();
-                }
-                log("Pipeline stopped - power saving mode");
+                // Previously this branch tore down the pipeline as "legacy
+                // power-save fallback." That races initSurveillance(): if the
+                // ACC ON IPC arrives before the manager is constructed, we'd
+                // stop the pipeline that init was about to wire up, and the
+                // pendingAccOn drain would then fire onAccStateChanged on a
+                // pipeline we just killed. Leave the pipeline alone — a future
+                // component (manager init drain, OEM resolver, surveillance
+                // event) will start/stop it as needed.
+                log("WARNING: recordingModeManager null on ACC ON — "
+                    + "recording disabled until daemon restart or init completes");
+                // FIX (audit R8, finding "ACC ON dispatch sets lastDispatchedAccIsOff
+                // before checking rmm==null branch"): we set
+                // lastDispatchedAccIsOff=ACC_ON above before reaching this
+                // branch. RMM was never notified, so the next AccSentry
+                // heartbeat IPC must re-run the full chain. Null the cache
+                // (mirrors the R7 pattern at the gpuPipeline.onAccOn() catch
+                // and the new R8 RMM-throw pattern above) so the dedup guard
+                // doesn't suppress the heartbeat after watchdog/ContextRecreate
+                // eventually creates rmm.
+                log("WARN: clearing lastDispatchedAccIsOff so next ACC heartbeat re-runs full ACC ON dispatch");
+                lastDispatchedAccIsOff = null;
             }
         }
     }

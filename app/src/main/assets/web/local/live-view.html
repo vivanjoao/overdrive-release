@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=3"></script>
+    <script src="../shared/theme.js?v=4"></script>
     <script src="../shared/app-shell.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css">
+    <link rel="stylesheet" href="../shared/styles.css?v=13">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../shared/leaflet.css" />
@@ -130,6 +130,18 @@
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
                                         <span class="hotspot-label" data-i18n="stream.hotspot_front">FRONT</span>
+                                    </div>
+                                    <!-- OEM Dashcam (data-cam=6). Hidden by default; the
+                                         init script unhides it iff /api/settings/quality
+                                         reports oemDashcam.oemDashcamCameraId >= 0. The
+                                         "DVR" pill sits on the hood, slightly off-centre
+                                         from the FRONT quadrant marker so users see the
+                                         standalone dashcam sensor as distinct from the
+                                         AVM front-quadrant stitch. -->
+                                    <div class="cam-hotspot cam-dvr" data-cam="6" style="display:none;" onclick="BYD.stream.selectCamera(6)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">DVR</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="3" onclick="BYD.stream.selectCamera(3)">
                                         <div class="hotspot-pulse"></div>
@@ -497,6 +509,12 @@
         .cam-hotspot[data-cam="4"] { top: 50%; left: -20px; transform: translateY(-50%); }
         .cam-hotspot[data-cam="2"] { top: 50%; right: -20px; transform: translateY(-50%); }
         .cam-hotspot.cam-all { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        /* OEM Dashcam pill — sits on the hood, just below the FRONT
+           hotspot (top:-8px) and offset right of centre so the DVR ring
+           and FRONT ring read as two distinct sensors. The "DVR" label
+           is anchored to the right side of its hotspot to avoid colliding
+           with the FRONT label that sits directly above the same column. */
+        .cam-hotspot[data-cam="6"] { top: 18px; left: 62%; transform: translateX(-50%); }
         
         .hotspot-ring {
             width: 20px; height: 20px;
@@ -536,6 +554,15 @@
         .cam-hotspot[data-cam="2"] .hotspot-label { right: -40px; left: auto; top: 50%; transform: translateY(-50%); bottom: auto; }
         /* All label - below center */
         .cam-hotspot.cam-all .hotspot-label { bottom: -20px; left: 50%; transform: translateX(-50%); top: auto; }
+        /* OEM Dashcam label — anchored to the right of the ring so it
+           floats outside the car silhouette and never overlaps the FRONT
+           label that sits directly above the centre column. */
+        .cam-hotspot[data-cam="6"] .hotspot-label {
+            left: calc(100% + 4px);
+            top: 50%;
+            transform: translateY(-50%);
+            bottom: auto;
+        }
         
         .cam-hotspot:hover .hotspot-ring {
             border-color: var(--brand-primary);
@@ -604,6 +631,8 @@
             .hotspot-ring { width: 18px; height: 18px; }
             .hotspot-pulse { width: 18px; height: 18px; }
             .hotspot-label { font-size: 9px; }
+            /* DVR sits a touch closer to FRONT on the smaller silhouette. */
+            .cam-hotspot[data-cam="6"] { top: 14px; left: 62%; }
             .idle-icon { width: 48px; height: 48px; }
             .idle-icon svg { width: 24px; height: 24px; }
             .idle-text { font-size: 12px; }
@@ -666,12 +695,12 @@
     </style>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/pwa-init.js"></script>
+    <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/stream.js"></script>
+    <script src="../shared/stream.js?v=index1"></script>
     <script src="../shared/map.js"></script>
-    <script src="../shared/surveillance.js"></script>
+    <script src="../shared/surveillance.js?v=index1"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -721,6 +750,12 @@
         BYD.stream.currentViewMode = -1; // -1 = none selected
         
         BYD.stream.selectCamera = async function(mode) {
+            // Capture the prior view mode + label BEFORE we mutate UI so the
+            // already-streaming branch can restore them on backend rejection.
+            const priorMode = this.currentViewMode;
+            const priorLabelEl0 = document.getElementById('currentCameraLabel');
+            const priorLabelText = priorLabelEl0 ? priorLabelEl0.textContent : '';
+
             // Toggle behavior: if the same camera is tapped again, stop the
             // stream. The earlier guard only checked sotaPlayer (WebCodecs),
             // so on the BYD in-app WebView (Chrome 58, no VideoDecoder) the
@@ -768,23 +803,63 @@
             
             // Update camera label. Reuse existing pip.title_* keys (these
             // labels are conceptually identical to the PiP camera titles).
-            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera'};
+            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam'};
             const labelEl = document.getElementById('currentCameraLabel');
             const overlayEl = document.getElementById('cameraLabelOverlay');
             if (labelEl) labelEl.textContent = camKeys[mode] ? BYD.i18n.t(camKeys[mode]) : BYD.i18n.t('pip.default_camera');
             if (overlayEl) overlayEl.style.display = 'block';
             
             this.currentViewMode = mode;
-            
-            // If already streaming, just switch the view mode
+
+            // Helper: switch view mode + revert UI on backend rejection. The
+            // backend returns {success:false, error} when the requested
+            // mode isn't currently routable (e.g. view 6 = OEM Dashcam
+            // before the streaming hook is plumbed). Without the JSON
+            // parse, the hotspot ring stays "active" while WS frames keep
+            // arriving from the previous source.
+            const applyView = async (m) => {
+                try {
+                    let r = await fetch('/api/stream/view/' + m);
+                    let d = await r.json();
+                    if (d && d.success === false && d.starting) {
+                        d = await BYD.stream._pollViewUntilSettled(m, d);
+                    }
+                    // Cancelled by a newer click — treat as success-ish
+                    // (don't toast an error, don't revert the UI). The
+                    // newer click is responsible for its own UI state.
+                    if (d && d.cancelled) return true;
+                    if (d && d.success === false) {
+                        if (BYD.utils && BYD.utils.toast) {
+                            const fallback = d.exhausted
+                                ? BYD.i18n.t('stream.start_timeout')
+                                : BYD.i18n.t('stream.view_unavailable');
+                            BYD.utils.toast(d.errorCode ? BYD.i18n.t('stream.' + d.errorCode) : (d.error || fallback), 'error');
+                        }
+                        return false;
+                    }
+                    return true;
+                } catch (e) { return true; }   // network errors fall through
+            };
+
+            // If already streaming, just switch the view mode. Restore prior
+            // UI state on rejection — leaving the user staring at "select
+            // camera" while frames continue from the previous view is the
+            // exact UX glitch the Round 3 audit flagged.
             if (this.sotaPlayer && this.sotaPlayer.isRunning()) {
                 console.log("[Stream] Switching view to:", mode);
-                try { 
-                    await fetch('/api/stream/view/' + mode);
-                } catch(e) {}
+                const ok = await applyView(mode);
+                if (!ok) {
+                    document.querySelectorAll('.cam-hotspot').forEach(el => el.classList.remove('active'));
+                    if (priorMode >= 0) {
+                        const priorHotspot = document.querySelector('.cam-hotspot[data-cam="' + priorMode + '"]');
+                        if (priorHotspot) priorHotspot.classList.add('active');
+                    }
+                    this.currentViewMode = priorMode;
+                    if (labelEl) labelEl.textContent = priorLabelText;
+                }
                 return;
             }
-            
+
             await this.startSeamlessStream();
         };
         
@@ -802,10 +877,35 @@
             const quality = (_qSel && _qSel.value) || 'LOW';
             try { await fetch('/api/stream/quality/' + quality, { method: 'POST' }); } catch(e) {}
             
-            // 2. Set view mode BEFORE enabling streaming
+            // 2. Set view mode BEFORE enabling streaming. Bail if the
+            // backend rejects the mode — otherwise WS connects to the
+            // default sink and the UI shows a stale label over different
+            // frames.
             if (this.currentViewMode >= 0) {
-                try { 
-                    await fetch('/api/stream/view/' + this.currentViewMode);
+                try {
+                    let r = await fetch('/api/stream/view/' + this.currentViewMode);
+                    let d = await r.json();
+                    if (d && d.success === false && d.starting) {
+                        d = await BYD.stream._pollViewUntilSettled(this.currentViewMode, d);
+                    }
+                    // Cancelled by a newer click; let the newer click own
+                    // the UI state. Don't bail out as if an error happened.
+                    if (d && d.cancelled) return;
+                    if (d && d.success === false) {
+                        if (BYD.utils && BYD.utils.toast) {
+                            const fallback = d.exhausted
+                                ? BYD.i18n.t('stream.start_timeout')
+                                : BYD.i18n.t('stream.view_unavailable');
+                            BYD.utils.toast(d.errorCode ? BYD.i18n.t('stream.' + d.errorCode) : (d.error || fallback), 'error');
+                        }
+                        document.querySelectorAll('.cam-hotspot').forEach(el => el.classList.remove('active'));
+                        this.currentViewMode = -1;
+                        this.streamStarted = false;
+                        const idleState = document.getElementById('videoIdleState');
+                        if (idleState) idleState.classList.remove('hidden');
+                        this.updateConnectionStatus('idle');
+                        return;
+                    }
                     console.log("[Stream] View mode set to:", this.currentViewMode);
                 } catch(e) {}
             }
@@ -965,6 +1065,35 @@
                 }
             } catch (e) {
                 console.log('[Init] Using default quality');
+            }
+        })();
+
+        // Gate the OEM Dashcam (data-cam=6) hotspot on whether the
+        // backend has a configured OEM dashcam camera id for this
+        // vehicle. /api/settings/quality returns:
+        //   oemDashcam: { oemDashcamCameraId, concurrentAvmSupported, ... }
+        // Negative id (-1) = unset / not detected — keep the hotspot
+        // hidden so the user can't tap into a view that the backend
+        // will reject. One-shot fetch on page load: the user reloads
+        // the live-view tab after configuring the id, so a perpetual
+        // poll would just burn cycles.
+        (async function () {
+            try {
+                const res = await fetch('/api/settings/quality');
+                const data = await res.json();
+                const oem = data && data.oemDashcam;
+                const camId = oem && typeof oem.oemDashcamCameraId === 'number'
+                    ? oem.oemDashcamCameraId
+                    : -1;
+                const hotspot = document.querySelector('.cam-hotspot[data-cam="6"]');
+                if (hotspot) {
+                    hotspot.style.display = camId >= 0 ? '' : 'none';
+                }
+            } catch (e) {
+                // Backend unreachable or response shape changed — leave
+                // the hotspot hidden (its inline default). The feature
+                // is opt-in; silent suppression is the safe fallback.
+                console.log('[Init] OEM dashcam gating skipped:', e && e.message);
             }
         })();
         

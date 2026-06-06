@@ -44,17 +44,15 @@ BYD.map = {
         // Start GPS tracking on the backend
         this.startGpsTracking();
         
-        // Create map with modern dark theme
         this.map = L.map('mapContainer', {
             zoomControl: false,
             attributionControl: false
         }).setView([0, 0], 2);
         
-        // CartoDB Voyager - colorful, Google Maps-like, works from any domain
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            maxZoom: 20,
-            subdomains: 'abcd'
-        }).addTo(this.map);
+        // CartoDB tiles — Voyager (light) / dark_all (dark). The shared
+        // helper picks the right style for the current data-theme and
+        // re-swaps the layer when the user toggles the theme picker.
+        BYD.theme.attachMapTiles(this.map);
         
         // Add zoom control to bottom right
         L.control.zoom({ position: 'bottomright' }).addTo(this.map);

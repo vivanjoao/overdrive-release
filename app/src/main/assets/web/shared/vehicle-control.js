@@ -303,7 +303,10 @@ var VC = {
     },
 
     addLighting: function() {
-        // Environment lighting for PBR materials
+        // Environment lighting for PBR materials. Refs stashed on `this` so the
+        // surround-bowl path can dim them — a fully-lit showroom car parked on
+        // top of live AVM footage reads as fake; biased toward bowl ambient it
+        // reads as "in the scene". See _setLightsForBowl.
         var ambient = new THREE.HemisphereLight(0x88aacc, 0x222244, 1.0);
         this.scene.add(ambient);
 
@@ -327,6 +330,43 @@ var VC = {
         var backLight = new THREE.DirectionalLight(0x6644aa, 0.3);
         backLight.position.set(0, 3, -6);
         this.scene.add(backLight);
+
+        // Save originals so the bowl path can scale them down and restore on
+        // exit. For the HemisphereLight we also stash the original colours
+        // since the AVM-derived sky-tint sampler tints them while bowl is up.
+        this._sceneLights = [
+            { light: ambient,   base: 1.0,
+              origColor: ambient.color.clone(),
+              origGroundColor: ambient.groundColor.clone() },
+            { light: keyLight,  base: 1.2 },
+            { light: fillLight, base: 0.6 },
+            { light: rimLight,  base: 0.6 },
+            { light: backLight, base: 0.3 }
+        ];
+    },
+
+    /**
+     * Bias scene lighting for surround-bowl mode. When the bowl is up, we want
+     * the car to read as parked INSIDE the live AVM scene, not as a render
+     * dropped on top of it — so the showroom-grade ambient/key/fill drops to
+     * ~30%, killing the "studio model on a video" mismatch. Restores originals
+     * on exit. Idempotent.
+     */
+    _setLightsForBowl: function(active) {
+        if (!this._sceneLights) return;
+        var scale = active ? 0.32 : 1.0;
+        for (var i = 0; i < this._sceneLights.length; i++) {
+            var entry = this._sceneLights[i];
+            entry.light.intensity = entry.base * scale;
+            // On exit, restore HemisphereLight's original sky/ground colours
+            // — the AVM-derived sampler tints them while bowl is up.
+            if (!active && entry.origColor && entry.light.isHemisphereLight) {
+                entry.light.color.copy(entry.origColor);
+                if (entry.origGroundColor) {
+                    entry.light.groundColor.copy(entry.origGroundColor);
+                }
+            }
+        }
     },
 
     addGroundGrid: function() {
@@ -2606,6 +2646,10 @@ var VC = {
                 // Hide ground grid — it conflicts with the surround view
                 if (this._groundGrid) this._groundGrid.visible = false;
 
+                // Bias scene lighting so the car reads as part of the AVM
+                // scene rather than a showroom render on top of it.
+                this._setLightsForBowl(true);
+
                 // Cinematic fly-in: GSAP-tween OrbitControls from the saved
                 // exterior pose to a hero position close to the car. The bowl
                 // wraps the user (R=8); polar stays just above horizon so we
@@ -2821,6 +2865,14 @@ var VC = {
         // Restore ground grid
         if (this._groundGrid) this._groundGrid.visible = true;
 
+        // Stop the AVM-derived sky-tint sampler before we restore lighting,
+        // so the last sample's HemisphereLight overwrite doesn't fight the
+        // restore by landing one tick later.
+        this._stopSkyTintSampler();
+
+        // Restore showroom lighting.
+        this._setLightsForBowl(false);
+
         // Restore orbit constraints + cinematic fly-out back to the hero pose
         if (this.controls && this._savedPolarMin !== undefined) {
             this.controls.minPolarAngle = this._savedPolarMin;
@@ -2885,8 +2937,23 @@ var VC = {
     },
 
     /**
-     * Surround geometry: cylinder wall + ground disc — the "old" production
-     * layout the user confirmed reads cleanly (rear cam looked correct here).
+     * Surround geometry: a single PARAMETRIC BOWL mesh — flat near the car,
+     * smoothly curving up to wall height at the perimeter. Replaces the older
+     * cylinder-wall + flat-disc pair which had a hard crease at the seam that
+     * read as "fake" no matter how good the shader blend was.
+     *
+     * Bowl profile (radial, axisymmetric):
+     *   r ∈ [0, R_FLAT]      y = Y_FLOOR              (flat near-field)
+     *   r ∈ [R_FLAT, R_WALL] y = Y_FLOOR + A·(r-R_FLAT)²   (C¹ ramp)
+     * with A chosen so y(R_WALL) = WALL_TOP — gives a tangent-continuous floor
+     * → wall transition, no visible crease.
+     *
+     * Every bowl pixel is painted by a single fragment shader that runs the
+     * same geometric IPM the old disc used, but generalised to ARBITRARY 3D
+     * world points (not just ground). That means the curved-up region pulls
+     * its content from the cams' actual image rows above the horizon — sky,
+     * garage roof, parking-lot ceiling — instead of the procedural horizon /
+     * zenith gradient the old wall shader painted (which was just a fake).
      *
      * Mosaic layout (after THREE.CanvasTexture flipY=true):
      *   tex space    canvas    camera
@@ -3235,6 +3302,20 @@ var VC = {
             'uniform float uFarClip[4];',
             'uniform float uCamPosX[4];',
             'uniform float uCamPosZ[4];',
+            'uniform float uYFloor;',
+            'uniform float uBodyHalfX;',
+            'uniform float uBodyHalfZ;',
+            // Per-quadrant mean RGB of the AVM mosaic (4×1 downsample, ~1Hz).
+            // Indexed by post-remap idx 0=Front,1=Right,2=Rear,3=Left.
+            'uniform vec3 uSkyTint[4];',
+            // Per-cam exposure-match gain. Computed JS-side from the same
+            // 1Hz mosaic sample by targeting the MEDIAN of the 4 quadrant
+            // lumas, so one over- or under-exposed cam doesnt pull the
+            // others. Bounded [0.6, 1.6] to avoid over-correction. Applied
+            // multiplicatively to col.rgb in sampleAt — the gain is keyed
+            // by post-remap idx (the physical cam) so it follows the cam
+            // through any rotate/swap.
+            'uniform float uCamGain[4];',
             '',
             '// Forward direction (in world XZ) for each PHYSICAL cam after',
             '// the post-remap idx is known. Front=-Z, Right=+X, Rear=+Z, Left=-X.',
@@ -3327,25 +3408,128 @@ var VC = {
             '}',
             '',
             'vec4 sampleGround(vec2 ground) {',
-            '    // Sum confidence-weighted samples from all 4 cams. This gives',
-            '    // a soft Voronoi-style blend in the cam overlap regions so',
-            '    // seams disappear without a hard partition.',
+            '    // POWER-WEIGHTED blend across the 4 cams. Each cams contribution',
+            '    // is weighted by alpha^P so the dominant cam in any given pixel',
+            '    // visually wins rather than getting averaged to mush in overlap',
+            '    // zones (which causes the ghost-doubling that reads as "this is',
+            '    // not Tesla"). P=3 gives a near-Voronoi look — clean seams in',
+            '    // overlap regions without the dead-zone risk of a hard bearing',
+            '    // partition (zero-confidence cams still contribute zero, so a',
+            '    // mis-classified point can never punch a black hole).',
             '    vec4 s0 = sampleGroundFromCam(0, ground);',
             '    vec4 s1 = sampleGroundFromCam(1, ground);',
             '    vec4 s2 = sampleGroundFromCam(2, ground);',
             '    vec4 s3 = sampleGroundFromCam(3, ground);',
-            '    float wsum = s0.a + s1.a + s2.a + s3.a;',
-            '    if (wsum < 1e-3) return vec4(0.0);',
-            '    vec3 rgb = (s0.rgb * s0.a + s1.rgb * s1.a +',
-            '                s2.rgb * s2.a + s3.rgb * s3.a) / wsum;',
-            '    return vec4(rgb, clamp(wsum, 0.0, 1.0));',
+            '    float w0 = s0.a * s0.a * s0.a;',
+            '    float w1 = s1.a * s1.a * s1.a;',
+            '    float w2 = s2.a * s2.a * s2.a;',
+            '    float w3 = s3.a * s3.a * s3.a;',
+            '    float wsum = w0 + w1 + w2 + w3;',
+            '    if (wsum < 1e-5) return vec4(0.0);',
+            '    vec3 rgb = (s0.rgb * w0 + s1.rgb * w1 +',
+            '                s2.rgb * w2 + s3.rgb * w3) / wsum;',
+            '    // Output alpha stays in linear-confidence units so the caller can',
+            '    // still fade to bg correctly — the power weighting only reshapes',
+            '    // the cross-cam color blend, not the visibility envelope.',
+            '    float aSum = clamp(s0.a + s1.a + s2.a + s3.a, 0.0, 1.0);',
+            '    return vec4(rgb, aSum);',
+            '}',
+            '',
+            '// ─── 3D-generalised IPM ───────────────────────────────────────',
+            '// sampleSpaceFromCam projects ANY world-space 3D point through',
+            '// the cam pinhole+fisheye model — same math as sampleGroundFromCam',
+            '// but with the y-coord generalised from the constant -h (ground)',
+            '// to (wpos.y - (Y_FLOOR + h)). That lets the bowl curve up off',
+            '// the floor and still pull content from the actual cam image rows',
+            '// above the horizon (sky / garage roof / parking-lot ceiling)',
+            '// rather than a procedural sky gradient.',
+            '//',
+            '// Y_FLOOR is the scene-y of the bowl floor; the cam IPM treats',
+            '// the floor plane as ground=0, so the cams effective scene-y is',
+            '// (Y_FLOOR + h). Inlined as a literal at JS build time.',
+            'vec4 sampleSpaceFromCam(int worldIdx, vec3 wpos) {',
+            '    float h     = pickFloat4(uCamHeight, worldIdx);',
+            '    float tilt  = pickFloat4(uCamTilt,   worldIdx);',
+            '    float yawB  = pickFloat4(uCamYaw,    worldIdx);',
+            '    float hfov  = pickFloat4(uCamFov,    worldIdx);',
+            '    float near  = pickFloat4(uNearClip,  worldIdx);',
+            '    float far   = pickFloat4(uFarClip,   worldIdx);',
+            '',
+            '    vec2 fwd = camForward(worldIdx);',
+            '    float cy = cos(yawB), sy = sin(yawB);',
+            '    vec2 fwdR = vec2(fwd.x * cy - fwd.y * sy, fwd.x * sy + fwd.y * cy);',
+            '    vec2 right = vec2(-fwdR.y, fwdR.x);',
+            '',
+            '    float camX = pickFloat4(uCamPosX, worldIdx);',
+            '    float camZ = pickFloat4(uCamPosZ, worldIdx);',
+            '    vec2 local = wpos.xz - vec2(camX, camZ);',
+            '',
+            '    float zc = dot(local, fwdR);',
+            '    float xc = dot(local, right);',
+            '    float yc = wpos.y - (uYFloor + h);',
+            '    float dist = length(vec3(xc, yc, zc));',
+            '',
+            '    if (zc <= 0.05) return vec4(0.0);',
+            '    // Far clip is generous on upper bowl since rim points sit at',
+            '    // ~10m diagonal from a side cam — keep them visible.',
+            '    if (dist < near || dist > far * 1.6) return vec4(0.0);',
+            '',
+            '    // Tilt rotation about the cam-X axis.',
+            '    float ct = cos(tilt), st = sin(tilt);',
+            '    float yr = yc * ct + zc * st;',
+            '    float zr = -yc * st + zc * ct;',
+            '    if (zr <= 0.05) return vec4(0.0);',
+            '',
+            '    float k = tan(hfov);',
+            '    float u = (xc / zr) / k;',
+            '    float v = (yr / zr) / k;',
+            '',
+            '    float r = length(vec2(u, v));',
+            '    if (r > 1.0) return vec4(0.0);',
+            '',
+            '    float vSample = 0.5 + 0.5 * v;',
+            '    vec4 col = sampleAt(worldIdx, u, vSample);',
+            '',
+            '    float radial = 1.0 - smoothstep(0.55, 0.95, r);',
+            '    float nearF  = smoothstep(near, near + 0.4, dist);',
+            '    float farF   = 1.0 - smoothstep(far * 1.6 - 1.2, far * 1.6, dist);',
+            '    col.a *= radial * nearF * farF;',
+            '    return col;',
+            '}',
+            '',
+            'vec4 sampleSpace(vec3 wpos) {',
+            '    // Same power-weighted blend as sampleGround — see the longer',
+            '    // comment there for the rationale. Reusing the exponent so the',
+            '    // floor↔curve crossfade in the bowl shader doesnt show a',
+            '    // change-of-regime in cam selection at the seam.',
+            '    vec4 s0 = sampleSpaceFromCam(0, wpos);',
+            '    vec4 s1 = sampleSpaceFromCam(1, wpos);',
+            '    vec4 s2 = sampleSpaceFromCam(2, wpos);',
+            '    vec4 s3 = sampleSpaceFromCam(3, wpos);',
+            '    float w0 = s0.a * s0.a * s0.a;',
+            '    float w1 = s1.a * s1.a * s1.a;',
+            '    float w2 = s2.a * s2.a * s2.a;',
+            '    float w3 = s3.a * s3.a * s3.a;',
+            '    float wsum = w0 + w1 + w2 + w3;',
+            '    if (wsum < 1e-5) return vec4(0.0);',
+            '    vec3 rgb = (s0.rgb * w0 + s1.rgb * w1 +',
+            '                s2.rgb * w2 + s3.rgb * w3) / wsum;',
+            '    float aSum = clamp(s0.a + s1.a + s2.a + s3.a, 0.0, 1.0);',
+            '    return vec4(rgb, aSum);',
             '}'
         ].join('\n');
 
-        // Shared uniforms for both passes (wall + disc). Each pass gets its
-        // own array copy via .slice() — Three.js compiles the uniform-array
-        // slot independently per material, and we recreate both materials
-        // together on every start3dView, so this stays in sync.
+        // Body-hole half-extents: bbox-driven if the model has loaded, else
+        // fall back to BYD Seal defaults so the bowl still works on first-run
+        // race conditions before _cacheCarBounds has fired.
+        var bodyHalfX = (typeof this._carHalfX === 'number' && this._carHalfX > 0)
+            ? this._carHalfX : 0.95;
+        var bodyHalfZ = (typeof this._carHalfZ === 'number' && this._carHalfZ > 0)
+            ? this._carHalfZ : 2.35;
+
+        // Shared uniforms for the bowl shader. The 3D-IPM helpers in
+        // SHARED_GLSL key off uYFloor (the bowl's floor scene-y) and
+        // uBodyHalfX/Z (the body hole footprint).
         var sharedUniforms = function() {
             return {
                 uTexture:       { value: this._videoTexture },
@@ -3365,87 +3549,94 @@ var VC = {
                 uNearClip:      { value: this._3dNearClip.slice() },
                 uFarClip:       { value: this._3dFarClip.slice() },
                 uCamPosX:       { value: this._3dCamPosX.slice() },
-                uCamPosZ:       { value: this._3dCamPosZ.slice() }
+                uCamPosZ:       { value: this._3dCamPosZ.slice() },
+                uYFloor:        { value: WALL_BOTTOM },
+                uBodyHalfX:     { value: bodyHalfX },
+                uBodyHalfZ:     { value: bodyHalfZ },
+                // Per-quadrant mean RGB of the live AVM mosaic, sampled at
+                // ~1Hz from a 4×1 downsample canvas. Drives the procedural
+                // sky tint so the upper bowl warms / cools with the actual
+                // scene (dusk → warm horizon, fluoro garage → cool tint).
+                // Order matches mosaic quadrant idx:
+                //   0=Front  1=Right  2=Rear  3=Left
+                // Initial neutral grey so first frame doesn't pop.
+                uSkyTint:       { value: [
+                    new THREE.Vector3(0.5, 0.5, 0.5),
+                    new THREE.Vector3(0.5, 0.5, 0.5),
+                    new THREE.Vector3(0.5, 0.5, 0.5),
+                    new THREE.Vector3(0.5, 0.5, 0.5)
+                ] },
+                // Per-cam exposure-match gain. Updated by the same 1Hz
+                // sampler from the per-quadrant luma; targets the median
+                // luma so one over/under-exposed cam doesnt pull the others.
+                uCamGain:       { value: [1.0, 1.0, 1.0, 1.0] }
             };
         }.bind(this);
 
-        // ── Cylindrical wall ────────────────────────────────────────────
-        var wallGeo = new THREE.CylinderGeometry(
-            WALL_RADIUS, WALL_RADIUS, WALL_HEIGHT, 96, 1, true);
-        wallGeo.translate(0, WALL_BOTTOM + WALL_HEIGHT / 2, 0);
-
-        var wallMat = new THREE.ShaderMaterial({
-            uniforms: sharedUniforms(),
-            vertexShader: [
-                'varying vec3 vWorldPos;',
-                'varying float vYNorm;',
-                'void main() {',
-                '    vec4 wp = modelMatrix * vec4(position, 1.0);',
-                '    vWorldPos = wp.xyz;',
-                '    vYNorm = clamp((position.y - (' + WALL_BOTTOM.toFixed(2) + ')) / ' + WALL_HEIGHT.toFixed(2) + ', 0.0, 1.0);',
-                '    gl_Position = projectionMatrix * viewMatrix * wp;',
-                '}'
-            ].join('\n'),
-            fragmentShader: [
-                'precision mediump float;',
-                SHARED_GLSL,
-                'varying vec3 vWorldPos;',
-                'varying float vYNorm;',
-                'void main() {',
-                '    float bearing = atan(vWorldPos.x, -vWorldPos.z);',
-                '    vec4 cam = sampleSurround(bearing, vYNorm);',
-                '',
-                '    vec3 horizon = vec3(0.04, 0.10, 0.11);',
-                '    vec3 zenith  = vec3(0.01, 0.02, 0.03);',
-                '    vec3 sky = mix(horizon, zenith, smoothstep(0.75, 1.0, vYNorm));',
-                '    vec3 baseBg = mix(vec3(0.04, 0.04, 0.05), sky,',
-                '                      smoothstep(0.0, 0.4, vYNorm));',
-                '',
-                '    // Cropped/out-of-frame fade — blend toward a *darkened*',
-                '    // version of the cam itself so the crop band reads as a',
-                '    // soft dimming of the image, not a black plate.',
-                '    vec3 dimmedCam = cam.rgb * 0.35;',
-                '    vec3 fadeColor = mix(baseBg, dimmedCam, 0.6);',
-                '    vec3 rgb = composeSurround(cam.rgb, cam.a, fadeColor);',
-                '',
-                '    // Upper bowl dissolves to sky regardless of crop.',
-                '    float skyFade = smoothstep(0.65, 0.95, vYNorm);',
-                '    rgb = mix(rgb, sky, skyFade);',
-                '',
-                '    float horizonGlow = smoothstep(0.55, 0.62, vYNorm) *',
-                '                        smoothstep(0.72, 0.62, vYNorm);',
-                '    rgb += vec3(0.0, 0.06, 0.05) * horizonGlow * 0.25;',
-                '',
-                '    float groundFade = smoothstep(0.05, 0.0, vYNorm);',
-                '    rgb = mix(rgb, vec3(0.04, 0.04, 0.05), groundFade * 0.6);',
-                '',
-                '    gl_FragColor = vec4(rgb, 1.0);',
-                '}'
-            ].join('\n'),
-            side: THREE.BackSide,
-            depthWrite: false
-        });
-        var wall = new THREE.Mesh(wallGeo, wallMat);
-        wall.renderOrder = -2;
-        this.scene.add(wall);
-        this._skySphere = wall;
-
-        // ── Ground disc ─────────────────────────────────────────────────
-        // True SOTA AVM uses a flat near-field + curved far-field. The wall
-        // shader above only paints the horizon and sky (the cropBottom values
-        // were just bumped to hide the bodywork band of each fisheye), and
-        // this disc fills everything from under the bumpers out to the bowl
-        // radius via geometric IPM (sampleGround in SHARED_GLSL).
+        // ── Parametric bowl ────────────────────────────────────────────
+        // Single radial-fan mesh: flat near the car, smoothly curving up to
+        // wall height at the perimeter. C¹-continuous (tangent-matched) at
+        // the floor→curve transition so there's no visible crease, unlike
+        // the previous cylinder+disc pair.
         //
-        // The fragment shader receives world-space (x, z) directly — no UV
-        // assumption, no quadrant remap on the wall side — so each ground
-        // pixel pulls from whichever cam(s) actually saw that point. Multiple
-        // cams contribute via confidence-weighted blend so the cardinal seams
-        // (front/right corner etc.) dissolve smoothly.
-        var DISC_SIZE = WALL_RADIUS * 2.0;
-        var discGeo = new THREE.PlaneGeometry(DISC_SIZE, DISC_SIZE, 1, 1);
+        // Profile (axisymmetric, r = sqrt(x²+z²)):
+        //   r ∈ [0, R_FLAT]      y = WALL_BOTTOM
+        //   r ∈ [R_FLAT, R_WALL] y = WALL_BOTTOM + A·(r-R_FLAT)²
+        // with A = WALL_HEIGHT / (R_WALL - R_FLAT)² so y(R_WALL) = WALL_TOP.
+        // dy/dr at R_FLAT is 0 — the slope on the flat side and the curve
+        // side both meet at zero, hiding the transition completely.
+        var R_FLAT = WALL_RADIUS * 0.45;        // ~3.6m flat near-field
+        var R_WALL = WALL_RADIUS;
+        var BOWL_RISE_K = WALL_HEIGHT / ((R_WALL - R_FLAT) * (R_WALL - R_FLAT));
+        var RADIAL_SEGS = 96;
+        var RING_COUNT  = 48;  // dense enough that Gouraud → fragment interp is smooth
 
-        var discMat = new THREE.ShaderMaterial({
+        var bowlGeo = (function() {
+            var positions = [];
+            var indices = [];
+            // Vertex 0 = centre at (0, floor, 0). Then RING_COUNT rings of
+            // RADIAL_SEGS verts each, evenly stepped in r so the curve stays
+            // smooth at high zoom.
+            positions.push(0, WALL_BOTTOM, 0);
+            for (var ri = 1; ri <= RING_COUNT; ri++) {
+                var t = ri / RING_COUNT;
+                var r = t * R_WALL;
+                var y;
+                if (r <= R_FLAT) {
+                    y = WALL_BOTTOM;
+                } else {
+                    var dr = r - R_FLAT;
+                    y = WALL_BOTTOM + BOWL_RISE_K * dr * dr;
+                }
+                for (var si = 0; si < RADIAL_SEGS; si++) {
+                    var theta = (si / RADIAL_SEGS) * Math.PI * 2;
+                    positions.push(Math.cos(theta) * r, y, Math.sin(theta) * r);
+                }
+            }
+
+            // Triangulate: centre fan → first ring; then ring-strip pairs.
+            for (var s0 = 0; s0 < RADIAL_SEGS; s0++) {
+                var s1 = (s0 + 1) % RADIAL_SEGS;
+                indices.push(0, 1 + s0, 1 + s1);
+            }
+            for (var ring = 0; ring < RING_COUNT - 1; ring++) {
+                var aBase = 1 + ring * RADIAL_SEGS;
+                var bBase = 1 + (ring + 1) * RADIAL_SEGS;
+                for (var k = 0; k < RADIAL_SEGS; k++) {
+                    var k1 = (k + 1) % RADIAL_SEGS;
+                    indices.push(aBase + k, bBase + k, bBase + k1);
+                    indices.push(aBase + k, bBase + k1, aBase + k1);
+                }
+            }
+
+            var g = new THREE.BufferGeometry();
+            g.setAttribute('position',
+                new THREE.BufferAttribute(new Float32Array(positions), 3));
+            g.setIndex(indices);
+            return g;
+        })();
+
+        var bowlMat = new THREE.ShaderMaterial({
             uniforms: sharedUniforms(),
             vertexShader: [
                 'varying vec3 vWorldPos;',
@@ -3459,42 +3650,147 @@ var VC = {
                 'precision mediump float;',
                 SHARED_GLSL,
                 'varying vec3 vWorldPos;',
-                'void main() {',
-                '    // Ground point in world XZ. The plane is rotated -90° on X',
-                '    // below, so position.xy in object space maps to (x, z) in world.',
-                '    vec2 ground = vWorldPos.xz;',
-                '    float radius = length(ground);',
                 '',
-                '    // Cut a body-shaped hole under the car so we never try to',
-                '    // invent pixels the cams cant physically see — the body',
-                '    // occludes the ground inside its own footprint, and IPM',
-                '    // would otherwise paint stretched bodywork onto the disc.',
-                '    // Half-extents: ~2.35m fore/aft, ~0.95m lateral (BYD Seal).',
-                '    float bodyX = abs(ground.x) / 0.95;',
-                '    float bodyZ = abs(ground.y) / 2.35;',
-                '    float bodyR = max(bodyX, bodyZ);',  // chebyshev / rounded box
+                '#define R_FLAT  ' + R_FLAT.toFixed(3),
+                '#define R_WALL  ' + R_WALL.toFixed(3),
+                '#define WALL_BOTTOM ' + WALL_BOTTOM.toFixed(3),
+                '#define WALL_TOP    ' + (WALL_BOTTOM + WALL_HEIGHT).toFixed(3),
+                '',
+                'void main() {',
+                '    float radius = length(vWorldPos.xz);',
+                '    float yNorm = clamp(',
+                '        (vWorldPos.y - WALL_BOTTOM) / (WALL_TOP - WALL_BOTTOM),',
+                '        0.0, 1.0);',
+                '',
+                '    // Body-shaped hole on the flat near-field. Half-extents come',
+                '    // from the loaded GLBs bounding box (uniform).',
+                '    float bodyX = abs(vWorldPos.x) / max(uBodyHalfX, 0.10);',
+                '    float bodyZ = abs(vWorldPos.z) / max(uBodyHalfZ, 0.10);',
+                '    float bodyR = max(bodyX, bodyZ);',
                 '    float carHole = smoothstep(1.00, 1.25, bodyR);',
                 '',
-                '    // Fade the disc out as it approaches the wall radius so the',
-                '    // disc/wall seam is a soft cross-fade rather than a hard ring.',
-                '    float edgeFade = 1.0 - smoothstep(' +
-                    (WALL_RADIUS * 0.85).toFixed(2) + ', ' +
-                    (WALL_RADIUS * 0.98).toFixed(2) + ', radius);',
+                '    // THREE-WAY HYBRID SAMPLING.',
+                '    //',
+                '    //   yNorm < 0.02   (flat floor)              → sampleGround (BEV IPM)',
+                '    //   0.02..0.30     (floor→wall transition)   → sampleSpace where reachable, sampleSurround fallback',
+                '    //   0.30..0.62     (mid-upper wall)           → sampleSurround (bearing)',
+                '    //   0.62..0.95     (above horizon)            → crossfade to stylized sky',
+                '    //',
+                '    // The transition band is the critical one — production',
+                '    // AVMs (Mercedes, Hyundai) keep IPM authoritative as far',
+                '    // up the lower wall as the cams physically reach. Points',
+                '    // 1-2m off the floor at r≈5-7m DO sit inside the side+rear',
+                '    // cam fisheye cones, so sampleSpace returns a meaningful',
+                '    // sample there; only when ALL four cams fail (corners +',
+                '    // upper wall) do we fall back to bearing. That keeps the',
+                '    // floor↔wall seam photometrically consistent — both sides',
+                '    // are projecting the same world point through cam intrinsics.',
+                '    // Earlier attempt used sampleSpace on the WHOLE curve, which',
+                '    // black-voided front+right because upper-wall points are',
+                '    // outside all cam cones. The reach test fixes that.',
+                '    float curveW = smoothstep(0.02, 0.30, yNorm);',
+                '    float skyW   = smoothstep(0.62, 0.95, yNorm);',
+                '    // ipmW: how much we trust IPM in the transition band.',
+                '    // Linear from 1 at yNorm=0.02 to 0 at yNorm=0.30 — past',
+                '    // 0.30 we are fully bearing.',
+                '    float ipmW = clamp(1.0 - smoothstep(0.02, 0.30, yNorm), 0.0, 1.0);',
                 '',
-                '    vec4 g = sampleGround(ground);',
-                '    float alpha = g.a * carHole * edgeFade;',
+                '    vec4 g = vec4(0.0);',
+                '    vec4 sp = vec4(0.0);',
+                '    vec4 srf = vec4(0.0);',
+                '    if (curveW < 0.999) {',
+                '        g = sampleGround(vWorldPos.xz);',
+                '    }',
+                '    if (ipmW > 0.001) {',
+                '        sp = sampleSpace(vWorldPos);',
+                '    }',
+                '    // Bearing fallback runs whenever we are in the curve and not',
+                '    // fully replaced by sky. Used both as "wall content" past',
+                '    // ipmW=0 and as the IPM-fallback when cams cant reach.',
+                '    if (curveW > 0.001 && skyW < 0.999) {',
+                '        float bearing = atan(vWorldPos.x, -vWorldPos.z);',
+                '        srf = sampleSurround(bearing, yNorm);',
+                '    }',
+                '    // Within the transition band, blend sampleSpace with',
+                '    // sampleSurround based on IPM reachability (sp.a). When',
+                '    // some cam reached the point, IPM wins; when none did,',
+                '    // bearing fills the gap with no black holes.',
+                '    float reach = smoothstep(0.05, 0.40, sp.a);',
+                '    vec4 trans = mix(srf, sp, reach * ipmW);',
+                '    // Now compose the wall. Where ipmW>0 (transition band)',
+                '    // use the IPM-with-fallback; past it, pure bearing.',
+                '    vec4 w = mix(srf, trans, ipmW);',
+                '    vec4 cam = mix(g, w, curveW);',
                 '',
-                '    if (alpha < 0.01) discard;',
+                '    // Stylized sky for the very top of the bowl — fisheye above-',
+                '    // horizon pixels are blown-out / car-roof bleed, so we hard-',
+                '    // replace them rather than show garbage. The horizon colour',
+                '    // is biased by the AVM mean luminance per quadrant: dusk in',
+                '    // front of the car warms the front horizon, fluoro garage',
+                '    // tints all four quadrants cool, sun overhead pushes the',
+                '    // zenith toward the cam mean rather than a fixed slate. Same',
+                '    // bearing remap used by sampleSurround so the cardinal',
+                '    // directions line up with their cam.',
+                '    float bearingSky = atan(vWorldPos.x, -vWorldPos.z);',
+                '    float bSky = mod(bearingSky + 0.78540, 6.28318);',
+                '    if (bSky < 0.0) bSky += 6.28318;',
+                '    float virtIdxSky = bSky / 1.5708;',
+                '    int idxFloorSky = int(mod(floor(virtIdxSky), 4.0));',
+                '    int idxNextSky  = int(mod(floor(virtIdxSky) + 1.0, 4.0));',
+                '    // uSkyTint is fed by the JS sampler in WORLD idx order',
+                '    // (0=Front, 1=Right, 2=Rear, 3=Left). Bearing also walks',
+                '    // world idx, so DO NOT remapIdx here — the swap/rotate',
+                '    // knobs only affect texture-quadrant lookup in sampleAt,',
+                '    // not the world-idx-keyed sky tint. Earlier draft had a',
+                '    // double-remap that desynced sky tint from cam content',
+                '    // whenever swap/rotate were non-default.',
+                '    vec3 tintA = uSkyTint[0]; vec3 tintB = uSkyTint[0];',
+                '    if (idxFloorSky == 1) tintA = uSkyTint[1]; else if (idxFloorSky == 2) tintA = uSkyTint[2]; else if (idxFloorSky == 3) tintA = uSkyTint[3];',
+                '    if (idxNextSky == 1) tintB = uSkyTint[1]; else if (idxNextSky == 2) tintB = uSkyTint[2]; else if (idxNextSky == 3) tintB = uSkyTint[3];',
+                '    float fracSky = virtIdxSky - floor(virtIdxSky);',
+                '    vec3 tintBearing = mix(tintA, tintB, smoothstep(0.0, 1.0, fracSky));',
+                '    // Mean luminance of the bearing tint — used to drive the',
+                '    // overall sky brightness so a dim garage sky stays dim.',
+                '    float tintLuma = dot(tintBearing, vec3(0.299, 0.587, 0.114));',
+                '    // Hue weight = how saturated the cam content is (chroma',
+                '    // dist from grey). Pure-grey scenes shouldnt push hue at all.',
+                '    float chroma = length(tintBearing - vec3(tintLuma));',
+                '    float hueW   = clamp(chroma * 4.0, 0.0, 0.8);',
+                '    // Designed sky stays the structural component; tint adds',
+                '    // scene context with a soft cap so it can never read as',
+                '    // unfiltered cam pixels (which would defeat the gradient).',
+                '    vec3 horizonSkyBase = vec3(0.045, 0.055, 0.070);',
+                '    vec3 zenithSkyBase  = vec3(0.018, 0.022, 0.030);',
+                '    vec3 horizonSky = mix(horizonSkyBase,',
+                '                          horizonSkyBase * (0.6 + tintLuma * 1.8) + tintBearing * 0.05,',
+                '                          hueW);',
+                '    vec3 zenithSky  = mix(zenithSkyBase,',
+                '                          zenithSkyBase * (0.7 + tintLuma * 1.4) + tintBearing * 0.02,',
+                '                          hueW);',
+                '    vec3 sky = mix(horizonSky, zenithSky, smoothstep(0.62, 1.0, yNorm));',
                 '',
-                '    // Subtle vignette toward the disc edge so far-field IPM',
-                '    // distortion (which gets stretchy near the horizon) reads',
-                '    // as atmospheric haze instead of broken geometry.',
-                '    float haze = smoothstep(' +
-                    (WALL_RADIUS * 0.55).toFixed(2) + ', ' +
-                    (WALL_RADIUS * 0.95).toFixed(2) + ', radius);',
+                '    // Compose: cam.a controls fade-to-bg in cropped/out-of-frame',
+                '    // regions. Background colour is a dim blend of cam + sky so',
+                '    // the fade never reads as a hard black plate.',
+                '    vec3 dimmedCam = cam.rgb * 0.35;',
+                '    vec3 fadeColor = mix(sky, dimmedCam, 0.55);',
+                '    vec3 rgb = composeSurround(cam.rgb, cam.a, fadeColor);',
+                '',
+                '    // Crossfade cam content → sky toward the rim.',
+                '    rgb = mix(rgb, sky, skyW);',
+                '',
+                '    // Subtle horizon glow draws the eye to the cam content band.',
+                '    float horizonGlow = smoothstep(0.55, 0.62, yNorm) *',
+                '                        smoothstep(0.72, 0.62, yNorm);',
+                '    rgb += vec3(0.0, 0.06, 0.05) * horizonGlow * 0.25;',
+                '',
+                '    // Atmospheric haze toward the rim.',
+                '    float haze = smoothstep(0.55, 0.95, yNorm);',
                 '    vec3 hazeColor = vec3(0.06, 0.09, 0.10);',
-                '    vec3 rgb = mix(g.rgb, hazeColor, haze * 0.35);',
+                '    rgb = mix(rgb, hazeColor, haze * 0.25);',
                 '',
+                '    float alpha = mix(1.0, carHole, smoothstep(0.0, 0.005, yNorm));',
+                '    if (alpha < 0.01) discard;',
                 '    gl_FragColor = vec4(rgb, alpha);',
                 '}'
             ].join('\n'),
@@ -3503,12 +3799,144 @@ var VC = {
             side: THREE.DoubleSide
         });
 
-        var disc = new THREE.Mesh(discGeo, discMat);
-        disc.rotation.x = -Math.PI / 2;
-        disc.position.y = WALL_BOTTOM + 0.001;  // a hair above the wall floor
-        disc.renderOrder = -1;                   // after wall (-2), before car (0)
-        this.scene.add(disc);
-        this._surroundDisc = disc;
+        var bowl = new THREE.Mesh(bowlGeo, bowlMat);
+        bowl.renderOrder = -2;
+        this.scene.add(bowl);
+        // Stash on both legacy slots so stop3dView's cleanup (which checks
+        // _skySphere AND _surroundDisc separately) finds and disposes it
+        // exactly once. We null _surroundDisc so the second branch is a no-op.
+        this._skySphere = bowl;
+        this._surroundDisc = null;
+
+        // Kick the AVM-derived sky-tint sampler. Reads a 2×2 downsample of
+        // the live mosaic at ~1Hz so the procedural sky and HemisphereLight
+        // pick up the actual scene colour palette (warm dusk, cool fluoro,
+        // sun-overhead etc.) without trying to use raw fisheye pixels.
+        this._startSkyTintSampler(bowlMat);
+    },
+
+    /**
+     * Sample the AVM mosaic into a 4-pixel offscreen canvas at ~1Hz, parse
+     * each pixel as the mean RGB of its source quadrant, and feed those
+     * four vec3s into `uSkyTint[4]` on the bowl material plus a tinted
+     * HemisphereLight on the scene. Cheap (one drawImage scaling 1280×960 →
+     * 2×2, one getImageData of 4 px) and runs only while the bowl is up.
+     *
+     * Quadrant idx in the canvas (post-CanvasTexture flipY):
+     *   (0,0) BL → Front       (1,0) BR → Right
+     *   (0,1) TL → Rear        (1,1) TR → Left
+     * Output array order matches sampleAt's WORLD idx (0=Front,1=Right,
+     * 2=Rear,3=Left), which is also what the shader expects in uSkyTint.
+     */
+    _startSkyTintSampler: function(bowlMat) {
+        var self = this;
+        if (this._skyTintInterval) clearInterval(this._skyTintInterval);
+        if (!this._skyTintCanvas) {
+            this._skyTintCanvas = document.createElement('canvas');
+            this._skyTintCanvas.width = 2;
+            this._skyTintCanvas.height = 2;
+        }
+        var dst = this._skyTintCanvas;
+        var dctx = dst.getContext('2d');
+
+        function tick() {
+            var src = self._3dCanvas;
+            if (!src || !bowlMat || !bowlMat.uniforms || !bowlMat.uniforms.uSkyTint) return;
+            try {
+                // Downsample the full mosaic to 2×2; the browser does a
+                // box-filter mean for us so each output pixel is the mean
+                // colour of its quadrant.
+                dctx.drawImage(src, 0, 0, dst.width, dst.height);
+                var data = dctx.getImageData(0, 0, 2, 2).data;
+                // ImageData order: row-major, top-down (y=0 is TOP).
+                // Indices: [0]=TL, [1]=TR, [2]=BL, [3]=BR (each is 4 bytes).
+                // After flipY in CanvasTexture, the on-screen mapping is:
+                //   canvas-TL → Rear, canvas-TR → Left,
+                //   canvas-BL → Front, canvas-BR → Right.
+                // Map to sampleAt WORLD idx (0=F,1=R,2=Rear,3=L):
+                function pixVec(off) {
+                    return new THREE.Vector3(
+                        data[off]     / 255,
+                        data[off + 1] / 255,
+                        data[off + 2] / 255
+                    );
+                }
+                var rear  = pixVec(0);   // TL
+                var left  = pixVec(4);   // TR
+                var front = pixVec(8);   // BL
+                var right = pixVec(12);  // BR
+                var arr = bowlMat.uniforms.uSkyTint.value;
+                arr[0].copy(front);
+                arr[1].copy(right);
+                arr[2].copy(rear);
+                arr[3].copy(left);
+
+                // Per-cam exposure match. Compute each quadrants luma, take
+                // the MEDIAN as the target, divide each cams luma by the
+                // target to get a per-cam gain, then clamp to [0.6, 1.6] so
+                // a single pitch-black cam can't blow the others out.
+                // Indexed in the same world idx order as uSkyTint.
+                function luma(v) { return v.x * 0.299 + v.y * 0.587 + v.z * 0.114; }
+                var lumaArr = [luma(front), luma(right), luma(rear), luma(left)];
+                // Median of 4: average of the two middle values after sort.
+                var sorted = lumaArr.slice().sort(function(a, b) { return a - b; });
+                var median = (sorted[1] + sorted[2]) * 0.5;
+                if (median < 0.02) median = 0.02;  // floor to avoid div-by-zero
+                var gainsOut = bowlMat.uniforms.uCamGain.value;
+                for (var qi = 0; qi < 4; qi++) {
+                    var camL = lumaArr[qi] < 0.01 ? 0.01 : lumaArr[qi];
+                    var g = median / camL;
+                    if (g < 0.6) g = 0.6;
+                    else if (g > 1.6) g = 1.6;
+                    // Ease toward target rather than snap, to avoid 1-Hz
+                    // luma flicker from cars passing or auto-exposure jumps.
+                    gainsOut[qi] = gainsOut[qi] * 0.5 + g * 0.5;
+                }
+
+                // Drive the showroom HemisphereLight from the same sample so
+                // the car's PBR ambient picks up scene context — rear+left+
+                // front+right top-half mean for skyColor, body-frame floor
+                // luma for groundColor. Stays subtle (mixed against the
+                // showroom defaults) so the car never reads as pure cam-tint.
+                if (self._sceneLights && self._sceneLights[0]) {
+                    var hemi = self._sceneLights[0].light;
+                    if (hemi && hemi.isHemisphereLight) {
+                        // 4-quadrant mean as the "sky" colour for IBL ambient.
+                        var avg = new THREE.Vector3();
+                        avg.copy(front).add(right).add(rear).add(left).multiplyScalar(0.25);
+                        // Blend against original sky colour 0x88aacc so a
+                        // dark bowl doesn't kill car contrast entirely.
+                        var origSky = new THREE.Color(0x88aacc);
+                        var blended = new THREE.Color(
+                            origSky.r * 0.55 + avg.x * 0.45,
+                            origSky.g * 0.55 + avg.y * 0.45,
+                            origSky.b * 0.55 + avg.z * 0.45
+                        );
+                        hemi.color.copy(blended);
+                        // Ground is dimmer; scale by 0.4 so under-car pickup
+                        // stays plausibly shadowed.
+                        var origGround = new THREE.Color(0x222244);
+                        var dimAvg = new THREE.Color(avg.x * 0.4, avg.y * 0.4, avg.z * 0.4);
+                        hemi.groundColor.copy(origGround.lerp(dimAvg, 0.6));
+                    }
+                }
+            } catch (e) {
+                // Cross-origin, canvas not ready, etc. — silent recovery on
+                // next tick; never let a sampling glitch kill the bowl.
+            }
+        }
+
+        // Prime once so the first second isn't neutral grey, then 1Hz.
+        tick();
+        this._skyTintInterval = setInterval(tick, 1000);
+    },
+
+    _stopSkyTintSampler: function() {
+        if (this._skyTintInterval) {
+            clearInterval(this._skyTintInterval);
+            this._skyTintInterval = null;
+        }
+        // Keep the canvas allocated; cheap to reuse on next start3dView.
     },
 
     // ==================== DEFAULT-VIEW DATA OVERLAYS ====================
@@ -3547,6 +3975,28 @@ var VC = {
         // Mark "ready to lay out" — actual positioning is screen-space,
         // not model-space, so we don't need to compute world anchors.
         this._tyreLayoutReady = true;
+
+        // Capture the model's world-space half-extents on the ground plane
+        // so the bowl shader can cut a body-shaped hole in the disc that
+        // matches whichever GLB is loaded (Seal/Tang/Han/Atto have different
+        // footprints; the previous hardcoded 0.95 × 2.35 was Seal-only and
+        // bled bodywork onto the disc on every other model).
+        if (!this.carModel || typeof THREE === 'undefined') return;
+        try {
+            var box = new THREE.Box3().setFromObject(this.carModel);
+            var size = box.getSize(new THREE.Vector3());
+            // Half-extents on world XZ. Add a small margin so the bowl-side
+            // body hole is slightly larger than the silhouette, hiding any
+            // last-pixel mismatch between the GLB outline and the actual car
+            // footprint as captured by the cams.
+            var marginX = 0.10;  // ~10cm
+            var marginZ = 0.15;  // ~15cm — front/back overhang varies more
+            this._carHalfX = (size.x * 0.5) + marginX;
+            this._carHalfZ = (size.z * 0.5) + marginZ;
+        } catch (e) {
+            this._carHalfX = null;
+            this._carHalfZ = null;
+        }
     },
 
     // Reusable scratch vectors so the per-frame projection allocates nothing.

@@ -165,10 +165,55 @@ public class RecordingModeManager {
             // through runActivateGuarded which re-validates again — so this
             // is a soft-pre-check that just decides whether to spawn the
             // warmup in the first place.
+            //
+            // One last hardware probe: the latch may have been released by
+            // a stale GearMonitor delivery before the AccSentry IPC landed,
+            // in which case accIsOn still reflects the constructor's
+            // possibly-stale read. Pulling fresh from the bodywork HAL here
+            // prevents auto-activate from racing against an ACC OFF that
+            // hasn't propagated to the field yet.
+            //
+            // FIX (rmm: BootAutoActivate post-latch HW probe pinned by slow
+            // binder): wrap the HW probe in a Future with 1.5s timeout. If
+            // the BYDAuto binder is wedged the probe could otherwise hang
+            // past BOOT_AUTO_ACTIVATE_HARD_CAP_MS. On timeout, fall through
+            // to the existing accIsOn (which carries the AccMonitor IPC
+            // value or constructor probe).
+            boolean hwAccPostLatch;
+            java.util.concurrent.ExecutorService probeExec =
+                java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                    Thread th = new Thread(r, "BootAutoActivate-HwProbe");
+                    th.setDaemon(true);
+                    return th;
+                });
+            try {
+                java.util.concurrent.Future<Boolean> probeFut =
+                    probeExec.submit(() -> queryAccStateFromHardware());
+                try {
+                    hwAccPostLatch = probeFut.get(1500L,
+                        java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (java.util.concurrent.TimeoutException te) {
+                    probeFut.cancel(true);
+                    logger.warn("Boot auto-activate HW probe timed out (>1.5s) — "
+                        + "falling back to accIsOn=" + accIsOn);
+                    hwAccPostLatch = accIsOn;
+                } catch (Exception e) {
+                    logger.warn("Boot auto-activate HW probe failed: " + e.getMessage()
+                        + " — falling back to accIsOn=" + accIsOn);
+                    hwAccPostLatch = accIsOn;
+                }
+            } finally {
+                probeExec.shutdownNow();
+            }
             Mode targetMode;
             int gearNow;
             boolean accNow;
             synchronized (RecordingModeManager.this) {
+                if (hwAccPostLatch != accIsOn) {
+                    logger.info("Boot auto-activate: HW probe corrects accIsOn "
+                        + accIsOn + " -> " + hwAccPostLatch);
+                    accIsOn = hwAccPostLatch;
+                }
                 targetMode = currentMode;
                 gearNow = currentGear;
                 accNow = accIsOn;
@@ -239,11 +284,24 @@ public class RecordingModeManager {
         resyncTickerThread = new Thread(() -> {
             // Initial cold-start delay matches construction's warmup-then-
             // activate window (~4s warmup + ~2s pipeline init + slack).
+            //
+            // FIX (rmm low: ticker silently exits on InterruptedException
+            // leaving wedge detection permanently dead until daemon restart).
+            // If the interrupt is not paired with a real shutdown signal
+            // (resyncTickerRunning=false), keep ticking — clear the
+            // interrupted flag and continue the outer loop instead of
+            // bare `return`. shutdown() always sets resyncTickerRunning=false
+            // BEFORE interrupting, so the post-sleep guard correctly exits
+            // on real shutdown.
             try {
                 Thread.sleep(COLD_START_RESYNC_DELAY_MS);
             } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                return;
+                Thread.interrupted();  // clear flag
+                if (!resyncTickerRunning) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                logger.warn("Cold-start sleep interrupted but ticker still running — continuing");
             }
             if (!resyncTickerRunning) return;
             try {
@@ -262,8 +320,16 @@ public class RecordingModeManager {
                 try {
                     Thread.sleep(PERIODIC_RESYNC_INTERVAL_MS);
                 } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return;
+                    Thread.interrupted();  // clear flag
+                    if (!resyncTickerRunning) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    // Spurious interrupt with shutdown not requested — keep
+                    // ticking. Without this, an unexpected interrupt would
+                    // permanently kill wedge detection.
+                    logger.warn("Periodic sleep interrupted but ticker still running — continuing");
+                    continue;
                 }
                 if (!resyncTickerRunning) return;
                 try {
@@ -285,12 +351,44 @@ public class RecordingModeManager {
      * Used both for cold-start re-sync and for any later resync hook.
      */
     public void resyncFromHardware(String reason) {
+        // FIX (rmm medium: stuck-warmup watchdog) — if a warmup worker has
+        // been pinned for >WARMUP_STUCK_THRESHOLD_MS (e.g. AvcHalWarmup
+        // launchAvc blocking forever in Process.waitFor() under
+        // system_server flap / package respawn / binder backpressure),
+        // force-clear the in-flight flag so the wedge-retry / gear-change /
+        // mode-select paths can spawn a fresh warmup. Without this backstop
+        // the daemon would have to be restarted to recover. We can't kill
+        // the stuck worker thread itself (no safe interrupt path through
+        // ProcessBuilder.waitFor()), but releasing the gate unblocks every
+        // future activate-with-warmup caller, and the pendingRetrigger
+        // backstop in the eventually-arriving stuck worker's finally is
+        // benign (pending will already be cleared by the fresh worker).
+        long warmupSince = warmupInFlightSinceMs;
+        if (warmupInFlight.get() && warmupSince > 0L
+            && (System.currentTimeMillis() - warmupSince) > WARMUP_STUCK_THRESHOLD_MS) {
+            logger.warn("Stuck warmup detected (in-flight for "
+                + (System.currentTimeMillis() - warmupSince) + "ms, threshold "
+                + WARMUP_STUCK_THRESHOLD_MS + "ms) — force-clearing warmupInFlight ("
+                + reason + ")");
+            warmupInFlightSinceMs = 0L;
+            warmupInFlight.set(false);
+            // Surface a pending re-trigger so the eventually-arriving
+            // stuck worker's finally doesn't drop the signal — the new
+            // CAS-winner may still want this resync's intent honored.
+            warmupPendingRetrigger.set(true);
+        }
+
         boolean hwAcc = queryAccStateFromHardware();
         int hwGear;
         boolean accChanged;
         boolean gearChanged;
         boolean shouldRetryActivation;
         Mode retryMode = null;
+        // Wedge-driven retry: when true, the resync-retry call below must
+        // bypass activateModeWithWarmup's "already active" supplier guard
+        // so the embedded stopRecording+startRecording cycle that unwedges
+        // a stalled encoder / stuck pendingRecordingPrefix actually runs.
+        boolean wedgeRetryDriven = false;
 
         // Try to (re)start GearMonitor before reading. If GearMonitor.start()
         // failed at cold boot (BYD HAL momentarily unavailable, binder service
@@ -312,6 +410,7 @@ public class RecordingModeManager {
                 com.overdrive.app.monitor.GearMonitor.getInstance();
             if (gm.isRunning()) {
                 gearMonitorRetryFailures = 0;  // healthy — reset counter
+                gearMonitorCapResetCounter = 0;
             } else if (accIsOn && gearMonitorRetryFailures < GEAR_MONITOR_RETRY_CAP) {
                 logger.info("GearMonitor not running — attempting start (" + reason
                     + ", attempt " + (gearMonitorRetryFailures + 1)
@@ -320,6 +419,7 @@ public class RecordingModeManager {
                     gm.start();
                     if (gm.isRunning()) {
                         gearMonitorRetryFailures = 0;
+                        gearMonitorCapResetCounter = 0;
                     } else {
                         gearMonitorRetryFailures++;
                     }
@@ -330,7 +430,24 @@ public class RecordingModeManager {
                 }
                 if (gearMonitorRetryFailures == GEAR_MONITOR_RETRY_CAP) {
                     logger.warn("GearMonitor retry cap reached — suppressing further attempts "
-                        + "until next ACC ON cycle. HAL is likely permanently unavailable.");
+                        + "until next ACC ON cycle or " + GEAR_MONITOR_CAP_RESET_TICKS
+                        + "-tick timer reset. HAL is likely permanently unavailable.");
+                    gearMonitorCapResetCounter = 0;
+                }
+            } else if (accIsOn && gearMonitorRetryFailures >= GEAR_MONITOR_RETRY_CAP) {
+                // Cap held but ACC still on (e.g., daemon respawned
+                // mid-drive — no ACC ON edge will ever fire to reset).
+                // Bleed back into retry territory every Nth tick so a
+                // transient HAL outage that recovers eventually resumes
+                // gear-driven mode activation without forcing a key cycle.
+                gearMonitorCapResetCounter++;
+                if (gearMonitorCapResetCounter >= GEAR_MONITOR_CAP_RESET_TICKS) {
+                    int newFailures = GEAR_MONITOR_RETRY_CAP - 1;
+                    logger.info("GearMonitor cap timer fired (" + reason + ") — "
+                        + "decrementing retry counter " + gearMonitorRetryFailures
+                        + " -> " + newFailures + " to allow one more attempt next tick");
+                    gearMonitorRetryFailures = newFailures;
+                    gearMonitorCapResetCounter = 0;
                 }
             }
         } catch (Exception ignored) {
@@ -355,10 +472,200 @@ public class RecordingModeManager {
             // every call = 2880 lines/day on a parked car for nothing useful.
             // Log info only when something actually changed or a retry will
             // fire; the no-change case stays at debug.
-            shouldRetryActivation = !accChanged && !gearChanged && accIsOn && !modeActive
+            //
+            // Wedge detection: the !modeActive arm catches activations that
+            // never set modeActive=true (pipeline.start() returned with
+            // running=false, mid-teardown race, etc.). The recordingHealthy
+            // arm catches the inverse — activation set modeActive=true
+            // optimistically but the pipeline is no longer actually
+            // recording AND no deferred-record path is in flight. Without
+            // the second arm, a mid-drive recorder failure leaves
+            // modeActive=true forever and the resync ticker is inert.
+            // PROXIMITY_GUARD intentionally has no continuous recording
+            // (it records on triggers only) so we must NOT mark it wedged
+            // simply because pipeline.isRecording()==false.
+            boolean recordingHealthy = pipeline.isRunning()
+                    && (pipeline.isRecording() || pipeline.getPendingRecordingPrefix() != null);
+            // FIX (pipeline: Segment-rotation grace window is plumbed in
+            // pipeline but never consumed by RMM wedge ticker): if a segment
+            // just rotated (within 5s), the pipeline.isRecording()=false read
+            // is the sub-second between-segments flicker on a normal close —
+            // not a wedge. Honor the grace window the pipeline already
+            // tracks (GpuSurveillancePipeline:131-139, getLastSegmentRotateMs).
+            // Without this, a 30s-tick that lands inside the rotation window
+            // burns a wedge retry slot AND triggers a stop()+start() cycle
+            // that produces a 2-5s recording gap.
+            long rotateAgeMs = System.currentTimeMillis() - pipeline.getLastSegmentRotateMs();
+            boolean inRotationGrace = rotateAgeMs >= 0L && rotateAgeMs < 5000L;
+            // FIX (rmm: wedgeDetected blind to stuck pendingRecordingPrefix):
+            // a stuck pendingRecordingPrefix (encoder format never available)
+            // would otherwise mask a wedge forever — recordingHealthy=true
+            // because pendingPrefix!=null. Track stuck-pending age and after
+            // PENDING_PREFIX_STUCK_TICKS ticks (60s at 30s tick), treat as
+            // wedged regardless. Self-resets when pendingPrefix clears
+            // (encoder format arrived, recording is now actually running).
+            String pendingPrefixNow = pipeline.getPendingRecordingPrefix();
+            boolean pendingPrefixStuck = false;
+            if (pendingPrefixNow != null && pipeline.isRunning() && !pipeline.isRecording()) {
+                if (lastObservedPendingPrefix == null
+                        || !lastObservedPendingPrefix.equals(pendingPrefixNow)) {
+                    lastObservedPendingPrefix = pendingPrefixNow;
+                    pendingPrefixStuckTicks = 1;
+                } else {
+                    pendingPrefixStuckTicks++;
+                }
+                if (pendingPrefixStuckTicks >= PENDING_PREFIX_STUCK_TICKS) {
+                    pendingPrefixStuck = true;
+                    logger.warn("Pending recording prefix stuck for "
+                        + pendingPrefixStuckTicks + " ticks (~"
+                        + (pendingPrefixStuckTicks * PERIODIC_RESYNC_INTERVAL_MS / 1000L)
+                        + "s) — treating as wedged regardless of pendingPrefix; "
+                        + "prefix=" + pendingPrefixNow);
+                }
+            } else {
+                if (lastObservedPendingPrefix != null) {
+                    logger.info("Pending recording prefix cleared (was stuck="
+                        + pendingPrefixStuckTicks + " ticks) — wedge tracking reset");
+                }
+                lastObservedPendingPrefix = null;
+                pendingPrefixStuckTicks = 0;
+            }
+            // FIX (rmm: Wedge ticker blind to encoder hangs that don't surface
+            // in isRunning/isRecording). Probe lastEncodedFrameMs — if the
+            // encoder hasn't successfully dequeued an output buffer in 15s
+            // while we believe modeActive AND we're outside a rotation grace
+            // window, that's a wedge regardless of what isRunning/isRecording
+            // claim. Hides behind PROXIMITY_GUARD's no-continuous-recording
+            // semantics: that mode legitimately goes long stretches with no
+            // encoded frames between radar triggers, so don't apply the
+            // probe to it.
+            long lastEncodedAgeMs = -1L;
+            try {
+                long lastEncodedMs = pipeline.getLastEncodedFrameMs();
+                if (lastEncodedMs > 0L) {
+                    lastEncodedAgeMs = System.currentTimeMillis() - lastEncodedMs;
+                }
+            } catch (Throwable ignored) {
+                // Older pipeline build without the accessor — fall through.
+            }
+            boolean encoderStalled = modeActive
+                    && currentMode != Mode.PROXIMITY_GUARD
+                    && !inRotationGrace
+                    && lastEncodedAgeMs > 15_000L;
+            if (encoderStalled) {
+                logger.warn("Encoder appears stalled (" + reason + ") — "
+                    + lastEncodedAgeMs + "ms since last encoded frame "
+                    + "(threshold 15000ms); treating as wedged");
+            }
+            boolean wedgeDetected = modeActive
+                    && (!recordingHealthy || pendingPrefixStuck || encoderStalled)
+                    && !inRotationGrace
+                    && currentMode != Mode.PROXIMITY_GUARD;
+            if (inRotationGrace && modeActive && !recordingHealthy
+                    && currentMode != Mode.PROXIMITY_GUARD) {
+                logger.info("Wedge check skipped (" + reason + ") — segment rotated "
+                    + rotateAgeMs + "ms ago (within 5s grace window)");
+            }
+
+            // FIX (rmm: Resync wedgeDetected has no backoff or per-cycle cap).
+            // Gate wedge-driven retries on backoff schedule + per-cycle cap.
+            // Non-wedge retries (modeActive=false from cold-start) still fire
+            // unthrottled — those are harmless and self-resolve in one tick.
+            //
+            // FIX (rmm Round 3, Finding 1: Wedge retry per-cycle cap permanently
+            // silences self-heal mid-drive). Once cap is reached, fall back to
+            // a long fixed post-cap backoff (WEDGE_RETRY_POST_CAP_BACKOFF_MS =
+            // 30 min) instead of suppressing forever. Each post-cap attempt
+            // updates the next-attempt timestamp WITHOUT incrementing the
+            // failure counter — so a transient HAL glitch that resolves later
+            // still self-heals during a long drive without an ACC cycle.
+            boolean wedgeRetryAllowed = true;
+            boolean wedgePostCapAttempt = false;
+            if (wedgeDetected) {
+                long nowMs = System.currentTimeMillis();
+                if (wedgeRetryFailures >= WEDGE_RETRY_MAX_PER_CYCLE) {
+                    if (nowMs >= wedgeRetryNextAttemptMs) {
+                        // Cap reached but post-cap backoff window has elapsed
+                        // — allow one more attempt every 30 min.
+                        wedgeRetryAllowed = true;
+                        wedgePostCapAttempt = true;
+                        logger.warn("Wedge retry post-cap attempt (" + reason
+                            + ") — cap " + WEDGE_RETRY_MAX_PER_CYCLE
+                            + " was reached but " + (WEDGE_RETRY_POST_CAP_BACKOFF_MS / 60_000L)
+                            + "-min backoff elapsed; firing one recovery attempt "
+                            + "(failures stay at " + wedgeRetryFailures + ", post-cap retries do NOT increment)");
+                    } else {
+                        wedgeRetryAllowed = false;
+                        long remainingMs = wedgeRetryNextAttemptMs - nowMs;
+                        logger.warn("Wedge retry suppressed (" + reason + ") — cap "
+                            + WEDGE_RETRY_MAX_PER_CYCLE + " reached, "
+                            + remainingMs + "ms until next post-cap recovery attempt. "
+                            + "Will reset on next ACC ON edge.");
+                    }
+                } else if (nowMs < wedgeRetryNextAttemptMs) {
+                    wedgeRetryAllowed = false;
+                    long remainingMs = wedgeRetryNextAttemptMs - nowMs;
+                    logger.info("Wedge retry deferred (" + reason + ") — "
+                        + remainingMs + "ms remaining in backoff window "
+                        + "(failures=" + wedgeRetryFailures + ")");
+                }
+            }
+
+            shouldRetryActivation = !accChanged && !gearChanged && accIsOn
+                    && (!modeActive || (wedgeDetected && wedgeRetryAllowed))
                     && (currentMode == Mode.CONTINUOUS
                         || (currentMode == Mode.DRIVE_MODE && isDrivingGear(currentGear))
                         || (currentMode == Mode.PROXIMITY_GUARD && currentGear != GEAR_P));
+            // FIX (rmm Round 3, Finding 2): give the wedge budget back when a
+            // tick observes healthy recording AND the previous tick was also
+            // healthy (or this is the first observation). This way only
+            // CONSECUTIVE failures count toward the cap; an isolated transient
+            // flicker that the next activate fully resolves doesn't burn a
+            // slot. PROXIMITY_GUARD never records continuously, so we only
+            // count it as healthy when modeActive=true (it's a control mode,
+            // not a recording mode — wedge tracking is suppressed for it
+            // upstream by the wedgeDetected gate anyway).
+            // Decouple tickHealthy from recordingHealthy alone — when
+            // pendingPrefixStuck fires, recordingHealthy is true (because
+            // pendingPrefix!=null) but the wedge is real. If we let
+            // recordingHealthy drive tickHealthy, the per-cycle wedge cap
+            // gets reset on the very tick that detected the stuck-prefix
+            // wedge — defeating the cap. Treat a tick as healthy ONLY
+            // when there is no stuck-prefix wedge in flight.
+            boolean tickHealthy = modeActive
+                    && (currentMode == Mode.PROXIMITY_GUARD
+                        || (recordingHealthy && !pendingPrefixStuck));
+            if (tickHealthy && lastTickWasHealthy
+                    && (wedgeRetryFailures > 0 || wedgeRetryNextAttemptMs > 0L)) {
+                logger.info("Wedge budget restored (" + reason
+                    + ") — two consecutive healthy ticks; resetting failures="
+                    + wedgeRetryFailures + " -> 0");
+                wedgeRetryFailures = 0;
+                wedgeRetryNextAttemptMs = 0L;
+            }
+            lastTickWasHealthy = tickHealthy;
+
+            if (wedgeDetected && wedgeRetryAllowed) {
+                long nextBackoff;
+                if (wedgePostCapAttempt) {
+                    // Post-cap recovery: stay at cap, schedule next attempt
+                    // 30 min out. Do NOT increment wedgeRetryFailures further.
+                    nextBackoff = WEDGE_RETRY_POST_CAP_BACKOFF_MS;
+                } else {
+                    int idx = Math.min(wedgeRetryFailures, WEDGE_RETRY_BACKOFF_MS.length - 1);
+                    nextBackoff = WEDGE_RETRY_BACKOFF_MS[idx];
+                    wedgeRetryFailures++;
+                }
+                wedgeRetryNextAttemptMs = System.currentTimeMillis() + nextBackoff;
+                logger.warn("Re-sync wedge detected (" + reason + "): mode=" + currentMode
+                        + " modeActive=true but pipeline.isRunning=" + pipeline.isRunning()
+                        + " isRecording=" + pipeline.isRecording()
+                        + " pendingPrefix=" + (pipeline.getPendingRecordingPrefix() != null)
+                        + " — forcing re-activation (attempt " + wedgeRetryFailures
+                        + "/" + WEDGE_RETRY_MAX_PER_CYCLE
+                        + (wedgePostCapAttempt ? " [post-cap]" : "")
+                        + ", next-allowed-in=" + nextBackoff + "ms)");
+            }
             String resyncMsg = "Re-sync (" + reason + "): hwAcc=" + hwAcc + " accIsOn=" + accIsOn
                 + ", hwGear=" + gearToString(hwGear) + " currentGear=" + gearToString(currentGear)
                 + ", mode=" + currentMode + ", modeActive=" + modeActive;
@@ -370,6 +677,12 @@ public class RecordingModeManager {
 
             if (shouldRetryActivation) {
                 retryMode = currentMode;
+                // Mark wedge-driven retries (encoderStalled or pendingPrefixStuck
+                // branch) so the call site forces past activateModeWithWarmup's
+                // already-active supplier guard. Cold-start retries (modeActive
+                // false) leave wedgeRetryDriven=false — the supplier guard is
+                // a no-op for them anyway since modeActive=false.
+                wedgeRetryDriven = wedgeDetected && wedgeRetryAllowed;
             }
         }
 
@@ -390,8 +703,9 @@ public class RecordingModeManager {
         // cold-start (camera HAL wedged, pipeline.start() returned with
         // isRunning()==false) actually pokes com.byd.avc this time around.
         if (retryMode != null) {
-            logger.info("Re-sync retry: activating " + retryMode);
-            activateModeWithWarmup(retryMode, "resync-retry");
+            logger.info("Re-sync retry: activating " + retryMode
+                + (wedgeRetryDriven ? " (wedge-driven, force=true)" : ""));
+            activateModeWithWarmup(retryMode, "resync-retry", wedgeRetryDriven);
         }
     }
 
@@ -433,6 +747,24 @@ public class RecordingModeManager {
         new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
+     * FIX (rmm medium: stuck warmup pins warmupInFlight=true → all subsequent
+     * activations and resync wedge retries coalesce indefinitely).
+     *
+     * <p>Set to {@link System#currentTimeMillis()} when warmupInFlight CAS-wins,
+     * cleared (=0) when warmupInFlight is cleared in the worker's finally.
+     * resyncFromHardware uses this to detect a stuck worker (e.g. AvcHalWarmup
+     * blocking forever inside Process.waitFor()) and force-clear the in-flight
+     * flag so future activations can spawn a fresh warmup. Without this
+     * backstop, a single blocked am-start permanently disables every
+     * activate-with-warmup path (gear-change, mode-change, wedge retry, user
+     * setMode) until daemon restart.
+     */
+    private volatile long warmupInFlightSinceMs = 0L;
+    /** ~4s warmup + 2s pipeline init + generous slack. Anything beyond this
+     * is structurally stuck (AvcHalWarmup launchAvc has no waitFor timeout). */
+    private static final long WARMUP_STUCK_THRESHOLD_MS = 30_000L;
+
+    /**
      * Set whenever a {@link #activateModeWithWarmup} call is coalesced
      * because a worker is already in-flight. The in-flight worker checks
      * this in its finally block; if set, it spawns one re-trigger so the
@@ -441,10 +773,16 @@ public class RecordingModeManager {
      * dropped and the user would wait up to 30s for the next resync to
      * pick it up.
      *
-     * <p>Volatile because the in-flight worker reads it from a different
-     * thread than the writer (the peer trigger).
+     * <p>AtomicBoolean so the read-then-clear in the in-flight worker's
+     * finally block is atomic (getAndSet) — without atomicity, a peer that
+     * arrives between the worker's read and clear would set pending=true and
+     * have its signal silently wiped by the worker's clear. With getAndSet,
+     * the worker reads-and-clears in a single CAS-equivalent op, and a peer
+     * that loses the race observes the post-clear state and CAS-spawns
+     * its own warmup via warmupInFlight instead.
      */
-    private volatile boolean warmupPendingRetrigger = false;
+    private final java.util.concurrent.atomic.AtomicBoolean warmupPendingRetrigger =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
      * Number of consecutive failed GearMonitor.start() attempts in
@@ -460,6 +798,102 @@ public class RecordingModeManager {
     // forever — defeating the observability the field exists for.
     private volatile int gearMonitorRetryFailures = 0;
     private static final int GEAR_MONITOR_RETRY_CAP = 5;
+
+    /**
+     * Tick counter used to slowly bleed back into retry attempts after
+     * {@link #gearMonitorRetryFailures} hits the cap. Resets to 0 every
+     * time a retry is allowed; advances every resync tick while the cap
+     * is held. The cap-only path lights up after a daemon respawn that
+     * happened mid-drive (ACC was already ON, no edge-trigger fires) —
+     * without this slow re-enabler DRIVE_MODE / PROXIMITY_GUARD would be
+     * permanently dead until the user cycled ACC OFF→ON.
+     *
+     * <p>At 30s tick interval, {@link #GEAR_MONITOR_CAP_RESET_TICKS}=10
+     * yields a 5-minute backoff between fresh attempts. Volatile because
+     * it shares a reader/writer fence with the cap field; both are
+     * written under the manager monitor inside resyncFromHardware.
+     */
+    private volatile int gearMonitorCapResetCounter = 0;
+    private static final int GEAR_MONITOR_CAP_RESET_TICKS = 10;
+
+    /**
+     * FIX (rmm: Resync wedgeDetected has no backoff or per-cycle cap).
+     *
+     * <p>Number of consecutive wedge-driven re-activation attempts inside the
+     * current ACC cycle. Reset to 0 on each ACC ON edge in
+     * {@link #onAccStateChangedLocked}. Capped at
+     * {@link #WEDGE_RETRY_MAX_PER_CYCLE} so a structural wedge can't burn
+     * forever — each retry pays a ~4s am-start cost and on the 3rd
+     * consecutive can cascade into forceRestartAvc.
+     *
+     * <p>Backoff schedule (ticks at 30s interval): 60s → 2m → 5m → 5m → 5m
+     * → post-cap fixed 5min retries (counter does NOT increment further).
+     * Last-attempt timestamp drives the gate so a backoff window persists
+     * even when the resync ticker keeps firing.
+     */
+    private volatile int wedgeRetryFailures = 0;
+    private volatile long wedgeRetryNextAttemptMs = 0L;
+    /**
+     * FIX (rmm Round 3, Finding 2: wedgeRetryFailures increments on every retry
+     * attempt, including those that succeed — burns budget on transient flickers).
+     *
+     * <p>Tracks whether the previous resync tick observed a healthy
+     * (modeActive=true AND pipeline running AND pipeline recording-or-pending)
+     * state. When two consecutive ticks are healthy, the previous wedge has
+     * clearly resolved, so we zero the per-cycle wedge budget — only
+     * consecutive failures count toward the cap, transient flickers don't burn
+     * slots. ACC ON edge still resets fully.
+     */
+    private volatile boolean lastTickWasHealthy = false;
+    private static final int WEDGE_RETRY_MAX_PER_CYCLE = 6;
+    // Backoff schedule indexed by attempt count [0..MAX-1]; ms.
+    private static final long[] WEDGE_RETRY_BACKOFF_MS = new long[] {
+        0L,           // first wedge: fire immediately
+        60_000L,      // 60s
+        120_000L,     // 2m
+        300_000L,     // 5m
+        300_000L,     // 5m
+        300_000L      // 5m
+    };
+    // FIX (rmm: Wedge per-cycle cap can leave structural wedge un-recovered
+    // until ACC cycle): instead of permanent suppression after the cap, fall
+    // back to a fixed backoff so a transient HAL glitch that resolves
+    // later still self-heals during a long drive. ACC ON edge still resets
+    // the counter; this just keeps the door cracked for slow recovery.
+    //
+    // FIX (rmm Round 6: Wedge post-cap backoff was 30 min — long recovery
+    // latency for transient HAL recovery mid-drive). Shortened to 5 min so
+    // a HAL/encoder flake that self-resolves at minute 20 of a drive is
+    // picked up at minute 25 worst-case instead of minute 50. Each post-cap
+    // attempt does NOT increment the failure counter, so a permanently
+    // wedged system still pays the same fixed cost per attempt (one
+    // ~4s warmup) every 5 min — well within budget for a head unit that
+    // is only running this code path while ACC is ON.
+    private static final long WEDGE_RETRY_POST_CAP_BACKOFF_MS = 5L * 60_000L; // 5 min
+
+    /**
+     * FIX (rmm: wedgeDetected blind to stuck pendingRecordingPrefix).
+     *
+     * <p>Tracks how many consecutive resync ticks have observed a non-null
+     * pipeline.getPendingRecordingPrefix() while pipeline.isRunning() AND
+     * !pipeline.isRecording(). A stuck encoder-format-not-available state
+     * keeps pendingPrefix non-null indefinitely, which would otherwise
+     * masquerade as recordingHealthy=true and mask the wedge forever.
+     *
+     * <p>{@link #lastObservedPendingPrefix} is the prefix string we saw on
+     * the previous tick — we only count ticks where the SAME prefix is
+     * still pending. A new prefix means a fresh deferred record (encoder
+     * format arrived for one segment, deferred again for the next) — that's
+     * not stuck, just slow.
+     *
+     * <p>At {@link #PERIODIC_RESYNC_INTERVAL_MS}=30s tick interval,
+     * {@link #PENDING_PREFIX_STUCK_TICKS}=2 yields ~60s tolerance before
+     * treating as wedged — comfortably above any normal encoder format
+     * latency (~200-500ms) but well under user-perceptible recording gaps.
+     */
+    private volatile String lastObservedPendingPrefix = null;
+    private volatile int pendingPrefixStuckTicks = 0;
+    private static final int PENDING_PREFIX_STUCK_TICKS = 2;
 
     /**
      * Released by the first ACC IPC ({@link #onAccStateChanged}) AND by the
@@ -579,6 +1013,22 @@ public class RecordingModeManager {
      * need to poke com.byd.avc) — same heuristic the IPC path uses.
      */
     private void activateModeWithWarmup(final Mode mode, final String reason) {
+        activateModeWithWarmup(mode, reason, false);
+    }
+
+    /**
+     * Force-aware overload. When {@code force=true}, the warmup worker's
+     * "already active" short-circuit at the modeActive/isRunning/
+     * isNormalRecordingMode supplier check is bypassed so the supplier
+     * returns true and activateMode() runs — which internally cycles
+     * pipeline.stopRecording() + pipeline.startRecording() and unwedges
+     * a stalled encoder or stuck pendingRecordingPrefix. Used by
+     * {@link #resyncFromHardware} when wedgeDetected.
+     *
+     * <p>The CAS gate (warmupInFlight) and retrigger logic are unchanged;
+     * only the supplier's already-active short-circuit honours force.
+     */
+    private void activateModeWithWarmup(final Mode mode, final String reason, final boolean force) {
         if (mode == Mode.NONE) {
             return;
         }
@@ -599,11 +1049,15 @@ public class RecordingModeManager {
         // silently dropped — it just gets serialised behind the current
         // attempt instead of paralleling it.
         if (!warmupInFlight.compareAndSet(false, true)) {
-            warmupPendingRetrigger = true;
+            warmupPendingRetrigger.set(true);
             logger.debug("Warmup already in flight — coalescing + scheduling re-trigger ("
                 + reason + ")");
             return;
         }
+        // FIX (rmm medium: stuck-warmup watchdog) — record CAS-win time so
+        // resyncFromHardware can detect a permanently-stuck worker and
+        // force-clear the in-flight flag.
+        warmupInFlightSinceMs = System.currentTimeMillis();
         // Don't clear warmupPendingRetrigger here. A peer trigger arriving
         // between our CAS-win above and any clear here would see
         // inFlight=true, set pending=true, and a clear at this point would
@@ -649,44 +1103,91 @@ public class RecordingModeManager {
                     logger.info("PROXIMITY_GUARD waiting for gear != P — " + reason);
                     return false;
                 }
-                if (modeActive && pipeline.isRunning() && pipeline.isNormalRecordingMode()) {
+                if (!force && modeActive && pipeline.isRunning() && pipeline.isNormalRecordingMode()) {
                     logger.info("Mode " + mode + " already active — skipping re-activation ("
                         + reason + ")");
                     return false;
                 }
+                if (force && modeActive && pipeline.isRunning() && pipeline.isNormalRecordingMode()) {
+                    logger.info("Wedge recovery: forcing activation despite modeActive — reason=" + reason);
+                }
                 return true;
             });
             } finally {
-                // Read+clear the pending flag BEFORE releasing in-flight.
-                // Reading after the release would let a peer trigger that
-                // arrives between (in-flight=false) and (read pending) be
-                // counted twice — once by our re-spawn AND once by the
-                // peer's own CAS-win path — producing redundant warmups.
-                // Reading before the release means a peer landing during
-                // our finally sees in-flight=true, sets pending=true, and
-                // is correctly counted in the NEXT cycle instead of
-                // racing this one.
-                boolean shouldRetrigger = warmupPendingRetrigger && !shuttingDown;
-                warmupPendingRetrigger = false;
-
+                // FIX (rmm Round 6: warmupPendingRetrigger signal can be
+                // silently dropped between getAndSet and warmupInFlight.set(false)).
+                // Reordered: clear warmupInFlight FIRST so any peer that lands
+                // between the read-and-clear of pending and the inFlight
+                // clear (the previous race window) CAS-succeeds on inFlight
+                // and starts its OWN fresh warmup directly — no signal
+                // dropped. Then read-and-clear pending. As a belt-and-
+                // suspenders backstop, re-check pending one more time after
+                // the read to catch a peer that landed in the same instant.
+                //
+                // Note: the previous concern was that a peer landing AFTER
+                // we cleared pending but BEFORE we cleared inFlight would
+                // see inFlight=true, set pending=true, and have it wiped by
+                // our clear. The reordering eliminates that window: if a
+                // peer lands in that order now, it sees inFlight=false
+                // (already cleared), CAS-succeeds, and runs its own warmup.
+                //
                 // Always clear the in-flight flag so a later trigger (gear
                 // change, mode change, resync retry) can spawn a new
                 // warmup. Done in finally so a thrown exception or an
                 // early return from runActivateGuarded doesn't leak the
                 // flag and lock out future activations forever.
+                // FIX (rmm medium: stuck-warmup watchdog) — clear the
+                // since-time alongside the in-flight flag so a fresh
+                // CAS-winner is correctly tracked.
+                warmupInFlightSinceMs = 0L;
                 warmupInFlight.set(false);
 
-                // Re-spawn ONE warmup with the latest state. The recursion
-                // is bounded: each cycle reads-and-clears pending under
-                // in-flight=true, so any peer landing during the new
-                // cycle's warmup gets queued for the cycle AFTER. Worst
-                // case under sustained flapping: one warmup running, one
-                // queued — bounded steady state, not an unbounded chain.
-                // The 30s resync ticker is the eventual backstop for any
-                // missed transition.
+                // Atomic read+clear of pending. Combined with the post-check
+                // below, this honors any signal a peer left for us.
+                boolean pendingNow = warmupPendingRetrigger.getAndSet(false);
+                // Backstop: a peer that called activateModeWithWarmup AFTER
+                // our inFlight clear above will have CAS-won inFlight on its
+                // own and started a fresh warmup — no need for us to
+                // retrigger. But a peer that called BETWEEN the inFlight
+                // clear and the pending getAndSet is the rare residual race;
+                // re-check once more.
+                if (!pendingNow) {
+                    pendingNow = warmupPendingRetrigger.getAndSet(false);
+                    if (pendingNow) {
+                        logger.debug("Backstop pending re-check picked up a late peer signal");
+                    }
+                }
+                boolean shouldRetrigger = pendingNow && !shuttingDown;
+
+                // Re-spawn ONE recovery via resyncFromHardware so the
+                // newer state (gear change, ACC change, mode change) is
+                // read FRESH from authoritative sources. Previously we
+                // re-armed activateModeWithWarmup(mode,...) using the
+                // captured mode parameter — but if the user switched mode
+                // (e.g., CONTINUOUS -> DRIVE_MODE) during the in-flight
+                // warmup, the retrigger would activate the stale captured
+                // mode and runActivateGuarded's supplier would reject it
+                // (currentMode != mode), silently losing the user-visible
+                // edge. resyncFromHardware reads currentMode/accIsOn/gear
+                // freshly under the manager monitor and dispatches whatever
+                // is currently appropriate.
+                //
+                // The recursion is bounded: each cycle reads-and-clears
+                // pending atomically under in-flight=true, so any peer
+                // landing during the new cycle's warmup gets queued for
+                // the cycle AFTER. Worst case under sustained flapping:
+                // one warmup running, one queued. The 30s resync ticker
+                // is the eventual backstop for any missed transition.
                 if (shouldRetrigger) {
-                    logger.debug("Coalesced trigger — re-spawning one warmup with latest state");
-                    activateModeWithWarmup(mode, "retrigger-" + reason);
+                    logger.info("Coalesced trigger — re-driving via resyncFromHardware "
+                        + "(reads fresh state instead of stale mode=" + mode + ")");
+                    new Thread(() -> {
+                        try {
+                            resyncFromHardware("warmup-retrigger-" + reason);
+                        } catch (Exception e) {
+                            logger.warn("Warmup retrigger resync failed: " + e.getMessage());
+                        }
+                    }, "WarmupRetriggerResync-" + reason).start();
                 }
             }
         }, "ModeWarmup-" + reason).start();
@@ -715,11 +1216,106 @@ public class RecordingModeManager {
             Mode oldMode;
             final Mode targetMode = mode;
             boolean shouldActivate;
+            // FIX (rmm Round 6: setMode same-mode early return blocks user-
+            // initiated recovery when modeActive=false but currentMode unchanged).
+            // If user re-selects the same mode while ACC is on but the mode is
+            // not active OR pipeline is wedged (running but not recording with
+            // no pending), treat the re-select as an explicit user recovery
+            // request: skip the deactivate/persist work but re-run activation,
+            // and reset the wedge backoff so the user's manual click is
+            // honored immediately rather than deferred up to 5 min by the
+            // post-cap backoff schedule.
+            boolean userRecoveryReselect = false;
             synchronized (this) {
                 if (mode == currentMode) {
-                    logger.debug("Mode already set to: " + mode);
+                    boolean recordingHealthy = pipeline.isRunning()
+                            && (pipeline.isRecording()
+                                || pipeline.getPendingRecordingPrefix() != null);
+                    boolean wedgedOrInactive = accIsOn && mode != Mode.NONE
+                            && (!modeActive
+                                || (mode != Mode.PROXIMITY_GUARD && !recordingHealthy));
+                    if (!wedgedOrInactive) {
+                        logger.debug("Mode already set to: " + mode);
+                        return;
+                    }
+                    logger.info("Mode already set to " + mode + " but state looks wedged "
+                        + "(modeActive=" + modeActive
+                        + ", running=" + pipeline.isRunning()
+                        + ", recording=" + pipeline.isRecording()
+                        + ", pendingPrefix=" + (pipeline.getPendingRecordingPrefix() != null)
+                        + ") — treating user re-select as recovery trigger");
+                    userRecoveryReselect = true;
+                    if (wedgeRetryFailures > 0 || wedgeRetryNextAttemptMs > 0L) {
+                        logger.info("User re-select — clearing wedge retry counter (was "
+                            + wedgeRetryFailures + ") and backoff window");
+                        wedgeRetryFailures = 0;
+                        wedgeRetryNextAttemptMs = 0L;
+                    }
+                }
+                if (userRecoveryReselect) {
+                    // FIX (rmm Round 8 low: queryAccStateFromHardware called
+                    // under manager monitor in setMode userRecoveryReselect
+                    // path). queryAccStateFromHardware does reflective IPC to
+                    // BYDAutoBodyworkDevice.getPowerLevel() with a write-through
+                    // to AccMonitor.setAccState; if the BYD binder is wedged,
+                    // the manager monitor was previously pinned for the
+                    // duration of the binder hang. Mirrors the
+                    // lifecycleSerializer/manager-monitor split already used
+                    // in onAccStateChangedLocked / setMode normal-path: drop
+                    // the manager monitor, do the HW probe + gear sync
+                    // unlocked, then jump straight to the warmup helper (also
+                    // unlocked — activateModeWithWarmup takes its own monitor
+                    // briefly inside). lifecycleSerializer still serialises
+                    // against peer setMode/onAccStateChanged invocations.
+                    logger.info("Re-select recovery — exiting manager monitor before HW probe");
+                    // Fall through past the inner synchronized(this) close.
+                    // userRecoveryReselect-specific recovery runs below.
+                }
+            }
+            if (userRecoveryReselect) {
+                // Sync hardware-authoritative ACC unlocked.
+                boolean actualAccState = queryAccStateFromHardware();
+                boolean shouldActivateReselect;
+                synchronized (this) {
+                    if (actualAccState != accIsOn) {
+                        logger.info("Re-select syncing ACC state: " + accIsOn + " -> " + actualAccState);
+                        accIsOn = actualAccState;
+                    }
+                    if (!accIsOn) {
+                        logger.info("Re-select aborted — ACC turned OFF in HW probe");
+                        return;
+                    }
+                    try {
+                        com.overdrive.app.monitor.GearMonitor gm =
+                            com.overdrive.app.monitor.GearMonitor.getInstance();
+                        if (gm.isRunning()) {
+                            int actualGear = gm.getCurrentGear();
+                            if (actualGear != currentGear) {
+                                logger.info("Re-select syncing gear: "
+                                    + gearToString(currentGear) + " -> " + gearToString(actualGear));
+                                currentGear = actualGear;
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    // Re-evaluate against fresh gear under the monitor.
+                    if (mode == Mode.DRIVE_MODE) {
+                        shouldActivateReselect = isDrivingGear(currentGear);
+                    } else if (mode == Mode.PROXIMITY_GUARD) {
+                        shouldActivateReselect = (currentGear != GEAR_P);
+                    } else {
+                        shouldActivateReselect = true;
+                    }
+                }
+                if (!shouldActivateReselect) {
+                    logger.info("Re-select waiting for appropriate gear (mode=" + mode
+                        + ", gear=" + currentGear + ")");
                     return;
                 }
+                logger.info("Re-select activating " + mode + " via warmup");
+                activateModeWithWarmup(mode, "user-reselect-" + mode);
+                return;
+            }
+            synchronized (this) {
 
                 logger.info("Changing recording mode: " + currentMode + " -> " + mode);
 
@@ -747,8 +1343,13 @@ public class RecordingModeManager {
                 oldMode = currentMode;
                 currentMode = mode;
 
-                // Persist mode to config EARLY — before activation which might fail
-                persistMode(mode);
+                // FIX (rmm: persistMode runs UnifiedConfig full-JSON write under
+                // manager monitor). Don't call persistMode here — UnifiedConfig
+                // updateSection rewrites the entire JSON document and grabs
+                // its own monitor + filesystem lock. With the manager monitor
+                // pinned, the resync ticker, gear/ACC IPC handlers, and HTTP
+                // introspection endpoints all stall behind the disk write.
+                // Defer to OUTSIDE the monitor below.
 
                 // Decide whether the new mode should activate now (mode/gear/ACC gates).
                 if (mode == Mode.DRIVE_MODE) {
@@ -786,24 +1387,49 @@ public class RecordingModeManager {
                 }
             }
 
+            // Persist new mode to config OUTSIDE the manager monitor — the
+            // UnifiedConfig write is a full JSON rewrite on the calling thread
+            // and we don't want to pin the manager monitor across it (see
+            // monitor-acquisition note above). Still done EARLY (before
+            // activation) so a crash during activation doesn't lose the
+            // user's persisted setting.
+            try {
+                persistMode(mode);
+            } catch (Exception persistErr) {
+                logger.warn("persistMode failed for " + mode + ": " + persistErr.getMessage());
+            }
+
             // Deactivate runs unconditionally with no re-validation.
             runDeactivateGuarded(oldMode);
 
             // Activate with re-validation: if ACC flipped or gear moved
             // between the snapshot above and this lock acquisition, abort.
+            //
+            // FIX (rmm Round 3, Finding 5: setMode mid-cold-boot bypasses AVC
+            // HAL warmup). Route non-NONE activations through
+            // activateModeWithWarmup so a setMode invocation within the
+            // ~4s post-boot window before com.byd.avc has primed the BYD
+            // camera HAL doesn't open the camera against a wedged HAL.
+            // The warmup helper:
+            //   - short-circuits warmup when pipeline.isRunning() is already
+            //     true (warm-already case pays no extra cost),
+            //   - coalesces against in-flight warmups (boot auto-activate
+            //     worker, gear-change activate),
+            //   - re-validates gating state under runActivateGuarded's
+            //     supplier before opening the camera.
+            // NONE stays on the direct runActivateGuarded path — no warmup
+            // needed for tear-down.
             if (shouldActivate) {
-                runActivateGuarded(targetMode, "setMode-" + targetMode, () -> {
-                    if (currentMode != targetMode) return false;  // a peer setMode ran first
-                    if (targetMode == Mode.NONE) return accIsOn;
-                    if (targetMode == Mode.DRIVE_MODE) {
-                        return accIsOn && isDrivingGear(currentGear);
-                    }
-                    if (targetMode == Mode.PROXIMITY_GUARD) {
-                        return accIsOn && currentGear != GEAR_P;
-                    }
-                    // CONTINUOUS
-                    return accIsOn;
-                });
+                if (targetMode == Mode.NONE) {
+                    runActivateGuarded(targetMode, "setMode-" + targetMode, () -> {
+                        if (currentMode != targetMode) return false;
+                        return accIsOn;
+                    });
+                } else {
+                    logger.info("setMode " + targetMode
+                        + " — routing through warmup to protect cold-boot HAL window");
+                    activateModeWithWarmup(targetMode, "setMode-" + targetMode);
+                }
             }
 
             logger.info("Recording mode changed: " + oldMode + " -> " + mode);
@@ -887,6 +1513,18 @@ public class RecordingModeManager {
                 // outage during the previous ACC cycle shouldn't permanently
                 // suppress retries once the user re-engages the system.
                 gearMonitorRetryFailures = 0;
+                gearMonitorCapResetCounter = 0;
+                // FIX (rmm: Resync wedgeDetected has no backoff or per-cycle
+                // cap): reset wedge retry counter + backoff window. Each
+                // ACC cycle gets a fresh budget; structural wedges that
+                // exhausted the previous cycle's cap can attempt recovery
+                // again now that the HAL has been kicked.
+                if (wedgeRetryFailures > 0 || wedgeRetryNextAttemptMs > 0L) {
+                    logger.info("ACC ON edge — resetting wedge retry counter (was "
+                        + wedgeRetryFailures + ")");
+                    wedgeRetryFailures = 0;
+                    wedgeRetryNextAttemptMs = 0L;
+                }
 
                 if (currentMode == Mode.NONE) {
                     // ESCO-PARITY: on dilink4 the pipeline is started at daemon
@@ -988,51 +1626,22 @@ public class RecordingModeManager {
         if (modeToActivate == null) return;
 
         final Mode mta = modeToActivate;
-        new Thread(() -> {
-            // Only warmup if pipeline isn't already running
-            // (if it's running, camera is already open — no need to poke com.byd.avc)
-            if (!pipeline.isRunning()) {
-                if (!avcWarmup.warmupAndWait()) {
-                    logger.warn("AVC warmup interrupted — skipping mode activation");
-                    return;
-                }
-            }
-
-            // Re-validate the gates under the manager monitor inside
-            // runActivateGuarded — handles the case where ACC flipped, the
-            // user changed mode, or gear changed during the AVC warmup
-            // sleep (~4s). Pre-existing logic; now centralised.
-            runActivateGuarded(mta, "acc-on-reacquire-" + mta, () -> {
-                if (!accIsOn) {
-                    logger.info("ACC turned OFF during reacquire delay — skipping mode activation");
-                    return false;
-                }
-                if (currentMode != mta) {
-                    logger.info("Mode changed during reacquire delay (" + currentMode + " != " + mta + ")");
-                    return false;
-                }
-                int gearNow = currentGear;
-                if (mta == Mode.DRIVE_MODE && !isDrivingGear(gearNow)) {
-                    logger.info("DRIVE_MODE waiting for driving gear (current=" + gearToString(gearNow) + ")");
-                    return false;
-                }
-                if (mta == Mode.PROXIMITY_GUARD && gearNow == GEAR_P) {
-                    logger.info("PROXIMITY_GUARD waiting for gear != P");
-                    return false;
-                }
-                // Skip only if the desired mode's recording is genuinely
-                // already running. Previously this checked
-                // pipeline.isRecording() alone, which returns true for
-                // SURVEILLANCE recordings still finalizing at the moment
-                // of ACC ON — causing CONTINUOUS/DRIVE_MODE to be skipped
-                // and never started until the next state transition.
-                if (modeActive && pipeline.isRunning() && pipeline.isNormalRecordingMode()) {
-                    logger.info("Mode " + mta + " already active — skipping re-activation");
-                    return false;
-                }
-                return true;
-            });
-        }, "AccOnReacquire").start();
+        // FIX (rmm Round 8 medium: AccOnReacquire warmup thread bypasses
+        // warmupInFlight CAS and stuck-warmup watchdog). Previously this
+        // path spawned a raw `new Thread()` that called avcWarmup.warmupAndWait()
+        // directly without going through activateModeWithWarmup. The
+        // warmupInFlight AtomicBoolean and warmupInFlightSinceMs timestamp
+        // were never set, so resyncFromHardware's stuck-warmup watchdog
+        // (keyed on warmupInFlight.get()) could not detect or force-clear
+        // a wedged AVC warmup on this path; it could also race in parallel
+        // with peer warmups (boot/gear/setMode) — both paying the ~4s sleep.
+        // activateModeWithWarmup short-circuits warmup when pipeline.isRunning(),
+        // sets warmupInFlight + since-time for watchdog visibility, coalesces
+        // against parallel warmups via CAS+pendingRetrigger, and re-validates
+        // the same gates inside runActivateGuarded.
+        logger.info("ACC ON reacquire — routing " + mta + " through activateModeWithWarmup "
+            + "(watchdog-tracked, CAS-coalesced)");
+        activateModeWithWarmup(mta, "acc-on-reacquire-" + mta);
     }
     
     /**
@@ -1294,13 +1903,45 @@ public class RecordingModeManager {
                         break;
                     }
                     // Pipeline.start() blocks ~2s for GL init. Recorder should be ready.
-                    if (!pipeline.isRecording()) {
+                    //
+                    // Gate skip on isNormalRecordingMode() (NORMAL_RECORDING vs
+                    // SURVEILLANCE) instead of raw isRecording() — when ACC ON
+                    // arrives during a surveillance segment finalize, the
+                    // recorder.isRecording() probe returns true (segment still
+                    // closing) but the pipeline is in SURVEILLANCE mode. If
+                    // we skipped startRecording on that signal, currentMode
+                    // would stay SURVEILLANCE and the user's CONTINUOUS dashcam
+                    // wouldn't actually start until the surveillance segment
+                    // closed (up to 5min). pipeline.startRecording() handles
+                    // the SURVEILLANCE->NORMAL transition correctly.
+                    if (!pipeline.isNormalRecordingMode()) {
+                        if (pipeline.isRecording()) {
+                            logger.info("CONTINUOUS: pipeline recording but not in NORMAL mode "
+                                + "(likely SURVEILLANCE finalize) — calling startRecording to "
+                                + "drive transition");
+                        }
                         pipeline.startRecording();
                         OemDashcamMirror.onPanoRecordingStarted();
                     }
                     // Start AVC keep-alive (pipeline is now running with ACC ON)
                     CameraDaemon.startAvcKeepAliveIfNeeded();
-                    modeActive = pipeline.isRunning();
+                    // Don't optimistically lie about modeActive: a true
+                    // pipeline.isRunning() with isRecording()==false AND no
+                    // deferred-record in flight is a wedged activation —
+                    // mark it inactive so the resync ticker retries instead
+                    // of believing the pipeline is healthy. Pending prefix
+                    // covers the brief startRecording() window where the
+                    // recorder hasn't latched yet.
+                    boolean continuousHealthy = pipeline.isRunning()
+                            && (pipeline.isRecording()
+                                || pipeline.getPendingRecordingPrefix() != null);
+                    modeActive = continuousHealthy;
+                    if (!continuousHealthy) {
+                        logger.warn("CONTINUOUS: pipeline running=" + pipeline.isRunning()
+                                + " recording=" + pipeline.isRecording()
+                                + " pendingPrefix=" + (pipeline.getPendingRecordingPrefix() != null)
+                                + " — leaving modeActive=false for resync retry");
+                    }
                 } catch (Exception e) {
                     logger.error("Failed to start CONTINUOUS mode: " + e.getMessage());
                     modeActive = false;
@@ -1321,14 +1962,36 @@ public class RecordingModeManager {
                         break;
                     }
                     // Pipeline.start() blocks ~2s for GL init. Recorder should be ready.
-                    if (!pipeline.isRecording()) {
-                        logger.info("Starting DRIVE_MODE recording");
+                    // Gate on isNormalRecordingMode() so a surveillance->normal
+                    // transition during gear-change activation actually drives
+                    // startRecording (mirrors CONTINUOUS branch — see comment
+                    // there for the surveillance-finalize race rationale).
+                    if (!pipeline.isNormalRecordingMode()) {
+                        if (pipeline.isRecording()) {
+                            logger.info("DRIVE_MODE: pipeline recording but not in NORMAL mode "
+                                + "(likely SURVEILLANCE finalize) — calling startRecording");
+                        } else {
+                            logger.info("Starting DRIVE_MODE recording");
+                        }
                         pipeline.startRecording();
                         OemDashcamMirror.onPanoRecordingStarted();
                     }
                     // Start AVC keep-alive (pipeline is now running with ACC ON)
                     CameraDaemon.startAvcKeepAliveIfNeeded();
-                    modeActive = pipeline.isRunning();
+                    // Same wedge-honest accounting as CONTINUOUS — see that
+                    // branch for rationale. PROXIMITY_GUARD below intentionally
+                    // keeps the optimistic isRunning() check because it doesn't
+                    // continuously record; recording fires on radar triggers.
+                    boolean driveHealthy = pipeline.isRunning()
+                            && (pipeline.isRecording()
+                                || pipeline.getPendingRecordingPrefix() != null);
+                    modeActive = driveHealthy;
+                    if (!driveHealthy) {
+                        logger.warn("DRIVE_MODE: pipeline running=" + pipeline.isRunning()
+                                + " recording=" + pipeline.isRecording()
+                                + " pendingPrefix=" + (pipeline.getPendingRecordingPrefix() != null)
+                                + " — leaving modeActive=false for resync retry");
+                    }
                 } catch (Exception e) {
                     logger.error("Failed to start DRIVE_MODE: " + e.getMessage());
                     modeActive = false;
@@ -1498,6 +2161,38 @@ public class RecordingModeManager {
                     if (level >= 0 && level <= 3) {
                         boolean isOn = level >= 2;
                         logger.debug("Hardware power level: " + level + " (ACC " + (isOn ? "ON" : "OFF") + ")");
+                        // Write-through to AccMonitor so the daemon-wide
+                        // static reflects the truth: peer code paths that
+                        // read AccMonitor.isAccOn() (e.g., NotificationGate)
+                        // would otherwise see a stale value if AccSentry
+                        // crashed and never delivered an IPC. Definitive
+                        // hardware reads (0..3) are authoritative; sentinel
+                        // values (4 / 255) intentionally fall through to
+                        // the existing AccMonitor read below.
+                        //
+                        // FIX (rmm: queryAccStateFromHardware write-through
+                        // races AccSentry IPC + acc-sentry: accOnAuthoritative
+                        // flag is dead code): gate the write-through on
+                        // (a) AccMonitor not yet authoritative (no IPC has
+                        // landed) OR (b) probe disagrees with current
+                        // AccMonitor value. If AccSentry has spoken AND we
+                        // agree, skip the write — avoids stamping a stale
+                        // level=0 mid-edge over a just-written true. Wires
+                        // the previously-dead accOnAuthoritative gate.
+                        boolean ipcAuthoritative =
+                            com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative();
+                        boolean ipcCurrent =
+                            com.overdrive.app.monitor.AccMonitor.isAccOn();
+                        if (!ipcAuthoritative || ipcCurrent != isOn) {
+                            if (ipcAuthoritative) {
+                                logger.info("HW probe disagrees with AccMonitor (ipc="
+                                    + ipcCurrent + ", hw=" + isOn + ", level=" + level
+                                    + ") — write-through");
+                            }
+                            com.overdrive.app.monitor.AccMonitor.setAccState(isOn);
+                        } else {
+                            logger.debug("HW probe agrees with authoritative AccMonitor — skipping write-through");
+                        }
                         return isOn;
                     }
                     // Sentinel / out-of-range — log and fall through.

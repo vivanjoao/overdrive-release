@@ -338,6 +338,106 @@ public class BydDataCollector {
     private static final long POLL_INTERVAL_PARKED_MS = 90000; // 90 seconds when ACC off — listener callbacks keep the snapshot fresh between polls
     private String lastSummaryHash = "";
 
+    // ==================== RoadSense fast dynamics poll ====================
+    // RoadSense needs brake/accel/gear event-aligned to ~200 ms jolts (R-PERF-4),
+    // but the main 5 s poll is far too coarse and we must NOT speed the whole poll
+    // up (battery/SDK load) just for one consumer. So we expose an OPT-IN, narrowly
+    // scoped fast poll that reads ONLY the four signals RoadSense uses
+    // (brake %, accel %, gear, speed) via the device handles the collector already
+    // holds, and publishes them to a SEPARATE lightweight atomic — never touching
+    // the main snapshot, so no other consumer's freshness/values change. Started by
+    // RoadSenseController only while RoadSense is ENABLED and the regime is DRIVING;
+    // stopped otherwise. Zero cost when RoadSense is off.
+
+    /** Immutable fast-dynamics tuple — only the fields RoadSense rejection needs. */
+    public static final class FastDynamics {
+        public final double speedKmh;
+        public final int accelPercent;
+        public final int brakePercent;
+        public final int gearMode;
+        public final long timestamp;
+        FastDynamics(double speedKmh, int accelPercent, int brakePercent, int gearMode, long timestamp) {
+            this.speedKmh = speedKmh; this.accelPercent = accelPercent;
+            this.brakePercent = brakePercent; this.gearMode = gearMode; this.timestamp = timestamp;
+        }
+    }
+
+    private final java.util.concurrent.atomic.AtomicReference<FastDynamics> fastDynamics =
+            new java.util.concurrent.atomic.AtomicReference<>(null);
+    private java.util.concurrent.ScheduledExecutorService fastPollScheduler;
+    /** Fast-poll cadence: 250 ms ≈ event-aligned for ~200 ms jolts without hammering
+     *  the SDK (4 Hz on three cheap getters, vs the 5 s full poll). */
+    private static final long FAST_POLL_INTERVAL_MS = 250;
+
+    /**
+     * Latest RoadSense fast-dynamics tuple, or null if the fast poll isn't running
+     * (RoadSense disabled / not driving). Consumers must treat null as "use the main
+     * snapshot instead". Lock-free.
+     */
+    public FastDynamics getFastDynamics() {
+        return fastDynamics.get();
+    }
+
+    /**
+     * Start the narrowly-scoped fast dynamics poll (idempotent). Reads ONLY
+     * brake/accel/gear/speed from the already-resolved device handles. Safe to call
+     * from any thread; a no-op if already running or if the speed device isn't
+     * available on this trim.
+     */
+    public synchronized void startFastDynamicsPoll() {
+        if (fastPollScheduler != null) return;       // already running
+        if (speedDevice == null && gearboxDevice == null) return; // nothing to poll on this trim
+        fastPollScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "RoadSenseFastPoll");
+            t.setDaemon(true);
+            return t;
+        });
+        fastPollScheduler.scheduleWithFixedDelay(() -> {
+            try {
+                double speedKmh = Double.NaN;
+                int accel = BydVehicleData.UNAVAILABLE;
+                int brake = BydVehicleData.UNAVAILABLE;
+                int gear = BydVehicleData.UNAVAILABLE;
+                if (speedDevice != null) {
+                    Object sp = BydDeviceHelper.callGetter(speedDevice, "getCurrentSpeed");
+                    if (sp instanceof Number) {
+                        double v = ((Number) sp).doubleValue();
+                        if (v != BydFeatureIds.SDK_NOT_AVAILABLE) speedKmh = v * distanceToKmFactor;
+                    }
+                    Object ac = BydDeviceHelper.callGetter(speedDevice, "getAccelerateDeepness");
+                    if (ac instanceof Number) accel = ((Number) ac).intValue();
+                    Object br = BydDeviceHelper.callGetter(speedDevice, "getBrakeDeepness");
+                    if (br instanceof Number) brake = ((Number) br).intValue();
+                }
+                if (gearboxDevice != null) {
+                    Object g = BydDeviceHelper.callGetter(gearboxDevice, "getGearboxAutoModeType");
+                    if (g instanceof Number) gear = ((Number) g).intValue();
+                }
+                // Fall back to the last main-snapshot value for any field the fast
+                // read couldn't get, so a momentary SDK miss doesn't blank a signal.
+                BydVehicleData snap = snapshot.get();
+                if (Double.isNaN(speedKmh) && snap != null) speedKmh = snap.speedKmh;
+                if (accel == BydVehicleData.UNAVAILABLE && snap != null) accel = snap.accelPercent;
+                if (brake == BydVehicleData.UNAVAILABLE && snap != null) brake = snap.brakePercent;
+                if (gear == BydVehicleData.UNAVAILABLE && snap != null) gear = snap.gearMode;
+                fastDynamics.set(new FastDynamics(speedKmh, accel, brake, gear, System.currentTimeMillis()));
+            } catch (Throwable t) {
+                logger.debug("Fast dynamics poll error: " + t.getMessage());
+            }
+        }, 0, FAST_POLL_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        logger.info("RoadSense fast dynamics poll started (" + FAST_POLL_INTERVAL_MS + "ms)");
+    }
+
+    /** Stop the fast dynamics poll and clear its snapshot (idempotent). */
+    public synchronized void stopFastDynamicsPoll() {
+        if (fastPollScheduler != null) {
+            fastPollScheduler.shutdownNow();
+            fastPollScheduler = null;
+            logger.info("RoadSense fast dynamics poll stopped");
+        }
+        fastDynamics.set(null);
+    }
+
     private void startPolling() {
         pollScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "BydDataPoll");
@@ -371,6 +471,7 @@ public class BydDataCollector {
             pollScheduler.shutdownNow();
             pollScheduler = null;
         }
+        stopFastDynamicsPoll();
         unregisterPlugEdgeReceiver();
         initialized = false;
     }

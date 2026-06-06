@@ -332,6 +332,11 @@ public class StorageManager {
     private final Object surveillanceCleanupLock = new Object();
     private final Object proximityCleanupLock = new Object();
     private final Object tripsCleanupLock = new Object();
+    // FIX (audit R8, LOW): serialize peer setStorageType calls so concurrent
+    // HTTP threads don't interleave field writes / setOutputDir push /
+    // stopRecording / saveConfig. setRecordingsStorageType, setSurveillanceStorageType,
+    // and setTripsStorageType all take this lock.
+    private final Object configChangeLock = new Object();
 
     /** Resolve the per-category lock by category key — used by helpers that
      *  receive the category as a string (drainDeferredCleanup, sweep helpers).
@@ -987,6 +992,36 @@ public class StorageManager {
             return false;
         }
         return isMountWritable(usbPath);
+    }
+
+    /**
+     * Cheap, fork-free USB-mount probe — mirrors {@link #isSdCardLikelyMounted}
+     * for the USB volume. Used by the per-minute watchdog tick so we don't
+     * spawn a shell ({@code touch} via {@link #isMountWritable}) every cycle.
+     *
+     * <p>FIX (audit R5): a {@code touch+rm} fork on every tick (1/min) under
+     * FUSE binder contention can itself amplify the contention that the
+     * watchdog is supposed to recover from, plus the false-positive "USB
+     * unmounted" reading after every UI settings save (when the page reflexively
+     * walks USB via /api/storage/external + /api/recordings/stats). The cheap
+     * StatFs+canWrite path has none of those side effects.
+     *
+     * <p>The expensive write-probe is reserved for {@link #isMountWritable} —
+     * callers that are about to actually write call it before mid-segment
+     * fsync points, where a 2s probe stall is preferable to a silently-vanished
+     * mount.
+     */
+    public boolean isUsbLikelyMounted() {
+        if (usbPath == null) return false;
+        File d = new File(usbPath);
+        if (!d.exists() || !d.isDirectory()) return false;
+        try {
+            android.os.StatFs s = new android.os.StatFs(usbPath);
+            if (s.getTotalBytes() <= 0) return false;
+        } catch (Throwable t) {
+            return false;
+        }
+        return d.canWrite();
     }
 
     /**
@@ -2046,6 +2081,13 @@ public class StorageManager {
      * @return true if successfully changed, false if SD card not available
      */
     public boolean setRecordingsStorageType(StorageType type) {
+        // FIX (audit R8, LOW): serialize concurrent setters so a fast
+        // double-fire from the web UI / HTTP pool can't interleave
+        // recordingsStorageType writes, pendingOutputDirOverride pushes,
+        // and saveConfig persistence. configChangeLock is shared with the
+        // peer setSurveillance/setTrips methods so cross-category races
+        // are also serialized (saveConfig is a single shared file write).
+        synchronized (configChangeLock) {
         if (!ensureExternalAvailable(type, "recordings")) return false;
 
         recordingsStorageType = type;
@@ -2057,18 +2099,132 @@ public class StorageManager {
         saveConfig();
         logInfo("Recordings storage type set to: " + type);
 
+        // Re-arm the volume watchdog so a transition INTERNAL → SD/USB during
+        // ACC=ON brings up the per-minute remount loop, and SD/USB → INTERNAL
+        // tears it down when no longer needed. startSdCardWatchdog is
+        // idempotent and self-gating (returns early when no category is on
+        // an external volume), so we can call it unconditionally here.
+        try {
+            startSdCardWatchdog();
+            logInfo("setRecordingsStorageType: volume watchdog re-armed for type=" + type);
+        } catch (Throwable t) {
+            logWarn("setRecordingsStorageType: could not re-arm volume watchdog: " + t.getMessage());
+        }
+
+        // Push the new recordings dir into the live pano recorder so an
+        // in-progress CONTINUOUS / DRIVE_MODE session lands future segments
+        // on the freshly selected volume. Without this, the recorder keeps
+        // writing to the dir captured at startRecording time until the next
+        // mode toggle or hot remount cycle (watchdog at line ~4229 only
+        // covers unmount/remount, not user-initiated type swaps).
+        //
+        // Bypass getRecordingsDir() / the volatile field: when a recording is
+        // active, updateActiveDirectories SKIPS the recordingsDir swap (per
+        // the active-recording guard at line ~1658), so the field still
+        // points at the OLD volume. Resolve the new dir directly from the
+        // freshly-set type so the user's choice actually reaches the
+        // recorder override even mid-session.
+        try {
+            com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline =
+                com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
+            if (pipeline != null && pipeline.getRecorder() != null) {
+                ResolvedDir r = resolveActive(type,
+                    internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir, "recordings");
+                java.io.File newRecordingsDir = r.dir;
+                pipeline.getRecorder().setOutputDir(newRecordingsDir);
+                logInfo("setRecordingsStorageType: pano recorder output dir updated to "
+                    + (newRecordingsDir != null ? newRecordingsDir.getAbsolutePath() : "null")
+                    + " (resolved=" + r.resolved
+                    + "; in-flight segment keeps prior path; future segments use new dir)");
+                // FIX (audit R4): if a CONTINUOUS / DRIVE_MODE session is
+                // mid-flight, the encoder's segmentBasePath was latched at
+                // startRecording time and segment rotations stay on the OLD
+                // volume until the next mode toggle. Force a stopRecording on
+                // the wrapper so the listener bridge clears recordingActive,
+                // then RMM's wedge ticker (or the next activateMode call)
+                // performs a fresh startRecording that picks up the new
+                // pendingOutputDirOverride. We lose ≈ one segment-second but
+                // the user's storage-type choice takes effect within seconds
+                // instead of waiting for the next ACC cycle.
+                try {
+                    if (pipeline.getRecorder().isRecording()) {
+                        logWarn("setRecordingsStorageType: recording active, "
+                            + "forcing pipeline.stopRecording so override applies on next start");
+                        // FIX (audit R7, HIGH): use pipeline.stopRecording() not
+                        // recorder.stopRecording(). The wrapper-only stop leaves
+                        // pipeline.currentMode=NORMAL_RECORDING + recordingMode=true,
+                        // which makes RMM.runActivateGuarded short-circuit on
+                        // pipeline.isNormalRecordingMode() and never re-issue
+                        // pipeline.startRecording() — pendingOutputDirOverride
+                        // is never consumed, recording is silently lost until
+                        // next ACC cycle. pipeline.stopRecording() additionally
+                        // clears recordingMode, currentMode=IDLE, and
+                        // pendingRecordingDir/Prefix so the next activateMode
+                        // is allowed and consumes the new override.
+                        pipeline.stopRecording();
+                        // FIX (audit R5, MEDIUM): kick RMM to re-evaluate mode
+                        // immediately so the next startRecording fires within
+                        // a tick instead of waiting for the wedge ticker / next
+                        // ACC cycle. resyncFromHardware reads currentMode +
+                        // accIsOn fresh and re-issues activateMode → which
+                        // consumes the just-pushed setOutputDir override.
+                        // Caller is HTTP / settings-save thread; resyncFromHardware
+                        // dispatches to its own executor and returns quickly.
+                        try {
+                            com.overdrive.app.recording.RecordingModeManager rmm =
+                                com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                            if (rmm != null) {
+                                rmm.resyncFromHardware("storage-type-switch-recordings");
+                                logInfo("setRecordingsStorageType: kicked RMM "
+                                    + "resyncFromHardware to re-arm recording on new volume");
+                            }
+                        } catch (Throwable rt) {
+                            logWarn("setRecordingsStorageType: RMM resync kick threw: "
+                                + rt.getMessage());
+                        }
+                    }
+                } catch (Throwable t) {
+                    logWarn("setRecordingsStorageType: stopRecording for re-segment threw: "
+                        + t.getMessage());
+                }
+            } else {
+                logInfo("setRecordingsStorageType: no live pano recorder, recorder dir push skipped");
+            }
+        } catch (Throwable t) {
+            logWarn("setRecordingsStorageType: could not push recorder dir: " + t.getMessage());
+        }
+
         if (type == StorageType.SD_CARD) {
             autoEnableCdrCleanup();
         }
+
+        // FIX (audit R8, MEDIUM): re-arm RecordingsIndex against the new
+        // volume's recordings dir + reconcile so events.html / native
+        // fragment lists stop showing the OLD volume's clips. Without
+        // this, FileObservers continue watching the old dir set and new
+        // cam_*.mp4 segments on the new volume don't fire events — UI
+        // shows stale data until the 1-hour periodic reconcile. Mirrors
+        // the existing notifyRecordingsIndexOfStorageChange calls in the
+        // SD/USB watchdog success branches (lines 4454, 4677).
+        try {
+            notifyRecordingsIndexOfStorageChange("set-recordings-storage-type");
+            logInfo("setRecordingsStorageType: re-armed RecordingsIndex for type=" + type);
+        } catch (Throwable t) {
+            logWarn("setRecordingsStorageType: RecordingsIndex re-arm failed: " + t.getMessage());
+        }
         return true;
+        } // end synchronized(configChangeLock) — FIX audit R8 LOW
     }
-    
+
     /**
      * Set surveillance storage type (INTERNAL or SD_CARD).
      * @param type The storage type to use
      * @return true if successfully changed, false if SD card not available
      */
     public boolean setSurveillanceStorageType(StorageType type) {
+        // FIX (audit R8, LOW): peer setter — share configChangeLock with
+        // setRecordingsStorageType / setTripsStorageType.
+        synchronized (configChangeLock) {
         if (!ensureExternalAvailable(type, "surveillance")) return false;
 
         surveillanceStorageType = type;
@@ -2078,12 +2234,36 @@ public class StorageManager {
         saveConfig();
         logInfo("Surveillance storage type set to: " + type);
 
+        // Re-arm the volume watchdog: a transition INTERNAL → SD/USB during
+        // ACC=ON must bring up the remount loop so a transient unmount during
+        // the drive (kernel hiccup, FUSE bridge reset) is recovered before
+        // the next ACC cycle. Idempotent + self-gating.
+        try {
+            startSdCardWatchdog();
+            logInfo("setSurveillanceStorageType: volume watchdog re-armed for type=" + type);
+        } catch (Throwable t) {
+            logWarn("setSurveillanceStorageType: could not re-arm volume watchdog: " + t.getMessage());
+        }
+
         if (type == StorageType.SD_CARD) {
             autoEnableCdrCleanup();
         }
+
+        // FIX (audit R8, MEDIUM): symmetric with setRecordingsStorageType.
+        // Recordings live alongside surveillance events on the same volume
+        // family; a surveillance-side type swap may shift the recordings
+        // dir indirectly (when both share a volume) or alter availability.
+        // Re-arm the index defensively. Best-effort.
+        try {
+            notifyRecordingsIndexOfStorageChange("set-surveillance-storage-type");
+            logInfo("setSurveillanceStorageType: re-armed RecordingsIndex for type=" + type);
+        } catch (Throwable t) {
+            logWarn("setSurveillanceStorageType: RecordingsIndex re-arm failed: " + t.getMessage());
+        }
         return true;
+        } // end synchronized(configChangeLock) — FIX audit R8 LOW
     }
-    
+
     /**
      * Set trips storage type (INTERNAL or SD_CARD).
      * Does NOT call autoEnableCdrCleanup() — trip files are small and don't compete with BYD dashcam space.
@@ -2091,6 +2271,9 @@ public class StorageManager {
      * @return true if successfully changed, false if SD card not available
      */
     public boolean setTripsStorageType(StorageType type) {
+        // FIX (audit R8, LOW): peer setter — share configChangeLock with
+        // setRecordingsStorageType / setSurveillanceStorageType.
+        synchronized (configChangeLock) {
         if (!ensureExternalAvailable(type, "trips")) return false;
 
         tripsStorageType = type;
@@ -2098,7 +2281,28 @@ public class StorageManager {
         updateActiveDirectories();
         saveConfig();
         logInfo("Trips storage type set to: " + type);
+
+        // Re-arm the volume watchdog so a trips-only external choice still
+        // gets remount coverage during ACC=ON. Idempotent + self-gating.
+        try {
+            startSdCardWatchdog();
+            logInfo("setTripsStorageType: volume watchdog re-armed for type=" + type);
+        } catch (Throwable t) {
+            logWarn("setTripsStorageType: could not re-arm volume watchdog: " + t.getMessage());
+        }
+
+        // FIX (audit R8, MEDIUM): symmetric with setRecordingsStorageType.
+        // Trips don't live in the recordings tree directly, but a type
+        // swap that changes mount availability can affect peer dirs;
+        // refresh the index so derived availability views stay coherent.
+        try {
+            notifyRecordingsIndexOfStorageChange("set-trips-storage-type");
+            logInfo("setTripsStorageType: re-armed RecordingsIndex for type=" + type);
+        } catch (Throwable t) {
+            logWarn("setTripsStorageType: RecordingsIndex re-arm failed: " + t.getMessage());
+        }
         return true;
+        } // end synchronized(configChangeLock) — FIX audit R8 LOW
     }
 
     /**
@@ -4180,13 +4384,26 @@ public class StorageManager {
                 // the false-positive "card unmounted" log that fires after
                 // every UI settings save (when the page reflexively walks
                 // the SD via /api/storage/external + /api/recordings/stats).
+                // FIX (audit R8, LOW): track whether the SD branch fully
+                // executed this tick. We must NOT short-circuit the whole
+                // lambda on a first-strike SD failure — the USB branch
+                // below has its own independent state machine and a
+                // first-strike SD probe failure must not delay USB
+                // unmount detection by a full 15s tick. We bypass the
+                // SD-handling block via a scoped flag instead of the
+                // historical `return;`.
+                boolean sdHandled = false;
                 if (watchSd && !isSdCardLikelyMounted()) {
                     sdWatchdogConsecutiveFailures++;
 
-                    // First failure: silent, just record and wait for next tick.
+                    // First failure: silent, just record and let the USB
+                    // branch still run. (FIX audit R8, LOW: was `return;`)
                     if (sdWatchdogConsecutiveFailures < 2) {
-                        return;
+                        logDebug("SD watchdog: first-strike probe failure, deferring to next tick "
+                            + "(USB branch still runs)");
+                        sdHandled = true;
                     }
+                    if (!sdHandled) {
 
                     // Only log verbosely for the first few failures, then quiet down
                     boolean shouldLog = sdWatchdogConsecutiveFailures <= SD_WATCHDOG_MAX_VERBOSE_FAILURES ||
@@ -4215,8 +4432,88 @@ public class StorageManager {
                                 logInfo("SD card watchdog: updated sentry output dir to " +
                                     getSurveillanceDir().getAbsolutePath());
                             }
-                        } catch (Exception e) {
-                            logWarn("SD card watchdog: could not update sentry dir: " + e.getMessage());
+
+                            // Also re-poke the pano recorder if recordings
+                            // are configured to land on SD. Without this,
+                            // an in-progress pano recording silently
+                            // continues writing to the vanished SD mount
+                            // path captured at startRecording time —
+                            // segments are lost until the next mode toggle.
+                            // Only future segments / start-recording calls
+                            // pick up the new dir; the in-flight segment is
+                            // unrecoverable (encoder's segmentBasePath was
+                            // fixed at the segment open).
+                            if (pipeline != null && pipeline.getRecorder() != null
+                                    && recordingsStorageType == StorageType.SD_CARD) {
+                                // FIX (audit R5, LOW): use canonical SD path
+                                // directly rather than the volatile recordingsDir
+                                // field (which is only swapped by
+                                // updateActiveDirectories when no recording is
+                                // active — so a hot remount during an in-flight
+                                // segment would still read the vanished dir).
+                                ResolvedDir rSd = resolveActive(StorageType.SD_CARD,
+                                    internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir,
+                                    "recordings");
+                                java.io.File newRecordingsDir = (sdCardRecordingsDir != null)
+                                    ? sdCardRecordingsDir : rSd.dir;
+                                // FIX (audit R2): if the encoder has already
+                                // latched writerAbortedCorrupt (SD vanished
+                                // mid-segment), the listener bridge in
+                                // GpuMosaicRecorder MAY have already cleared
+                                // wrapper.recording — but if it didn't fire
+                                // (raced, exception path), wrapper.recording
+                                // still lies. Belt-and-suspenders: force a
+                                // stopRecording() on the wrapper before we
+                                // poke setOutputDir. That guarantees
+                                // recording=false + recordingActive=false so
+                                // RMM's wedge detector + activateMode path
+                                // can consume pendingOutputDirOverride on
+                                // the very next tick instead of waiting for
+                                // ACC OFF/ON or daemon restart.
+                                try {
+                                    com.overdrive.app.surveillance.HardwareEventRecorderGpu enc =
+                                        pipeline.getRecorder().getEncoder();
+                                    if (enc != null && enc.isWriterAborted()
+                                            && pipeline.getRecorder().isRecording()) {
+                                        logWarn("SD card watchdog: encoder writer aborted "
+                                            + "but wrapper.recording still true — forcing pipeline.stopRecording()"
+                                            + " before setOutputDir to unblock RMM wedge recovery");
+                                        // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                        // not recorder.stopRecording(); see
+                                        // setRecordingsStorageType for full rationale.
+                                        // recorder-only stop leaves pipeline.currentMode
+                                        // pinned at NORMAL_RECORDING and RMM rejects
+                                        // every wedge-retry activateMode forever.
+                                        pipeline.stopRecording();
+                                    }
+                                } catch (Throwable t) {
+                                    logWarn("SD card watchdog: writer-abort stop probe failed: "
+                                        + t.getMessage());
+                                }
+                                pipeline.getRecorder().setOutputDir(newRecordingsDir);
+                                logInfo("SD card watchdog: pano recorder output dir updated to " +
+                                    newRecordingsDir.getAbsolutePath()
+                                    + " (in-flight segment may be lost; future segments use new path)");
+
+                                // FIX (audit R7, HIGH): kick RMM resync immediately
+                                // so the freshly-cleared currentMode→IDLE state is
+                                // re-armed without waiting up to 30s for the next
+                                // ticker. Mirrors the setRecordingsStorageType kick.
+                                try {
+                                    com.overdrive.app.recording.RecordingModeManager rmm =
+                                        com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                    if (rmm != null) {
+                                        rmm.resyncFromHardware("sd-watchdog-remount-success");
+                                        logInfo("SD card watchdog: kicked RMM resyncFromHardware "
+                                            + "to re-arm recording on remounted volume");
+                                    }
+                                } catch (Throwable rt) {
+                                    logWarn("SD card watchdog: RMM resync kick threw: "
+                                        + rt.getMessage());
+                                }
+                            }
+                        } catch (Throwable t) {
+                            logWarn("SD card watchdog: could not update recorder/sentry dir: " + t.getMessage());
                         }
 
                         // Re-arm RecordingsIndex against the freshly-mounted
@@ -4226,9 +4523,116 @@ public class StorageManager {
                         // the native fragment until the 1-hour periodic
                         // reconcile.
                         notifyRecordingsIndexOfStorageChange("SD watchdog");
-                    } else if (shouldLog) {
-                        logError("SD card watchdog: remount FAILED - surveillance may use internal fallback");
+                    } else {
+                        // FIX (audit R4): on remount failure, eagerly re-resolve
+                        // active directories so recordingsDir / surveillanceDir
+                        // fields fall back to internal NOW. Previously this
+                        // branch only logged: cleanup + recordings-stats +
+                        // pre-flight reserve callers that don't go through
+                        // ensureStorageReady continued to hit the vanished SD
+                        // path for 30-60s until RMM wedge detection kicked the
+                        // pipeline into a fresh start(). Mirrors the success
+                        // branch's updateActiveDirectories() call.
+                        try {
+                            discoverVolumes();
+                            updateActiveDirectories();
+                            logWarn("SD card watchdog: remount FAILED — fell back active dirs to internal "
+                                + "(recordings=" + getRecordingsDir().getAbsolutePath() + ")");
+                        } catch (Throwable t) {
+                            logWarn("SD card watchdog: remount-failure fallback re-resolve threw: "
+                                + t.getMessage());
+                        }
+
+                        // FIX (audit R5, HIGH): mirror SUCCESS branch on
+                        // FAILURE too. Without this, encoder writer-abort may
+                        // not have fired yet (3 disk-write fails needed) OR
+                        // FUSE may block the writer indefinitely. Wrapper
+                        // recording stays true, recordingsDir stays pinned at
+                        // the vanished SD path, setOutputDir is never pushed,
+                        // and segments are silently lost until ACC OFF/ON.
+                        //
+                        // (1) probe writer-aborted+isRecording — if true,
+                        //     force stopRecording so wrapper.recording and
+                        //     recordingActive synchronously flip false BEFORE
+                        //     dir swap.
+                        // (2) compute internal-fallback dir directly via
+                        //     resolveActive(INTERNAL,...) — bypasses the
+                        //     recordingActive-gated recordingsDir field which
+                        //     was still pointing at the vanished mount until
+                        //     step (1) cleared it.
+                        // (3) push setOutputDir(internalFallbackDir) so RMM's
+                        //     next start consumes the override and lands on
+                        //     internal instead of the dead SD path.
+                        try {
+                            com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline =
+                                com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
+                            if (pipeline != null && pipeline.getRecorder() != null
+                                    && recordingsStorageType == StorageType.SD_CARD) {
+                                try {
+                                    com.overdrive.app.surveillance.HardwareEventRecorderGpu enc =
+                                        pipeline.getRecorder().getEncoder();
+                                    if (enc != null && enc.isWriterAborted()
+                                            && pipeline.getRecorder().isRecording()) {
+                                        logWarn("SD card watchdog: remount FAILED + encoder writer aborted "
+                                            + "— forcing pipeline.stopRecording before internal-fallback setOutputDir "
+                                            + "to unblock RMM wedge recovery");
+                                        // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                        // not recorder.stopRecording(); see
+                                        // setRecordingsStorageType for rationale.
+                                        pipeline.stopRecording();
+                                    } else if (pipeline.getRecorder().isRecording()) {
+                                        logWarn("SD card watchdog: remount FAILED while recording — "
+                                            + "forcing pipeline.stopRecording so internal-fallback setOutputDir "
+                                            + "applies on next start (in-flight segment lost)");
+                                        // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                        // not recorder.stopRecording(); see
+                                        // setRecordingsStorageType for rationale.
+                                        pipeline.stopRecording();
+                                    }
+                                } catch (Throwable t) {
+                                    logWarn("SD card watchdog: remount-failure stop probe threw: "
+                                        + t.getMessage());
+                                }
+                                // Resolve INTERNAL directly — bypass the
+                                // recordingsDir field which may still be stale
+                                // until updateActiveDirectories above swapped it.
+                                ResolvedDir rFallback = resolveActive(StorageType.INTERNAL,
+                                    internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir,
+                                    "recordings");
+                                java.io.File internalFallbackDir = rFallback.dir;
+                                if (internalFallbackDir != null) {
+                                    pipeline.getRecorder().setOutputDir(internalFallbackDir);
+                                    logWarn("SD card watchdog: remount FAILED — pushed pano recorder dir "
+                                        + "to INTERNAL fallback " + internalFallbackDir.getAbsolutePath()
+                                        + " (future segments land on internal until SD recovers)");
+
+                                    // FIX (audit R7, HIGH): kick RMM resync to
+                                    // re-arm recording on the internal fallback
+                                    // immediately, instead of waiting up to 30s.
+                                    try {
+                                        com.overdrive.app.recording.RecordingModeManager rmm =
+                                            com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                        if (rmm != null) {
+                                            rmm.resyncFromHardware("sd-watchdog-remount-failed");
+                                            logInfo("SD card watchdog: kicked RMM resyncFromHardware "
+                                                + "to re-arm recording on internal fallback");
+                                        }
+                                    } catch (Throwable rt) {
+                                        logWarn("SD card watchdog: RMM resync kick threw: "
+                                            + rt.getMessage());
+                                    }
+                                }
+                            }
+                        } catch (Throwable t) {
+                            logWarn("SD card watchdog: remount-failure setOutputDir push threw: "
+                                + t.getMessage());
+                        }
+
+                        if (shouldLog) {
+                            logError("SD card watchdog: remount FAILED - surveillance may use internal fallback");
+                        }
                     }
+                    } // end if (!sdHandled) — FIX audit R8 LOW
                 } else if (watchSd) {
                     // Card is healthy — reset failure counter (was a single
                     // transient probe failure, not a real unmount).
@@ -4246,8 +4650,28 @@ public class StorageManager {
                 // mid-recording, but ALSO get a remount attempt when the
                 // bus settles. Without this branch a USB-only surveillance
                 // config that loses its drive stays on internal forever.
-                if (watchUsb && !isUsbMounted()) {
+                // FIX (audit R5): mirror SD branch — use cheap fork-free
+                // probe (StatFs+canWrite) so the per-minute tick never forks
+                // a shell, AND apply two-strikes (single negative reading is
+                // a transient probe failure, not real unmount). Eliminates the
+                // false-positive remount cascade after every UI settings save.
+                // FIX (audit R8, LOW): mirror SD-side fix — never `return;`
+                // out of the whole tick on a first-strike USB probe
+                // failure. The SD branch above is also independent and
+                // its state must not be skipped if/when USB transient
+                // failures stack at the start of a tick.
+                boolean usbHandled = false;
+                if (watchUsb && !isUsbLikelyMounted()) {
                     usbWatchdogConsecutiveFailures++;
+
+                    // First failure: silent, just record and let the rest
+                    // of the tick run. (FIX audit R8 LOW: was `return;`)
+                    if (usbWatchdogConsecutiveFailures < 2) {
+                        logDebug("USB watchdog: first-strike probe failure, deferring to next tick");
+                        usbHandled = true;
+                    }
+                    if (!usbHandled) {
+
                     boolean shouldLogUsb = usbWatchdogConsecutiveFailures <= SD_WATCHDOG_MAX_VERBOSE_FAILURES ||
                                            usbWatchdogConsecutiveFailures % SD_WATCHDOG_QUIET_LOG_INTERVAL == 0;
                     if (shouldLogUsb) {
@@ -4269,8 +4693,62 @@ public class StorageManager {
                                 logInfo("USB watchdog: updated sentry output dir to " +
                                     getSurveillanceDir().getAbsolutePath());
                             }
-                        } catch (Exception e) {
-                            logWarn("USB watchdog: could not update sentry dir: " + e.getMessage());
+
+                            // Pano recorder dir re-poke: same rationale as
+                            // the SD branch — gated to USB-backed recordings
+                            // since otherwise the recordings dir didn't move.
+                            if (pipeline != null && pipeline.getRecorder() != null
+                                    && recordingsStorageType == StorageType.USB) {
+                                // FIX (audit R5, LOW): use canonical USB path
+                                // directly — see SD branch comment for rationale.
+                                ResolvedDir rUsb = resolveActive(StorageType.USB,
+                                    internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir,
+                                    "recordings");
+                                java.io.File newRecordingsDir = (usbRecordingsDir != null)
+                                    ? usbRecordingsDir : rUsb.dir;
+                                // FIX (audit R2): same writerAborted belt-and-
+                                // suspenders as the SD branch — see comment
+                                // there for full rationale.
+                                try {
+                                    com.overdrive.app.surveillance.HardwareEventRecorderGpu enc =
+                                        pipeline.getRecorder().getEncoder();
+                                    if (enc != null && enc.isWriterAborted()
+                                            && pipeline.getRecorder().isRecording()) {
+                                        logWarn("USB watchdog: encoder writer aborted "
+                                            + "but wrapper.recording still true — forcing pipeline.stopRecording()"
+                                            + " before setOutputDir to unblock RMM wedge recovery");
+                                        // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                        // not recorder.stopRecording(); see
+                                        // setRecordingsStorageType for rationale.
+                                        pipeline.stopRecording();
+                                    }
+                                } catch (Throwable t) {
+                                    logWarn("USB watchdog: writer-abort stop probe failed: "
+                                        + t.getMessage());
+                                }
+                                pipeline.getRecorder().setOutputDir(newRecordingsDir);
+                                logInfo("USB watchdog: pano recorder output dir updated to " +
+                                    newRecordingsDir.getAbsolutePath()
+                                    + " (in-flight segment may be lost; future segments use new path)");
+
+                                // FIX (audit R7, HIGH): kick RMM resync to re-arm
+                                // recording immediately on the freshly-remounted
+                                // USB volume. Mirrors SD watchdog success branch.
+                                try {
+                                    com.overdrive.app.recording.RecordingModeManager rmm =
+                                        com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                    if (rmm != null) {
+                                        rmm.resyncFromHardware("usb-watchdog-remount-success");
+                                        logInfo("USB watchdog: kicked RMM resyncFromHardware "
+                                            + "to re-arm recording on remounted volume");
+                                    }
+                                } catch (Throwable rt) {
+                                    logWarn("USB watchdog: RMM resync kick threw: "
+                                        + rt.getMessage());
+                                }
+                            }
+                        } catch (Throwable t) {
+                            logWarn("USB watchdog: could not update recorder/sentry dir: " + t.getMessage());
                         }
 
                         // Same RecordingsIndex re-arm + reconcile pattern as
@@ -4278,12 +4756,102 @@ public class StorageManager {
                         // mounted USB sticks otherwise stay invisible to the
                         // index until the 1-hour periodic reconcile.
                         notifyRecordingsIndexOfStorageChange("USB watchdog");
-                    } else if (shouldLogUsb) {
-                        logError("USB watchdog: remount FAILED - surveillance may use internal fallback");
+                    } else {
+                        // FIX (audit R4): symmetric to SD branch — eagerly fall
+                        // back active dirs to internal on USB remount failure
+                        // so cleanup / recordings-stats / pre-flight reserve
+                        // callers see truthful paths immediately.
+                        try {
+                            discoverVolumes();
+                            updateActiveDirectories();
+                            logWarn("USB watchdog: remount FAILED — fell back active dirs to internal "
+                                + "(recordings=" + getRecordingsDir().getAbsolutePath() + ")");
+                        } catch (Throwable t) {
+                            logWarn("USB watchdog: remount-failure fallback re-resolve threw: "
+                                + t.getMessage());
+                        }
+
+                        // FIX (audit R5, HIGH): identical recovery to SD
+                        // FAILURE branch — see comment there. Without this,
+                        // a USB-only configuration that loses the stick mid-
+                        // segment continues to write to the vanished mount
+                        // until ACC OFF/ON or daemon restart.
+                        try {
+                            com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline =
+                                com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
+                            if (pipeline != null && pipeline.getRecorder() != null
+                                    && recordingsStorageType == StorageType.USB) {
+                                try {
+                                    com.overdrive.app.surveillance.HardwareEventRecorderGpu enc =
+                                        pipeline.getRecorder().getEncoder();
+                                    if (enc != null && enc.isWriterAborted()
+                                            && pipeline.getRecorder().isRecording()) {
+                                        logWarn("USB watchdog: remount FAILED + encoder writer aborted "
+                                            + "— forcing pipeline.stopRecording before internal-fallback setOutputDir "
+                                            + "to unblock RMM wedge recovery");
+                                        // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                        // not recorder.stopRecording(); see
+                                        // setRecordingsStorageType for rationale.
+                                        pipeline.stopRecording();
+                                    } else if (pipeline.getRecorder().isRecording()) {
+                                        logWarn("USB watchdog: remount FAILED while recording — "
+                                            + "forcing pipeline.stopRecording so internal-fallback setOutputDir "
+                                            + "applies on next start (in-flight segment lost)");
+                                        // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                        // not recorder.stopRecording(); see
+                                        // setRecordingsStorageType for rationale.
+                                        pipeline.stopRecording();
+                                    }
+                                } catch (Throwable t) {
+                                    logWarn("USB watchdog: remount-failure stop probe threw: "
+                                        + t.getMessage());
+                                }
+                                ResolvedDir rFallback = resolveActive(StorageType.INTERNAL,
+                                    internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir,
+                                    "recordings");
+                                java.io.File internalFallbackDir = rFallback.dir;
+                                if (internalFallbackDir != null) {
+                                    pipeline.getRecorder().setOutputDir(internalFallbackDir);
+                                    logWarn("USB watchdog: remount FAILED — pushed pano recorder dir "
+                                        + "to INTERNAL fallback " + internalFallbackDir.getAbsolutePath()
+                                        + " (future segments land on internal until USB recovers)");
+
+                                    // FIX (audit R7, HIGH): kick RMM resync to
+                                    // re-arm recording on the internal fallback
+                                    // immediately, mirroring SD failure branch.
+                                    try {
+                                        com.overdrive.app.recording.RecordingModeManager rmm =
+                                            com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                        if (rmm != null) {
+                                            rmm.resyncFromHardware("usb-watchdog-remount-failed");
+                                            logInfo("USB watchdog: kicked RMM resyncFromHardware "
+                                                + "to re-arm recording on internal fallback");
+                                        }
+                                    } catch (Throwable rt) {
+                                        logWarn("USB watchdog: RMM resync kick threw: "
+                                            + rt.getMessage());
+                                    }
+                                }
+                            }
+                        } catch (Throwable t) {
+                            logWarn("USB watchdog: remount-failure setOutputDir push threw: "
+                                + t.getMessage());
+                        }
+
+                        if (shouldLogUsb) {
+                            logError("USB watchdog: remount FAILED - surveillance may use internal fallback");
+                        }
                     }
+                    } // end if (!usbHandled) — FIX audit R8 LOW
                 } else if (watchUsb) {
+                    // FIX (audit R5): mirror SD reset path — only log "mounted
+                    // again" when we actually crossed the two-strikes threshold,
+                    // otherwise the tick is a single transient probe failure
+                    // recovering on the very next read (not user-visible).
                     if (usbWatchdogConsecutiveFailures > 0) {
-                        logInfo("USB watchdog: drive is mounted again");
+                        if (usbWatchdogConsecutiveFailures >= 2) {
+                            logInfo("USB watchdog: drive is mounted again");
+                        }
                         usbWatchdogConsecutiveFailures = 0;
                     }
                 }
@@ -4415,7 +4983,78 @@ public class StorageManager {
             default: return -1;
         }
 
+        // FIX (audit R4): protect the in-flight encoder output and any *.tmp
+        // newer than the 10-min grace window used by sweepOrphanTempFiles.
+        // Without these gates, a user-initiated Reset Data → Recordings during
+        // an active CONTINUOUS / DRIVE_MODE pano session unlinks the open
+        // *.mp4.tmp the encoder is currently writing into; recovery only
+        // happens after RMM wedge detection (~30-60 s).
+        //
+        // Probe the encoder's active path through the live pipeline. We look
+        // up GpuSurveillancePipeline lazily so the wipe still works when no
+        // recorder exists (e.g., daemon shutdown). For the trips category we
+        // also honour activeTripFilePath like sweepOrphanTempFiles does.
+        String activeEncoderPath = null;
+        String activeEncoderTmpPath = null;
+        if ("recordings".equals(category) || "surveillance".equals(category)
+                || "proximity".equals(category)) {
+            try {
+                com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline =
+                    com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
+                if (pipeline != null && pipeline.getRecorder() != null) {
+                    com.overdrive.app.surveillance.HardwareEventRecorderGpu enc =
+                        pipeline.getRecorder().getEncoder();
+                    if (enc != null) {
+                        // Force a clean segment finalise so the encoder is no
+                        // longer holding an open fd against any path we are
+                        // about to nuke. Best-effort — if it throws or the
+                        // recorder isn't actually recording the call is a
+                        // no-op.
+                        try {
+                            if (pipeline.getRecorder().isRecording()) {
+                                logWarn("wipeMediaCategory(" + category + "): recording active, "
+                                    + "forcing pipeline.stopRecording before wipe to finalise current segment");
+                                // FIX (audit R7, HIGH): pipeline.stopRecording()
+                                // not recorder.stopRecording(); recorder-only
+                                // stop leaves pipeline.currentMode pinned at
+                                // NORMAL_RECORDING and RMM rejects re-activation,
+                                // wedging recording until ACC OFF/ON. See
+                                // setRecordingsStorageType for full rationale.
+                                pipeline.stopRecording();
+                                // Kick RMM so re-activation runs immediately on
+                                // the next ticker rather than after up-to-30s.
+                                try {
+                                    com.overdrive.app.recording.RecordingModeManager rmm =
+                                        com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
+                                    if (rmm != null) {
+                                        rmm.resyncFromHardware("wipe-media-" + category);
+                                    }
+                                } catch (Throwable rt) {
+                                    logWarn("wipeMediaCategory: RMM resync kick threw: "
+                                        + rt.getMessage());
+                                }
+                            }
+                        } catch (Throwable t) {
+                            logWarn("wipeMediaCategory: stopRecording before wipe threw: "
+                                + t.getMessage());
+                        }
+                        activeEncoderPath = enc.getCurrentOutputPath();
+                        if (activeEncoderPath != null) {
+                            activeEncoderTmpPath = activeEncoderPath + ".tmp";
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                logWarn("wipeMediaCategory: encoder-path probe threw: " + t.getMessage());
+            }
+        }
+        final String protectedTripPath = "trips".equals(category) ? activeTripFilePath : null;
+        final String protEncoderPath = activeEncoderPath;
+        final String protEncoderTmpPath = activeEncoderTmpPath;
+        final long tmpGraceCutoff = System.currentTimeMillis() - (10L * 60L * 1000L);
+
         long deleted = 0;
+        long skippedActive = 0;
         synchronized (lockForCategory(category)) {
             for (File dir : dirs) {
                 if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
@@ -4424,6 +5063,29 @@ public class StorageManager {
                 for (File f : files) {
                     if (f.isFile()) {
                         String name = f.getName();
+                        String absPath = f.getAbsolutePath();
+                        // Skip the encoder's currently-open output path and
+                        // its .tmp companion.
+                        if (protEncoderPath != null
+                                && (absPath.equals(protEncoderPath)
+                                    || absPath.equals(protEncoderTmpPath))) {
+                            skippedActive++;
+                            continue;
+                        }
+                        // Skip in-flight trip file (mirrors sweepOrphanTempFiles).
+                        if (protectedTripPath != null
+                                && (protectedTripPath.equals(absPath)
+                                    || protectedTripPath.equals(absPath + ".tmp"))) {
+                            skippedActive++;
+                            continue;
+                        }
+                        // Honour the same 10-min grace window for any *.tmp
+                        // partial — newer than that and a writer may still
+                        // hold it open.
+                        if (name.endsWith(".tmp") && f.lastModified() > tmpGraceCutoff) {
+                            skippedActive++;
+                            continue;
+                        }
                         if (f.delete()) {
                             deleted++;
                             // Drop the H2 row eagerly so the next
@@ -4464,7 +5126,9 @@ public class StorageManager {
             } catch (Exception ignored) {}
         }
 
-        logInfo("wipeMediaCategory(" + category + ") deleted " + deleted + " files");
+        logInfo("wipeMediaCategory(" + category + ") deleted " + deleted + " files"
+            + (skippedActive > 0 ? " (skipped " + skippedActive
+                + " in-flight/grace-window files)" : ""));
         return deleted;
     }
 

@@ -168,14 +168,65 @@ const TRIPS = {
         document.addEventListener('ot-tabs:active-changed', function () {
             if (self.currentTripId != null) self.hideDetail();
         });
-        await this.loadConfig();
-        await this.loadStorageSettings();
+
+        // Render skeletons immediately so the user sees something while the
+        // bootstrap fetch is in flight. The storage card especially used to
+        // sit blank for the entire 10-20 minute SD-card walk; even though
+        // the DB-backed getTripsSize() removed that, the skeleton is still
+        // the right "I'm working on it" affordance during the single RTT.
+        this._renderInitialSkeletons();
+
+        // Single composite call replaces 6 sequential RTTs (config / storage
+        // / dna / summary / range / trips). Falls back to the legacy
+        // sequential loaders if the bootstrap endpoint is unavailable or
+        // returns an unsuccessful payload — worst-case behaviour is
+        // unchanged.
+        let usedBootstrap = false;
+        try {
+            const bootstrapResp = await fetch('/api/trips/bootstrap');
+            const bootstrapData = await bootstrapResp.json();
+            if (bootstrapData && bootstrapData.success && bootstrapData.bootstrap) {
+                const b = bootstrapData.bootstrap;
+                if (b.config)  this._applyConfigPayload(b.config);
+                if (b.storage) this._applyStoragePayload(b.storage);
+                if (b.dna)     this._applyDnaPayload(b.dna);
+                if (b.summary) this._applySummaryPayload(b.summary);
+                if (b.range)   this._applyRangePayload(b.range);
+                if (b.trips)   this._applyTripsPayload(b.trips, 0);
+                usedBootstrap = true;
+            }
+        } catch (e) {
+            console.warn('[Trips] Bootstrap failed, falling back to sequential loaders:', e);
+        }
+
+        if (!usedBootstrap) {
+            await this.loadConfig();
+            await this.loadStorageSettings();
+            await this.loadDna();
+            await this.loadSummary(7);
+            await this.loadRange();
+            await this.loadTrips(this.currentDays, 0);
+        }
+
+        // CDR info is a separate /api/storage/external endpoint, not part
+        // of the trips bootstrap. Small enough that one extra RTT after
+        // first paint doesn't matter.
         await this.loadCdrInfo();
-        await this.loadDna();
-        await this.loadSummary(7);
-        await this.loadRange();
-        await this.loadTrips(this.currentDays, 0);
-        console.log('[Trips] Initialized');
+        console.log('[Trips] Initialized (bootstrap=' + usedBootstrap + ')');
+    },
+
+    /**
+     * Show skeleton placeholders for the storage/range/list cards while
+     * the bootstrap fetch is in flight. Idempotent — safe to call before
+     * the first paint or after a hot-reload. The trip-list skeleton is
+     * already in the markup; this just ensures it isn't hidden by a prior
+     * render before {@code _applyTripsPayload} fires.
+     */
+    _renderInitialSkeletons() {
+        try {
+            const skel = document.getElementById('tripListSkeleton');
+            if (skel) skel.style.display = '';
+        } catch (e) { /* harmless */ }
     },
 
     // ==================== CONFIG ====================
@@ -184,41 +235,51 @@ const TRIPS = {
         try {
             const resp = await fetch('/api/trips/config');
             const data = await resp.json();
-            if (data.success && data.config) {
-                const el = document.getElementById('tripsEnabled');
-                if (el) el.checked = data.config.enabled || false;
-                // Load electricity rate
-                this.electricityRate = data.config.electricityRate || 0;
-                this.currency = data.config.currency || '$';
-                this.nominalKwh = data.config.nominalKwh || 0;
-                const rateInput = document.getElementById('rateInput');
-                const currSelect = document.getElementById('currencySelect');
-                if (rateInput && this.electricityRate > 0) rateInput.value = this.electricityRate;
-                if (currSelect) currSelect.value = this.currency;
-                // PHEV — server probe drives row visibility. Tank input is
-                // shown in user's chosen unit; we convert L↔gal at the I/O
-                // boundary so internal storage stays in litres.
-                this.isPhev = !!data.config.isPhev;
-                this.tankCapacityL = data.config.tankCapacityL || 0;
-                this.fuelPricePerL = data.config.fuelPricePerL || 0;
-                this.fuelUnit = data.config.fuelUnit === 'gal' ? 'gal' : 'L';
-                this.applyPhevVisibility();
-                this.applyFuelInputs();
-                // Load distance unit preference, refresh button + all labels
-                var distUnit = data.config.distanceUnit || 'km';
-                BYD.units.mode = distUnit;
-                this.updateDistanceUnitButtons(distUnit);
-                // If trips/summary already rendered before config arrived,
-                // re-render so values pick up the persisted unit on first load.
-                if (this.currentTrips && this.currentTrips.length > 0) {
-                    this.renderTripCards(this.currentTrips);
-                }
-                this.updatePeriodSummary();
-                this.updateCostHero();
-                // Update currency icons
-                this.updateCurrencyIcons();
-            }
+            this._applyConfigPayload(data);
         } catch (e) { console.warn('[Trips] Config load failed:', e); }
+    },
+
+    /**
+     * Apply a /api/trips/config response (or the matching slice of the
+     * /api/trips/bootstrap response) to the live UI state. Accepts the
+     * raw handler payload (the {@code data} from {@code resp.json()}); a
+     * missing or unsuccessful payload is a no-op so the bootstrap path
+     * can pass through partial responses without guarding here.
+     */
+    _applyConfigPayload(data) {
+        if (!data || !data.config) return;
+        const el = document.getElementById('tripsEnabled');
+        if (el) el.checked = data.config.enabled || false;
+        // Load electricity rate
+        this.electricityRate = data.config.electricityRate || 0;
+        this.currency = data.config.currency || '$';
+        this.nominalKwh = data.config.nominalKwh || 0;
+        const rateInput = document.getElementById('rateInput');
+        const currSelect = document.getElementById('currencySelect');
+        if (rateInput && this.electricityRate > 0) rateInput.value = this.electricityRate;
+        if (currSelect) currSelect.value = this.currency;
+        // PHEV — server probe drives row visibility. Tank input is
+        // shown in user's chosen unit; we convert L↔gal at the I/O
+        // boundary so internal storage stays in litres.
+        this.isPhev = !!data.config.isPhev;
+        this.tankCapacityL = data.config.tankCapacityL || 0;
+        this.fuelPricePerL = data.config.fuelPricePerL || 0;
+        this.fuelUnit = data.config.fuelUnit === 'gal' ? 'gal' : 'L';
+        this.applyPhevVisibility();
+        this.applyFuelInputs();
+        // Load distance unit preference, refresh button + all labels
+        var distUnit = data.config.distanceUnit || 'km';
+        BYD.units.mode = distUnit;
+        this.updateDistanceUnitButtons(distUnit);
+        // If trips/summary already rendered before config arrived,
+        // re-render so values pick up the persisted unit on first load.
+        if (this.currentTrips && this.currentTrips.length > 0) {
+            this.renderTripCards(this.currentTrips);
+        }
+        this.updatePeriodSummary();
+        this.updateCostHero();
+        // Update currency icons
+        this.updateCurrencyIcons();
     },
 
     async toggleEnabled() {
@@ -450,102 +511,111 @@ const TRIPS = {
         try {
             const resp = await fetch('/api/trips/storage');
             const data = await resp.json();
-            if (data.success && data.storage) {
-                const s = data.storage;
-                this.storageMeta = s;  // cached for setStorageType / clamp logic
-                const intBtn = document.getElementById('storageInternal');
-                const sdBtn = document.getElementById('storageSdCard');
-                const usbBtn = document.getElementById('storageUsb');
-                if (intBtn) intBtn.classList.toggle('active', s.storageType === 'INTERNAL');
-                if (sdBtn) {
-                    sdBtn.classList.toggle('active', s.storageType === 'SD_CARD');
-                    sdBtn.disabled = !s.sdCardAvailable;
-                    sdBtn.title = s.sdCardAvailable ? '' : BYD.i18n.t('recording.sd_card_unavailable');
-                }
-                if (usbBtn) {
-                    usbBtn.classList.toggle('active', s.storageType === 'USB');
-                    usbBtn.disabled = !s.usbAvailable;
-                    usbBtn.title = s.usbAvailable ? '' : BYD.i18n.t('recording.usb_unavailable');
-                }
-                const slider = document.getElementById('storageLimitSlider');
-                const sliderMax = this.tripsMaxFor(s.storageType, s);
-                if (slider) {
-                    slider.max = sliderMax;
-                    slider.value = Math.min(s.limitMb || 500, sliderMax);
-                }
-                this.updateLimitLabel(s.limitMb || 500);
-                this.renderStorageUsage(s.usedMb || 0, s.limitMb || 500, s.tripsCount || 0, s.usedUnit || 'MB');
-
-                const pathEl = document.getElementById('tripStoragePath');
-                if (pathEl && s.storagePath) {
-                    pathEl.textContent = s.storagePath;
-                } else if (pathEl) {
-                    if (s.storageType === 'SD_CARD') pathEl.textContent = BYD.i18n.t('trip.sd_path_default');
-                    else if (s.storageType === 'USB') pathEl.textContent = BYD.i18n.t('trip.usb_path_default');
-                    else pathEl.textContent = BYD.i18n.t('trip.internal_path_default');
-                }
-
-                // SD card status row — always visible so the user sees the
-                // alternative volume's status (matches recording/surveillance
-                // pages). Online/offline dot reflects availability regardless
-                // of which type is currently selected.
-                const sdStatus = document.getElementById('tripSdCardStatus');
-                const sdDot = document.getElementById('tripSdStatusDot');
-                const sdText = document.getElementById('tripSdStatusText');
-                const sdSpaceInfo = document.getElementById('tripSdSpaceInfo');
-                const sdFree = document.getElementById('tripSdFree');
-                const sdTotal = document.getElementById('tripSdTotal');
-                if (sdStatus) {
-                    sdStatus.style.display = 'block';
-                    if (s.sdCardAvailable) {
-                        if (sdDot) { sdDot.classList.add('online'); sdDot.classList.remove('offline'); }
-                        if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_available');
-                        if (sdSpaceInfo && s.sdCardTotalSpace) {
-                            sdSpaceInfo.style.display = 'block';
-                            if (sdFree) sdFree.textContent = this.formatBytes(s.sdCardFreeSpace) + ' free';
-                            if (sdTotal) sdTotal.textContent = this.formatBytes(s.sdCardTotalSpace) + ' total';
-                        }
-                    } else {
-                        if (sdDot) { sdDot.classList.add('offline'); sdDot.classList.remove('online'); }
-                        if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_not_detected');
-                        if (sdSpaceInfo) sdSpaceInfo.style.display = 'none';
-                    }
-                }
-
-                // USB status row — always visible (see comment above).
-                const usbStatus = document.getElementById('tripUsbStatus');
-                const usbDot = document.getElementById('tripUsbStatusDot');
-                const usbText = document.getElementById('tripUsbStatusText');
-                const usbSpaceInfo = document.getElementById('tripUsbSpaceInfo');
-                const usbFree = document.getElementById('tripUsbFree');
-                const usbTotal = document.getElementById('tripUsbTotal');
-                if (usbStatus) {
-                    usbStatus.style.display = 'block';
-                    if (s.usbAvailable) {
-                        if (usbDot) { usbDot.classList.add('online'); usbDot.classList.remove('offline'); }
-                        if (usbText) usbText.textContent = BYD.i18n.t('recording.usb_available');
-                        if (usbSpaceInfo && s.usbTotalSpace) {
-                            usbSpaceInfo.style.display = 'block';
-                            if (usbFree) usbFree.textContent = this.formatBytes(s.usbFreeSpace) + ' free';
-                            if (usbTotal) usbTotal.textContent = this.formatBytes(s.usbTotalSpace) + ' total';
-                        }
-                    } else {
-                        if (usbDot) { usbDot.classList.add('offline'); usbDot.classList.remove('online'); }
-                        if (usbText) usbText.textContent = BYD.i18n.t('recording.usb_not_detected');
-                        if (usbSpaceInfo) usbSpaceInfo.style.display = 'none';
-                    }
-                }
-
-                // CDR cleanup card is SD-only (BYD's built-in dashcam)
-                const cdrCard = document.getElementById('tripCdrCleanupCard');
-                if (cdrCard) cdrCard.style.display = s.storageType === 'SD_CARD' ? 'block' : 'none';
-                if (s.storageType === 'SD_CARD') this.loadCdrInfo();
-
-                this.pendingStorageType = null;
-                this.pendingStorageLimit = null;
-                this.resetApplyButton();
-            }
+            this._applyStoragePayload(data);
         } catch (e) { console.warn('[Trips] Storage load failed:', e); }
+    },
+
+    /**
+     * Apply a /api/trips/storage response to the storage card. Accepts the
+     * raw handler payload ({@code {success, storage: {...}}}) or the
+     * bootstrap-stripped slice ({@code {storage: {...}}}); both have a
+     * top-level {@code storage} key.
+     */
+    _applyStoragePayload(data) {
+        if (!data || !data.storage) return;
+        const s = data.storage;
+        this.storageMeta = s;  // cached for setStorageType / clamp logic
+        const intBtn = document.getElementById('storageInternal');
+        const sdBtn = document.getElementById('storageSdCard');
+        const usbBtn = document.getElementById('storageUsb');
+        if (intBtn) intBtn.classList.toggle('active', s.storageType === 'INTERNAL');
+        if (sdBtn) {
+            sdBtn.classList.toggle('active', s.storageType === 'SD_CARD');
+            sdBtn.disabled = !s.sdCardAvailable;
+            sdBtn.title = s.sdCardAvailable ? '' : BYD.i18n.t('recording.sd_card_unavailable');
+        }
+        if (usbBtn) {
+            usbBtn.classList.toggle('active', s.storageType === 'USB');
+            usbBtn.disabled = !s.usbAvailable;
+            usbBtn.title = s.usbAvailable ? '' : BYD.i18n.t('recording.usb_unavailable');
+        }
+        const slider = document.getElementById('storageLimitSlider');
+        const sliderMax = this.tripsMaxFor(s.storageType, s);
+        if (slider) {
+            slider.max = sliderMax;
+            slider.value = Math.min(s.limitMb || 500, sliderMax);
+        }
+        this.updateLimitLabel(s.limitMb || 500);
+        this.renderStorageUsage(s.usedMb || 0, s.limitMb || 500, s.tripsCount || 0, s.usedUnit || 'MB');
+
+        const pathEl = document.getElementById('tripStoragePath');
+        if (pathEl && s.storagePath) {
+            pathEl.textContent = s.storagePath;
+        } else if (pathEl) {
+            if (s.storageType === 'SD_CARD') pathEl.textContent = BYD.i18n.t('trip.sd_path_default');
+            else if (s.storageType === 'USB') pathEl.textContent = BYD.i18n.t('trip.usb_path_default');
+            else pathEl.textContent = BYD.i18n.t('trip.internal_path_default');
+        }
+
+        // SD card status row — always visible so the user sees the
+        // alternative volume's status (matches recording/surveillance
+        // pages). Online/offline dot reflects availability regardless
+        // of which type is currently selected.
+        const sdStatus = document.getElementById('tripSdCardStatus');
+        const sdDot = document.getElementById('tripSdStatusDot');
+        const sdText = document.getElementById('tripSdStatusText');
+        const sdSpaceInfo = document.getElementById('tripSdSpaceInfo');
+        const sdFree = document.getElementById('tripSdFree');
+        const sdTotal = document.getElementById('tripSdTotal');
+        if (sdStatus) {
+            sdStatus.style.display = 'block';
+            if (s.sdCardAvailable) {
+                if (sdDot) { sdDot.classList.add('online'); sdDot.classList.remove('offline'); }
+                if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_available');
+                if (sdSpaceInfo && s.sdCardTotalSpace) {
+                    sdSpaceInfo.style.display = 'block';
+                    if (sdFree) sdFree.textContent = this.formatBytes(s.sdCardFreeSpace) + ' free';
+                    if (sdTotal) sdTotal.textContent = this.formatBytes(s.sdCardTotalSpace) + ' total';
+                }
+            } else {
+                if (sdDot) { sdDot.classList.add('offline'); sdDot.classList.remove('online'); }
+                if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_not_detected');
+                if (sdSpaceInfo) sdSpaceInfo.style.display = 'none';
+            }
+        }
+
+        // USB status row — always visible (see comment above).
+        const usbStatus = document.getElementById('tripUsbStatus');
+        const usbDot = document.getElementById('tripUsbStatusDot');
+        const usbText = document.getElementById('tripUsbStatusText');
+        const usbSpaceInfo = document.getElementById('tripUsbSpaceInfo');
+        const usbFree = document.getElementById('tripUsbFree');
+        const usbTotal = document.getElementById('tripUsbTotal');
+        if (usbStatus) {
+            usbStatus.style.display = 'block';
+            if (s.usbAvailable) {
+                if (usbDot) { usbDot.classList.add('online'); usbDot.classList.remove('offline'); }
+                if (usbText) usbText.textContent = BYD.i18n.t('recording.usb_available');
+                if (usbSpaceInfo && s.usbTotalSpace) {
+                    usbSpaceInfo.style.display = 'block';
+                    if (usbFree) usbFree.textContent = this.formatBytes(s.usbFreeSpace) + ' free';
+                    if (usbTotal) usbTotal.textContent = this.formatBytes(s.usbTotalSpace) + ' total';
+                }
+            } else {
+                if (usbDot) { usbDot.classList.add('offline'); usbDot.classList.remove('online'); }
+                if (usbText) usbText.textContent = BYD.i18n.t('recording.usb_not_detected');
+                if (usbSpaceInfo) usbSpaceInfo.style.display = 'none';
+            }
+        }
+
+        // CDR cleanup card is SD-only (BYD's built-in dashcam)
+        const cdrCard = document.getElementById('tripCdrCleanupCard');
+        if (cdrCard) cdrCard.style.display = s.storageType === 'SD_CARD' ? 'block' : 'none';
+        if (s.storageType === 'SD_CARD') this.loadCdrInfo();
+
+        this.pendingStorageType = null;
+        this.pendingStorageLimit = null;
+        this.resetApplyButton();
     },
 
     /**
@@ -1063,37 +1133,48 @@ const TRIPS = {
                 + '&limit=' + this.pageSize
                 + '&offset=' + off);
             const data = await resp.json();
-            const skel = document.getElementById('tripListSkeleton');
-            if (skel) skel.style.display = 'none';
-
-            const btn = document.getElementById('loadMoreBtn');
-            const empty = document.getElementById('tripEmptyState');
-
-            if (data.success && data.trips && data.trips.length > 0) {
-                if (off === 0) this.trips = [];
-                this.trips = this.trips.concat(data.trips);
-                this.currentOffset = this.trips.length;
-                this.renderTripList(this.trips);
-                // Short page → no more rows in this window. Server returns
-                // exactly `pageSize` only when there's at least one more page
-                // to fetch, so this is the canonical "has more" signal.
-                if (btn) btn.style.display = data.trips.length >= this.pageSize ? 'block' : 'none';
-                if (empty) empty.style.display = 'none';
-            } else if (off === 0) {
-                // No trips for this period — clear the list and show empty state.
-                this.trips = [];
-                this.renderTripList([]);
-                if (empty) empty.style.display = 'flex';
-                if (btn) btn.style.display = 'none';
-            } else {
-                // Paginating past end-of-data (data.success but no more rows).
-                // Don't touch this.trips; just hide the button.
-                if (btn) btn.style.display = 'none';
-            }
+            this._applyTripsPayload(data, off);
         } catch (e) {
             console.warn('[Trips] Load trips failed:', e);
             const skel = document.getElementById('tripListSkeleton');
             if (skel) skel.style.display = 'none';
+        }
+    },
+
+    /**
+     * Apply a /api/trips list response. {@code offset} is the offset that
+     * was sent to the server: zero resets {@code this.trips}, non-zero
+     * appends. The bootstrap path always passes {@code offset=0} (matching
+     * the server-side default in {@link TripApiHandler#handleGetBootstrap}).
+     */
+    _applyTripsPayload(data, offset) {
+        const off = offset || 0;
+        const skel = document.getElementById('tripListSkeleton');
+        if (skel) skel.style.display = 'none';
+
+        const btn = document.getElementById('loadMoreBtn');
+        const empty = document.getElementById('tripEmptyState');
+
+        if (data && data.trips && data.trips.length > 0) {
+            if (off === 0) this.trips = [];
+            this.trips = this.trips.concat(data.trips);
+            this.currentOffset = this.trips.length;
+            this.renderTripList(this.trips);
+            // Short page → no more rows in this window. Server returns
+            // exactly `pageSize` only when there's at least one more page
+            // to fetch, so this is the canonical "has more" signal.
+            if (btn) btn.style.display = data.trips.length >= this.pageSize ? 'block' : 'none';
+            if (empty) empty.style.display = 'none';
+        } else if (off === 0) {
+            // No trips for this period — clear the list and show empty state.
+            this.trips = [];
+            this.renderTripList([]);
+            if (empty) empty.style.display = 'flex';
+            if (btn) btn.style.display = 'none';
+        } else {
+            // Paginating past end-of-data (data.success but no more rows).
+            // Don't touch this.trips; just hide the button.
+            if (btn) btn.style.display = 'none';
         }
     },
 
@@ -1232,13 +1313,22 @@ const TRIPS = {
         try {
             const resp = await fetch('/api/trips/dna?days=30');
             const data = await resp.json();
-            if (data.success && data.dna) {
-                this.radarScoresCache = data.dna;
-                const canvas = document.getElementById('radarChart');
-                if (canvas) this.renderRadar(canvas, data.dna);
-                if (data.dna.overall !== undefined) this.renderScoreCircle(data.dna.overall);
-            }
+            this._applyDnaPayload(data);
         } catch (e) { console.warn('[Trips] DNA load failed:', e); }
+    },
+
+    /**
+     * Apply a /api/trips/dna response (or the matching slice of the
+     * bootstrap payload) to the radar + score-circle. {@code data.dna}
+     * may be null when the user has no scored trips yet — we then leave
+     * the cache alone instead of clobbering it with null.
+     */
+    _applyDnaPayload(data) {
+        if (!data || !data.dna) return;
+        this.radarScoresCache = data.dna;
+        const canvas = document.getElementById('radarChart');
+        if (canvas) this.renderRadar(canvas, data.dna);
+        if (data.dna.overall !== undefined) this.renderScoreCircle(data.dna.overall);
     },
 
     async loadSummary(days) {
@@ -1246,20 +1336,28 @@ const TRIPS = {
         try {
             const resp = await fetch('/api/trips/summary?days=' + d);
             const data = await resp.json();
-            if (data.success && data.summary && data.summary.length > 0) {
-                const s = data.summary[0];
-                this.setEl('summaryTrips', s.tripCount || s.trip_count || 0);
-                this.setEl('summaryDistance', BYD.units.distVal(s.totalDistanceKm || s.total_distance_km || 0).toFixed(1));
-                this.setEl('summaryTime', ((s.totalDurationSeconds || s.total_duration_seconds || 0) / 3600).toFixed(1));
-                // Compute overall from 5 sub-scores (matching backend integer division)
-                const sA = s.avgAnticipation || s.avg_anticipation || 0;
-                const sS = s.avgSmoothness || s.avg_smoothness || 0;
-                const sSD = s.avgSpeedDiscipline || s.avg_speed_discipline || 0;
-                const sE = s.avgEfficiencyScore || s.avg_efficiency_score || 0;
-                const sC = s.avgConsistency || s.avg_consistency || 0;
-                this.setEl('summaryEfficiency', Math.floor((sA + sS + sSD + sE + sC) / 5));
-            }
+            this._applySummaryPayload(data);
         } catch (e) { console.warn('[Trips] Summary load failed:', e); }
+    },
+
+    /**
+     * Apply a /api/trips/summary response to the period-summary tiles.
+     * Server returns an array of weekly rollups; we only render the most
+     * recent one (matching the legacy loadSummary behaviour).
+     */
+    _applySummaryPayload(data) {
+        if (!data || !data.summary || data.summary.length === 0) return;
+        const s = data.summary[0];
+        this.setEl('summaryTrips', s.tripCount || s.trip_count || 0);
+        this.setEl('summaryDistance', BYD.units.distVal(s.totalDistanceKm || s.total_distance_km || 0).toFixed(1));
+        this.setEl('summaryTime', ((s.totalDurationSeconds || s.total_duration_seconds || 0) / 3600).toFixed(1));
+        // Compute overall from 5 sub-scores (matching backend integer division)
+        const sA = s.avgAnticipation || s.avg_anticipation || 0;
+        const sS = s.avgSmoothness || s.avg_smoothness || 0;
+        const sSD = s.avgSpeedDiscipline || s.avg_speed_discipline || 0;
+        const sE = s.avgEfficiencyScore || s.avg_efficiency_score || 0;
+        const sC = s.avgConsistency || s.avg_consistency || 0;
+        this.setEl('summaryEfficiency', Math.floor((sA + sS + sSD + sE + sC) / 5));
     },
 
     // ==================== CLIENT-SIDE SUMMARY ====================
@@ -1476,10 +1574,27 @@ const TRIPS = {
         try {
             const resp = await fetch('/api/trips/range');
             const data = await resp.json();
+            this._applyRangePayload(data);
+        } catch (e) {
+            console.warn('[Trips] Range load failed:', e);
+            this.renderCircleGauge('rangeCircleCanvas', 0, 'rgba(14,165,233,0.2)');
+            this.renderPetrolRange(null);
+        }
+    },
+
+    /**
+     * Apply a /api/trips/range response to the range hero card. Accepts
+     * the raw handler payload or the bootstrap-stripped slice; both keep
+     * {@code range} / {@code fuelRange} / {@code totalRangeKm} at the top
+     * level. Empty / no-data responses fall through to the no-data
+     * rendering at the bottom.
+     */
+    _applyRangePayload(data) {
+        try {
             const content = document.getElementById('rangeHeroContent');
             if (!content) return;
 
-            if (data.success && data.range && data.range !== null) {
+            if (data && data.range && data.range !== null) {
                 const r = data.range;
                 this.rangeCache = r;
                 // Backend always returns km; convert to user's display unit.
@@ -1625,9 +1740,10 @@ const TRIPS = {
             // vehicle is PHEV-classified, fuel% is readable, and the user
             // has set tankCapacityL. Renders a sub-line under the hero
             // circle. BEV / unconfigured PHEV → tile hidden.
-            this.renderPetrolRange(data.fuelRange || null, data.totalRangeKm);
+            this.renderPetrolRange((data && data.fuelRange) || null,
+                                   data && data.totalRangeKm);
         } catch (e) {
-            console.warn('[Trips] Range load failed:', e);
+            console.warn('[Trips] Range apply failed:', e);
             this.renderCircleGauge('rangeCircleCanvas', 0, 'rgba(14,165,233,0.2)');
             this.renderPetrolRange(null);
         }
@@ -2203,14 +2319,11 @@ const TRIPS = {
             mapDiv.innerHTML = '';
             const map = L.map(mapDiv, { zoomControl: false, attributionControl: false });
             this.routeCompareMapInstance = map;
-            // Match the live-view map (shared/map.js): CartoCDN Voyager
-            // tiles. OSM's main tile servers reject the BYD head-unit's
-            // Android 7.1 WebView UA, so the previous URL silently 404'd
-            // / hung in-app while working in browsers.
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                maxZoom: 20,
-                subdomains: 'abcd'
-            }).addTo(map);
+            // Theme-aware CartoCDN tiles (Voyager light / dark_all dark).
+            // Helper handles the live re-swap when the theme picker flips.
+            // OSM's main tile servers reject the BYD head-unit's Android 7.1
+            // WebView UA, so we stay on CartoCDN end-to-end.
+            BYD.theme.attachMapTiles(map);
 
             const bounds = L.latLngBounds();
 
@@ -3225,14 +3338,11 @@ const TRIPS = {
             this.leafletMap.setView([points[0].la, points[0].lo], 14);
         }
 
-        // Match the live-view map (shared/map.js): CartoCDN Voyager
-        // tiles. OSM's main tile servers reject the BYD head-unit's
-        // Android 7.1 WebView UA, so the previous URL silently 404'd
-        // / hung in-app while working in browsers.
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            maxZoom: 20,
-            subdomains: 'abcd'
-        }).addTo(this.leafletMap);
+        // Theme-aware CartoCDN tiles (Voyager light / dark_all dark).
+        // Helper handles the live re-swap when the theme picker flips.
+        // OSM's main tile servers reject the BYD head-unit's Android 7.1
+        // WebView UA, so we stay on CartoCDN end-to-end.
+        BYD.theme.attachMapTiles(this.leafletMap);
 
         console.log('[Trips] Map created successfully, tiles added, bounds set');
 

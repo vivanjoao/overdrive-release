@@ -498,6 +498,10 @@ public class HttpServer {
                 if (!serveStaticFile(out, "local/byd-cloud.html")) {
                     HttpResponse.sendError(out, 404, "byd-cloud.html not found");
                 }
+            } else if (path.equals("/road-sense.html") || path.equals("/road-sense")) {
+                if (!serveStaticFile(out, "local/road-sense.html")) {
+                    HttpResponse.sendError(out, 404, "road-sense.html not found");
+                }
             } else if (path.equals("/notifications.html") || path.equals("/notifications")) {
                 if (!serveStaticFile(out, "local/notifications.html")) {
                     HttpResponse.sendError(out, 404, "notifications.html not found");
@@ -657,6 +661,11 @@ public class HttpServer {
         // MQTT API
         if (path.startsWith("/api/mqtt/")) {
             return MqttApiHandler.handle(method, path, body, out);
+        }
+
+        // RoadSense API (delete-local / delete-cloud data actions)
+        if (path.startsWith("/api/roadsense/")) {
+            return RoadSenseApiHandler.handle(method, path, body, out);
         }
 
         // Telegram bot config API (token / pairing PIN / owner / preferences).
