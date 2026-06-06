@@ -23,7 +23,7 @@
     <string name="action_select_all">Selecteer alle</string>
     <string name="action_select_all_short">Allemaal .</string>
     <string name="action_delete">Verwijderen</string>
-    <string name="action_share">Share</string>
+    <string name="action_share">Delen</string>
     <string name="action_done">Gedaan</string>
     <string name="action_remind_me_later">Herinner mij later.</string>
     <string name="action_retry">Opnieuw proberen</string>
@@ -51,13 +51,13 @@
     <string name="cd_player_maximize">Maximale speler</string>
     <string name="cd_player_minimize">Uitgang fullscreen</string>
     <string name="cd_player_mute">Tooggeluidingsgeluid</string>
-    <string name="cd_player_quadrant_all">Show all cameras</string>
-    <string name="cd_player_quadrant_front">Show front camera</string>
-    <string name="cd_player_quadrant_right">Show right camera</string>
-    <string name="cd_player_quadrant_rear">Show rear camera</string>
-    <string name="cd_player_quadrant_left">Show left camera</string>
+    <string name="cd_player_quadrant_all">Alle camera\'s weergeven</string>
+    <string name="cd_player_quadrant_front">Camera aan voorzijde tonen</string>
+    <string name="cd_player_quadrant_right">Toon rechter camera</string>
+    <string name="cd_player_quadrant_rear">Camera aan de achterkant weergeven</string>
+    <string name="cd_player_quadrant_left">Toon camera links</string>
     <string name="cd_delete">Verwijderen</string>
-    <string name="cd_share">Share</string>
+    <string name="cd_share">Delen</string>
     <string name="cd_expand">Uitbreiden</string>
     <string name="cd_configure">Configuratie</string>
     <string name="cd_download_log">Download log</string>
@@ -75,10 +75,10 @@
          translatable=false to avoid bloating the i18n catalog. The
          _cd content-descriptions are real prose and ARE translatable —
          they go through the NLLB pipeline like every other a11y string. -->
-    <string name="overlay_mode_off_cd">Stop recording</string>
-    <string name="overlay_mode_continuous_cd">Continuous recording</string>
-    <string name="overlay_mode_drive_cd">Drive-mode recording</string>
-    <string name="overlay_mode_proximity_cd">Proximity-guard recording</string>
+    <string name="overlay_mode_off_cd">Stop met opnemen</string>
+    <string name="overlay_mode_continuous_cd">Continue opname</string>
+    <string name="overlay_mode_drive_cd">Opname rij-modus</string>
+    <string name="overlay_mode_proximity_cd">Opname ximity-guard</string>
     <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
          placeholder/preview text used at design time and visible in some empty states) -->
     <string name="log_entry_default_timestamp">- Ik heb geen idee.</string>
@@ -130,19 +130,19 @@
     <string name="camera_option_5">Camera 5</string>
     <string name="camera_selection_hint">De camera 1 = BYD Seal, camera 0 = Atto trimmen. Restart de daemon na het wijzigen van de camera-ID voor de instelling om in werking te treden.</string>
     <!-- OEM Dashcam camera ID picker (Phase 5: separate forward-sensor pipeline) -->
-    <string name="camera_oem_dashcam_title">OEM Dashcam Camera ID</string>
-    <string name="camera_oem_dashcam_hint">Pick the AVMCamera id that points at the forward dashcam sensor. Dashcam is the OPPOSITE of pano: Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Leave on Auto to let OverDrive pick.</string>
-    <string name="camera_oem_dashcam_auto_resolved">Auto — using id %1$d (pano is id %2$d)</string>
-    <string name="camera_oem_dashcam_auto_unavailable">Auto — pano id is %1$d, can\'t infer dashcam</string>
-    <string name="camera_oem_dashcam_save">Save</string>
+    <string name="camera_oem_dashcam_title">OEM Dashcam cameraID</string>
+    <string name="camera_oem_dashcam_hint">Kies de AVMCamera id die wijst op de vooruit dashcam sensor. Dashcam is de pano: Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Ga automatisch op om OverDrive te laten kiezen.</string>
+    <string name="camera_oem_dashcam_auto_resolved">Automatisch - gebruik van id %1$d (pano is id %2$d)</string>
+    <string name="camera_oem_dashcam_auto_unavailable">Auto - pano id is %1$d, kan geen infer dashcam</string>
+    <string name="camera_oem_dashcam_save">Opslaan</string>
     <!-- Dashcam-side camera labels — REVERSE of the pano labels above. The
          OEM dashcam id is the opposite of the pano id, so the helpful
          "this is what your trim should pick" hint flips between the two
          dialogs. Without these strings the dashcam picker re-used the pano
          labels and told Seal owners to pick "Camera 1 — Seal" for their
          dashcam, which is the pano camera, not the dashcam. -->
-    <string name="camera_oem_option_0">Camera 0 — Seal / Han (default)</string>
-    <string name="camera_oem_option_1">Camera 1 — Atto / Tang</string>
+    <string name="camera_oem_option_0">Camera 0 – Zegel / Han (standaard)</string>
+    <string name="camera_oem_option_1">Camera 1 – Atto / Tang</string>
     <!-- Camera mapping dialog (multi-vehicle role-to-slice routing) -->
     <string name="camera_mapping_title">Kamerkaarten maken</string>
     <string name="camera_role_label">Role mapping</string>
@@ -276,29 +276,29 @@
     <string name="cd_open_filters">Open filters</string>
     <string name="cd_clear_filter">Doorzichtig filter</string>
     <!-- v5 redesign: SOTA empty state with CTA + tile type badges -->
-    <string name="recording_lib_empty_title">No recordings match</string>
-    <string name="recording_lib_empty_body">Try adjusting your date range or chip filters.</string>
-    <string name="recording_lib_empty_clear_filters">Clear filters</string>
+    <string name="recording_lib_empty_title">Geen overeenkomende opnames</string>
+    <string name="recording_lib_empty_body">Probeer uw datumbereik of chip-filters aan te passen.</string>
+    <string name="recording_lib_empty_clear_filters">Filters wissen</string>
     <!-- Shown on the empty-state body when there are zero clips on disk
          (no filter is active). Sets a friendlier tone than "No recordings match". -->
-    <string name="recording_lib_empty_disk_title">Nothing recorded yet</string>
-    <string name="recording_lib_empty_disk_body">Captures will appear here as soon as the dashcam or surveillance pipeline writes a clip.</string>
+    <string name="recording_lib_empty_disk_title">Nog niets opgenomen</string>
+    <string name="recording_lib_empty_disk_body">Opnames zullen hier verschijnen zodra de dashcam of de pijpleiding een clip schrijft.</string>
     <!-- Shown while the daemon is warming the H2 recording index on cold
          start. Includes a progress counter when the daemon reports done/total,
          otherwise a static body. The library re-polls every 1.5s and
          transitions out automatically once results land. -->
-    <string name="recording_lib_building_index_title">Building library index</string>
-    <string name="recording_lib_building_index_body">One moment while the daemon scans your recordings.</string>
-    <string name="recording_lib_building_index_progress">Indexed %1$d of %2$d clips…</string>
+    <string name="recording_lib_building_index_title">Bibliotheek index opbouwen</string>
+    <string name="recording_lib_building_index_body">Een moment terwijl de daemon uw opnames scant.</string>
+    <string name="recording_lib_building_index_progress">Geïndexeerde %1$d van %2$d clips…</string>
     <!-- Tile type badge labels — short, glanceable, mirrors the on-disk
          filename prefix (cam_/event_/dvr_/proximity_) so power users can
          map a tile back to its file group at a glance. -->
-    <string name="recording_lib_type_normal">CAM</string>
-    <string name="recording_lib_type_event">EVENT</string>
+    <string name="recording_lib_type_normal">KAN</string>
+    <string name="recording_lib_type_event">EVENEMENT</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
-    <string name="toast_share_recordings">Sharing %1$d recordings</string>
+    <string name="toast_share_recordings">Delen van %1$d opnamen</string>
     <!-- fragment_sentry_config -->
     <!-- fragment_video_player -->
     <string name="player_title_recording">Opname</string>
@@ -548,10 +548,10 @@
          notifications into one shade entry. The summary text is intentionally
          generic so it stays accurate whether all three services are running
          or only the keepalive survived an OOM respawn. -->
-    <string name="daemon_keepalive_notif_title">Overdrive Active</string>
-    <string name="daemon_keepalive_notif_text">Monitoring vehicle systems</string>
+    <string name="daemon_keepalive_notif_title">Overdrive actief</string>
+    <string name="daemon_keepalive_notif_text">Toezicht op voertuigsystemen</string>
     <string name="overdrive_status_summary_title">Overdrive</string>
-    <string name="overdrive_status_summary_text">Background services running</string>
+    <string name="overdrive_status_summary_text">Achtergrond-services worden uitgevoerd</string>
     <!-- ============================================================== -->
     <!-- M3 Revamp: navigation rail + settings sub-rail + theme picker  -->
     <!-- ============================================================== -->
@@ -571,7 +571,7 @@
     <string name="settings_section_daemons">Deemonen</string>
     <string name="settings_section_privacy">Privacy &amp; gegevens</string>
     <string name="settings_section_overlay">Statusoverlay</string>
-    <string name="settings_section_security">Security</string>
+    <string name="settings_section_security">Beveiliging</string>
     <string name="settings_overlay_subtitle">Kies welke segmenten van de drijvende statuspil zichtbaar blijven.</string>
     <string name="settings_overlay_camera_title">Camera indicator</string>
     <string name="settings_overlay_camera_subtitle">Toon het REC / PROX- badge terwijl de opname actief is.</string>
@@ -793,68 +793,68 @@
          The lock guards the OverDrive UI only. Cam daemon, AccSentry,
          surveillance, recording, Telegram alerts, status overlay, and the
          deterrent screen all run independently regardless of this state. -->
-    <string name="settings_security_title">Security</string>
-    <string name="settings_security_subtitle">Lock the OverDrive app so passengers and valets can\'t open it without your PIN.</string>
-    <string name="settings_security_stance_title">UI lock only</string>
-    <string name="settings_security_stance_body">Surveillance, recording, deterrent, alerts, and background services keep running while the app is locked. The PIN gates the OverDrive interface, nothing else.</string>
-    <string name="settings_security_overline_lock">App lock</string>
-    <string name="settings_security_overline_recovery">If you forget your PIN</string>
-    <string name="settings_security_toggle_title">Require PIN</string>
-    <string name="settings_security_toggle_subtitle_off">Off — anyone can open OverDrive.</string>
-    <string name="settings_security_toggle_subtitle_on">On — PIN required to open OverDrive.</string>
-    <string name="settings_security_change_title">Change PIN</string>
-    <string name="settings_security_change_subtitle">Confirm current PIN, then set a new one.</string>
-    <string name="settings_security_autolock_title">Auto-lock</string>
-    <string name="settings_security_autolock_immediate">Lock immediately</string>
-    <string name="settings_security_autolock_1min">After 1 minute</string>
-    <string name="settings_security_autolock_5min">After 5 minutes</string>
-    <string name="settings_security_autolock_15min">After 15 minutes</string>
-    <string name="settings_security_autolock_never">Never auto-lock by time</string>
-    <string name="settings_security_recovery_title">ADB recovery</string>
-    <string name="settings_security_recovery_body">Forgotten PIN can be cleared from a host machine over USB debugging without a factory reset. Run this command, then reopen the app.</string>
+    <string name="settings_security_title">Beveiliging</string>
+    <string name="settings_security_subtitle">Vergrendel de OverDrive app zodat passagiers en radiatorkranen deze niet kunnen openen zonder uw pincode.</string>
+    <string name="settings_security_stance_title">Alleen UI Vergrendeling</string>
+    <string name="settings_security_stance_body">Surveillance, opname, afschrikking, waarschuwingen en achtergronddiensten blijven actief terwijl de app is vergrendeld. De pincode verbindt de OverDrive interface en niets anders.</string>
+    <string name="settings_security_overline_lock">App vergrendeling</string>
+    <string name="settings_security_overline_recovery">Als je je pincode bent vergeten</string>
+    <string name="settings_security_toggle_title">Pincode vereisen</string>
+    <string name="settings_security_toggle_subtitle_off">Uit - iedereen kan OverDrive openen.</string>
+    <string name="settings_security_toggle_subtitle_on">Op — PIN vereist om OverDrive te openen.</string>
+    <string name="settings_security_change_title">Pincode wijzigen</string>
+    <string name="settings_security_change_subtitle">Bevestig huidige pincode en stel daarna een nieuwe in.</string>
+    <string name="settings_security_autolock_title">Automatisch vergrendelen</string>
+    <string name="settings_security_autolock_immediate">Onmiddellijk vergrendelen</string>
+    <string name="settings_security_autolock_1min">Na 1 minuut</string>
+    <string name="settings_security_autolock_5min">Na 5 minuten</string>
+    <string name="settings_security_autolock_15min">Na 15 minuten</string>
+    <string name="settings_security_autolock_never">Nooit automatisch vergrendelen op tijd</string>
+    <string name="settings_security_recovery_title">ADB herstel</string>
+    <string name="settings_security_recovery_body">Vergeten PIN kan worden gewist van een host machine via USB debugging zonder terugzetten naar fabrieksinstellingen. Voer deze opdracht uit en heropen de app.</string>
     <!-- Verbatim ADB command. translatable=false so the i18n pipeline
          doesn't localize the literal path/command — translators following
          Crowdin would otherwise risk breaking the only recovery path. -->
-    <string name="settings_security_dialog_set_title">Set PIN</string>
-    <string name="settings_security_dialog_set_body">Pick a 4–8 digit PIN. You\'ll need this every time you open the app.</string>
-    <string name="settings_security_dialog_disable_title">Turn off PIN lock?</string>
-    <string name="settings_security_dialog_disable_body">Confirm your current PIN to turn off the app lock.</string>
-    <string name="settings_security_dialog_change_step1_title">Confirm current PIN</string>
-    <string name="settings_security_dialog_change_step1_body">Enter your current PIN, then you\'ll set a new one.</string>
-    <string name="settings_security_action_set">Set PIN</string>
-    <string name="settings_security_action_disable">Turn off lock</string>
-    <string name="settings_security_action_continue">Continue</string>
-    <string name="settings_security_pin_hint">PIN</string>
-    <string name="settings_security_pin_confirm_hint">Confirm PIN</string>
-    <string name="settings_security_error_length">PIN must be 4 to 8 digits</string>
-    <string name="settings_security_error_numeric">Digits only</string>
-    <string name="settings_security_error_mismatch">PINs don\'t match</string>
-    <string name="settings_security_error_wrong">Wrong PIN</string>
-    <string name="settings_security_error_locked_out">Too many attempts. Try again in a moment.</string>
-    <string name="settings_security_error_persist">Couldn\'t save the PIN. Try again.</string>
-    <string name="settings_security_toast_set_ok">PIN set. App lock is on.</string>
-    <string name="settings_security_toast_disable_ok">App lock turned off.</string>
+    <string name="settings_security_dialog_set_title">Pincode instellen</string>
+    <string name="settings_security_dialog_set_body">Kies een 4-8-cijferige PIN. U heeft dit nodig elke keer als u de app opent.</string>
+    <string name="settings_security_dialog_disable_title">PIN-vergrendeling uitschakelen?</string>
+    <string name="settings_security_dialog_disable_body">Bevestig uw huidige pincode om de app vergrendeling uit te schakelen.</string>
+    <string name="settings_security_dialog_change_step1_title">Huidige pincode bevestigen</string>
+    <string name="settings_security_dialog_change_step1_body">Voer je huidige pincode in en dan stel je een nieuwe in.</string>
+    <string name="settings_security_action_set">Pincode instellen</string>
+    <string name="settings_security_action_disable">Vergrendeling uitschakelen</string>
+    <string name="settings_security_action_continue">Doorgaan</string>
+    <string name="settings_security_pin_hint">Pincode</string>
+    <string name="settings_security_pin_confirm_hint">Pincode bevestigen</string>
+    <string name="settings_security_error_length">Pincode moet uit 4 tot 8 cijfers bestaan</string>
+    <string name="settings_security_error_numeric">Alleen cijfers</string>
+    <string name="settings_security_error_mismatch">Pincodes komen niet overeen</string>
+    <string name="settings_security_error_wrong">Onjuiste pincode</string>
+    <string name="settings_security_error_locked_out">Te veel pogingen. Probeer het straks opnieuw.</string>
+    <string name="settings_security_error_persist">Kan de pincode niet opslaan. Probeer het opnieuw.</string>
+    <string name="settings_security_toast_set_ok">Pincode ingesteld. App lock is ingeschakeld.</string>
+    <string name="settings_security_toast_disable_ok">App-vergrendeling uitgeschakeld.</string>
     <!-- PIN unlock screen (PinLockActivity). Shown over MainActivity when
          the app lock is enabled and the session isn\'t fresh. -->
-    <string name="pin_lock_title">Enter PIN</string>
-    <string name="pin_lock_title_unlocked">Unlocked</string>
-    <string name="pin_lock_subtitle_default">Unlock OverDrive to continue.</string>
-    <string name="pin_lock_subtitle_wrong">Wrong PIN. Try again.</string>
-    <string name="pin_lock_subtitle_locked_out">Too many attempts. Try again shortly.</string>
+    <string name="pin_lock_title">Pincode invoeren</string>
+    <string name="pin_lock_title_unlocked">Ontgrendeld</string>
+    <string name="pin_lock_subtitle_default">Ontgrendel OverDrive om door te gaan.</string>
+    <string name="pin_lock_subtitle_wrong">Verkeerde pincode. Probeer het opnieuw.</string>
+    <string name="pin_lock_subtitle_locked_out">Te veel pogingen. Probeer het snel opnieuw.</string>
     <!-- %1$s is a formatted countdown like "30s" or "2:45". -->
-    <string name="pin_lock_subtitle_locked_out_countdown">Locked. Try again in %1$s.</string>
-    <string name="pin_lock_lockout_seconds">%1$ds</string>
+    <string name="pin_lock_subtitle_locked_out_countdown">Vergrendeld. Probeer het opnieuw in %1$s.</string>
+    <string name="pin_lock_lockout_seconds">%1$dsec</string>
     <string name="pin_lock_lockout_minutes">%1$d:%2$02d</string>
     <!-- Lock-screen recovery hint. Two-part: a translatable prose prefix
          and a translatable=false literal command (reuses the same
          settings_security_recovery_command resource so a future edit to
          the command stays in sync across both surfaces). The lock screen
          concatenates them at runtime via String.format. -->
-    <string name="pin_lock_recovery_hint_prefix">Forgot your PIN? Run from a connected computer:\n%1$s</string>
-    <string name="pin_lock_backspace_cd">Backspace</string>
+    <string name="pin_lock_recovery_hint_prefix">Pincode vergeten? Uitvoeren vanaf een verbonden computer:\n%1$s</string>
+    <string name="pin_lock_backspace_cd">Achtergrond</string>
     <plurals name="pin_lock_dot_a11y">
-        <item quantity="one">%1$d digit entered</item>
-        <item quantity="other">%1$d digits entered</item>
+        <item quantity="one">%1$d cijfers ingevoerd</item>
+        <item quantity="other">%1$d cijfers ingevoerd</item>
     </plurals>
     <!-- Place tagging (reverse geocoding) — recording row chip fallback. -->
     <string name="recording_unknown_location">Geen locatie</string>
@@ -928,45 +928,45 @@
          ============================================================ -->
     <string name="rail_roadsense">RoadSense</string>
     <string name="roadsense_title">RoadSense</string>
-    <string name="roadsense_pill_scanning">Scanning</string>
+    <string name="roadsense_pill_scanning">Scannen</string>
     <string name="roadsense_pill_idle">RoadSense</string>
-    <string name="roadsense_status_idle">Idle</string>
+    <string name="roadsense_status_idle">Inactief</string>
     <!-- VEHICLE calibration (suspension-learning) — the green/orange/red dot. Worded
          about the car, not the route, since that's what maturity actually measures. -->
-    <string name="roadsense_cal_learning">Learning your vehicle</string>
-    <string name="roadsense_cal_ready">Vehicle calibrated</string>
-    <string name="roadsense_cal_partial">Calibration improving</string>
+    <string name="roadsense_cal_learning">Uw voertuig leren</string>
+    <string name="roadsense_cal_ready">Voertuig gekalibreerd</string>
+    <string name="roadsense_cal_partial">Verbeter kalibratie</string>
     <!-- Idle caption — ROUTE coverage (distinct from vehicle calibration). "Clear
          ahead" only when we've actually mapped this stretch; "New road" when we
          haven't, so an unsurveyed road isn't mistaken for confirmed-safe. -->
-    <string name="roadsense_clear_ahead">Clear ahead</string>
-    <string name="roadsense_road_mapped">Road mapped · clear</string>
-    <string name="roadsense_road_new">New road · learning</string>
-    <string name="roadsense_unit_meters">m</string>
+    <string name="roadsense_clear_ahead">Vooruit wissen</string>
+    <string name="roadsense_road_mapped">Verkeerskaart · helder</string>
+    <string name="roadsense_road_new">Nieuwe weg · leren</string>
+    <string name="roadsense_unit_meters">min</string>
     <string name="roadsense_dash_distance">—</string>
-    <string name="roadsense_warn_label">Warn</string>
-    <string name="roadsense_toggle_audio">Audio</string>
-    <string name="roadsense_toggle_visual">Visual</string>
+    <string name="roadsense_warn_label">Waarschuwen</string>
+    <string name="roadsense_toggle_audio">Geluid</string>
+    <string name="roadsense_toggle_visual">Visueel</string>
     <!-- severity / type readouts (formatted at runtime) -->
-    <string name="roadsense_sev_minor">Minor</string>
-    <string name="roadsense_sev_moderate">Moderate</string>
-    <string name="roadsense_sev_severe">Severe</string>
-    <string name="roadsense_type_breaker">Speed breaker</string>
-    <string name="roadsense_type_pothole">Pothole</string>
-    <string name="roadsense_type_hazard">Hazard</string>
-    <string name="roadsense_type_rough">Rough section</string>
+    <string name="roadsense_sev_minor">Klein</string>
+    <string name="roadsense_sev_moderate">Matig</string>
+    <string name="roadsense_sev_severe">Ernstig</string>
+    <string name="roadsense_type_breaker">Snelheid onderbreker</string>
+    <string name="roadsense_type_pothole">Pothoek</string>
+    <string name="roadsense_type_hazard">Risico</string>
+    <string name="roadsense_type_rough">Ruwe sectie</string>
     <!-- "Moderate · Pothole" style line -->
     <string name="roadsense_hazard_format">%1$s · %2$s</string>
     <!-- Zone readouts (D-032): cluster of hazards announced as one. -->
     <!-- "3 bumps ahead" — %1$d = count -->
-    <string name="roadsense_zone_count">%1$d bumps ahead</string>
+    <string name="roadsense_zone_count">%1$d stapels vooruit</string>
     <!-- "Rough section · 40 m" — %1$d = length in metres -->
-    <string name="roadsense_zone_rough">Rough section · %1$d m</string>
+    <string name="roadsense_zone_rough">Ruwe sectie · %1$d m</string>
     <!-- Calibration-Mode confirm card (R-OVL-6) -->
-    <string name="roadsense_confirm_prompt">Was this a hazard?</string>
-    <string name="roadsense_confirm_reject">Not a hazard</string>
-    <string name="roadsense_confirm_accept">Confirm</string>
+    <string name="roadsense_confirm_prompt">Was dit een gevaar?</string>
+    <string name="roadsense_confirm_reject">Geen gevaar</string>
+    <string name="roadsense_confirm_accept">Bevestigen</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
-    <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <string name="roadsense_cd_cal_level">Route kalibratieniveau</string>
+    <string name="roadsense_cd_direction">Richting naar volgend gevaar</string>
 </resources>
