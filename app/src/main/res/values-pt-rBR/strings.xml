@@ -395,7 +395,7 @@
     <string name="update_picker_current_suffix">%1$s (instalado)</string>
     <string name="update_picker_older_suffix">%1$s (antigo)</string>
     <!-- Update progress (title + per-step status; no emoji — state icon carries the cue) -->
-    <string name="update_progress_title">Atualizando Sobrecarga</string>
+    <string name="update_progress_title">Atualizando Overdrive</string>
     <string name="update_step_downloading">Baixando atualização…</string>
     <string name="update_step_verifying">Verificando o download…</string>
     <string name="update_step_stopping">Parando daemons…</string>
@@ -608,7 +608,7 @@
          notifications into one shade entry. The summary text is intentionally
          generic so it stays accurate whether all three services are running
          or only the keepalive survived an OOM respawn. -->
-    <string name="daemon_keepalive_notif_title">Sobrecarga ativa</string>
+    <string name="daemon_keepalive_notif_title">Overdrive ativa</string>
     <string name="daemon_keepalive_notif_text">Sistemas de monitoramento</string>
     <string name="overdrive_status_summary_title">Sobrecarga</string>
     <string name="overdrive_status_summary_text">Serviços em segundo plano em execução</string>
