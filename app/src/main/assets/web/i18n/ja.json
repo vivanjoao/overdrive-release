@@ -51,7 +51,7 @@
     "road_sense": "RoadSense"
   },
   "road_sense": {
-    "page_title": "ロードセンスの設定",
+    "page_title": "RoadSense 設定",
     "tab_general": "全般",
     "tab_map": "地図",
     "tab_warnings": "警告",
@@ -99,7 +99,7 @@
     "saved": "保存しました",
     "save_failed": "保存に失敗しました",
     "master_title": "RoadSense",
-    "master_enable": "ロードセンスを有効化",
+    "master_enable": "RoadSense を有効化",
     "master_enable_desc": "道路の危険性(バンプ、穴、スピードブレーカー)を運動やGPSから検出し、既知のものより先に警告します。 他のすべてのRoadSense設定は有効な間のみ有効になります。",
     "map_title": "地図",
     "map_open": "地図を開く",
@@ -137,7 +137,7 @@
     "map_cluster_off": "オフ",
     "calibration_title": "キャリブレーションモード",
     "calibration_enable": "オーバーレイで検出を確認する",
-    "calibration_enable_desc": "検出された各ハザードをスクリーンオーバーレイに表示し、確認/正しいボタンを使用してRodSenseにどの検出が本物かを教えることができます。 いくつかのドライブにこれを使用して、あなたの車両の検出を調整し、それをオフにします。",
+    "calibration_enable_desc": "検出された各ハザードをスクリーンオーバーレイに表示し、確認/正しいボタンを使用して RoadSense にどの検出が本物かを教えることができます。 いくつかのドライブにこれを使用して、あなたの車両の検出を調整し、それをオフにします。",
     "overlay_title": "On-screen overlay",
     "overlay_show": "画面上にオーバーレイを表示",
     "overlay_show_desc": "フローティング RoadSenseピルとハザードカードを画面に表示します。 これをオフにして非表示にする — 検出、音声警告、およびクラウドソーシングはバックグラウンドで実行され続けます。オンスクリーンディスプレイのみが非表示になります。",
