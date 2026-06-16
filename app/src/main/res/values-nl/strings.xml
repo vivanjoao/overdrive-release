@@ -1061,7 +1061,7 @@
     <!-- Snackbar / toast confirmations -->
     <string name="roadsense_map_confirmed_toast">Risico bevestigd</string>
     <string name="roadsense_map_deleted_toast">Risico verwijderd</string>
-    <string name="roadsense_map_action_failed">RoadSens kon niet worden bereikt. Probeer het opnieuw.</string>
+    <string name="roadsense_map_action_failed">RoadSense kon niet worden bereikt. Probeer het opnieuw.</string>
     <string name="roadsense_map_no_location">Waiting for GPS fix…</string>
     <!-- Navigation: search + routing + turn-by-turn -->
     <string name="roadsense_map_search_hint">Zoek bestemming</string>
