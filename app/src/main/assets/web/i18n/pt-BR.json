@@ -22,7 +22,7 @@
     "byd_cloud_title": "Nuvem BYD - OverDrive",
     "telegram_title": "Telegram - OverDrive",
     "dashboard_title": "Painel de controle - OverDrive",
-    "road_sense_title": "RoadSense - OverDrive"
+    "road_sense_title": "RoadSense - Overdrive"
   },
   "nav": {
     "dashboard": "Painel",
@@ -48,7 +48,7 @@
     "about_group": "Sobre",
     "brand_home": "OverDrive — abrir Painel",
     "telegram": "Telegram",
-    "road_sense": "RoadSense"
+    "road_sense": "Sentido"
   },
   "road_sense": {
     "page_title": "Configurações de RoadSense",
@@ -68,7 +68,7 @@
     "bs_display_cluster": "Grupo de motoristas",
     "bs_cluster_layout": "Layout do cluster",
     "bs_cluster_layout_desc": "Combine isso com o tamanho do seu agrupamento de instrumentos. Se a visão projetada parecer esticada ou cortada, tente outra opção.",
-    "bs_layout_1025": "10.25\" cluster",
+    "bs_layout_1025": "Tela 10.25\"",
     "bs_layout_123": "12.3\" agrupamento",
     "bs_layout_88": "8.8\" agrupamento",
     "bs_size": "Overlay size",
@@ -98,7 +98,7 @@
     "bs_needs_overlay": "Permitir \"exibir sobre outros apps\" para mostrar o ponto de vista cego",
     "saved": "Salvo",
     "save_failed": "Falha ao salvar",
-    "master_title": "RoadSense",
+    "master_title": "Sentido",
     "master_enable": "Habilitar RoadSense",
     "master_enable_desc": "Detecta perigos na estrada (propulsões, potholes, disjuntores de velocidade) de movimento e GPS, e avisa você antes dos conhecidos. Todas as outras configurações de RoadSense só terão efeito enquanto isto estiver ativado.",
     "map_title": "Mapear",
