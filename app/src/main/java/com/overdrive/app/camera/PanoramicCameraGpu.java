@@ -767,31 +767,23 @@ public class PanoramicCameraGpu {
             try {
                 initializeGl();
 
-                // SOTA FIX: Check for native app activity during initial startup if ACC is ON.
-                // If the system AVM or DVR is starting up, we must let it have the primary slot
-                // to avoid "no signal" issues. We wait up to 3 seconds for it to claim the slot.
+                // SOTA FIX: Delay camera opening if ACC is ON to prevent AVM "no signal".
+                // We wait for the system app to claim the primary slot first.
                 if (AccMonitor.isAccOn() && cameraCoordinator != null && cameraCoordinator.isRegistered()) {
-                    logger.info("Startup: ACC is ON, checking for native app activity before opening...");
+                    logger.info("Startup: ACC is ON, waiting for system camera apps to initialize...");
                     long deadline = System.currentTimeMillis() + 3000;
-                    boolean nativeActive = false;
                     while (System.currentTimeMillis() < deadline) {
                         if (cameraCoordinator.checkNativeAppActive()) {
-                            nativeActive = true;
+                            logger.info("Startup: native AVM app detected — will attach as secondary consumer");
+                            // Wait a bit more for it to fully settle
+                            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
                             break;
                         }
                         try { Thread.sleep(500); } catch (InterruptedException ignored) {}
                     }
-                    
-                    if (nativeActive) {
-                        logger.info("Startup: native AVM app detected — yielding immediately");
-                        cameraYielded = true;
-                        startYieldPoller();
-                    }
                 }
 
-                if (!cameraYielded) {
-                    startCamera();
-                }
+                startCamera();
 
                 // SOTA: Setup event callback for HAL error detection (-10086, 8)
                 if (cameraCoordinator != null && cameraObj != null) {
