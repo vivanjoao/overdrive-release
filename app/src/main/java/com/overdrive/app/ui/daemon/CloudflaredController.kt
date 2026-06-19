@@ -29,6 +29,16 @@ class CloudflaredController(
     
     override fun start(callback: DaemonCallback) {
         if (!isConfigured()) {
+            // SOTA: Reset state if misconfigured to allow user to retry
+            if (com.overdrive.app.config.CloudflaredPaidConfig.isPaidVersion() && 
+                com.overdrive.app.config.CloudflaredPaidConfig.getToken().isEmpty()) {
+                val resetConfig = org.json.JSONObject()
+                resetConfig.put("isPaid", false)
+                resetConfig.put("token", "")
+                Thread {
+                    com.overdrive.app.config.UnifiedConfigManager.setCloudflared(resetConfig)
+                }.start()
+            }
             callback.onError("Paid version requires a token")
             return
         }

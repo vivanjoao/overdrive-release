@@ -10,6 +10,7 @@ import android.os.HandlerThread;
 import android.view.Surface;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.monitor.AccMonitor;
 import com.overdrive.app.surveillance.GpuDownscaler;
 import com.overdrive.app.surveillance.FoveatedCropper;
 import com.overdrive.app.surveillance.GpuMosaicRecorder;
@@ -736,17 +737,12 @@ public class PanoramicCameraGpu {
                     }
                 }
             });
-            // Esco-parity: skip IBYDCameraService binder registration on
-            // dilink4 (byd_apa). Esco never touches the bydcameramanager
-            // service — it opens AVMCamera directly. The arbitration
-            // protocol may require an IBYDCameraUser.onYield ack we never
-            // send; the HAL can stay in "waiting for user-ack" state and
-            // refuse to stream frames. See audit Top-5 #5.
-            if (!USE_ESCO_SURFACE_TEXTURE_PATH) {
-                cameraCoordinator.register();
-            } else {
-                logger.info("dilink4: skipping IBYDCameraService registration (esco-parity)");
-            }
+            
+            // SOTA: Always register with IBYDCameraService so we can poll for native app activity.
+            // BydCameraCoordinator.register() only connects to the service; it does NOT
+            // participate in arbitration (registerUser is disabled there), so it's safe
+            // even on dilink4 boards.
+            cameraCoordinator.register();
         }
         
         // Start GL thread
@@ -770,7 +766,32 @@ public class PanoramicCameraGpu {
         glHandler.post(() -> {
             try {
                 initializeGl();
-                startCamera();
+
+                // SOTA FIX: Check for native app activity during initial startup if ACC is ON.
+                // If the system AVM or DVR is starting up, we must let it have the primary slot
+                // to avoid "no signal" issues. We wait up to 3 seconds for it to claim the slot.
+                if (AccMonitor.isAccOn() && cameraCoordinator != null && cameraCoordinator.isRegistered()) {
+                    logger.info("Startup: ACC is ON, checking for native app activity before opening...");
+                    long deadline = System.currentTimeMillis() + 3000;
+                    boolean nativeActive = false;
+                    while (System.currentTimeMillis() < deadline) {
+                        if (cameraCoordinator.checkNativeAppActive()) {
+                            nativeActive = true;
+                            break;
+                        }
+                        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                    }
+                    
+                    if (nativeActive) {
+                        logger.info("Startup: native AVM app detected — yielding immediately");
+                        cameraYielded = true;
+                        startYieldPoller();
+                    }
+                }
+
+                if (!cameraYielded) {
+                    startCamera();
+                }
 
                 // SOTA: Setup event callback for HAL error detection (-10086, 8)
                 if (cameraCoordinator != null && cameraObj != null) {

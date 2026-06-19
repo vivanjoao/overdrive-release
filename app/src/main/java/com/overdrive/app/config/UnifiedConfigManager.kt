@@ -114,6 +114,17 @@ object UnifiedConfigManager {
             Log.i(TAG, "Unified config not found, migrating from legacy configs...")
             migrateFromLegacy()
         } else {
+            // SOTA: Always re-assert 666 if we're the daemon. If the app
+            // process wrote the file during the update window, it might
+            // have different permissions than we expect on some builds (DiLink 3).
+            if (android.os.Process.myUid() == SHELL_DAEMON_UID) {
+                try {
+                    configFile.setReadable(true, false)
+                    configFile.setWritable(true, false)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to re-assert permissions: ${e.message}")
+                }
+            }
             Log.i(TAG, "Unified config exists at $CONFIG_PATH")
             loadConfig()
         }
@@ -633,10 +644,10 @@ object UnifiedConfigManager {
                     // nested keys wouldn't exist.
                     //
                     // Detect "needs migration" cheaply (legacy key at the
-                    // top of geocoding) so non-migrating loads stay zero-
-                    // overhead.
+                    // top of geocoding, or missing new sections).
                     val migrationNeeded = run {
-                        val geo = config.optJSONObject("geocoding") ?: return@run false
+                        if (!config.has("cloudflared")) return@run true
+                        val geo = config.optJSONObject("geocoding") ?: return@run true
                         geo.has("enabled") || geo.has("allowOnline")
                             || geo.has("customNominatimBase")
                             || geo.has("nominatimCooldownUntilMs")

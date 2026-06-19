@@ -1,6 +1,7 @@
 package com.overdrive.app.config
 
 import android.content.Context
+import androidx.fragment.app.FragmentActivity
 import android.view.LayoutInflater
 import android.widget.EditText
 import android.widget.Toast
@@ -104,6 +105,7 @@ object CloudflaredPaidConfig {
      * Show the Cloudflared settings dialog.
      */
     fun showSettingsDialog(context: Context, daemonsViewModel: DaemonsViewModel) {
+        val activity = context as? FragmentActivity
         val inflater = LayoutInflater.from(context)
         val dialogView = inflater.inflate(R.layout.dialog_cloudflared_settings, null)
 
@@ -133,7 +135,10 @@ object CloudflaredPaidConfig {
             .setView(dialogView)
             .setPositiveButton(context.getString(R.string.dialog_save)) { _, _ ->
                 val paid = swPaid.isChecked
-                val token = etToken.text?.toString()?.trim() ?: ""
+                // SOTA: Tokens often contain newlines if copied from a terminal or
+                // wrapped text. Strip ALL whitespace to prevent breaking the IPC
+                // protocol (which is newline-delimited JSON).
+                val token = etToken.text?.toString()?.replace("\\s".toRegex(), "") ?: ""
 
                 if (paid && token.isEmpty()) {
                     Toast.makeText(context, context.getString(R.string.toast_cloudflared_token_cannot_be_empty), Toast.LENGTH_SHORT).show()
@@ -144,25 +149,34 @@ object CloudflaredPaidConfig {
 
                     // Save to unified config (atomic write via daemon IPC if called from app)
                     Thread {
-                        UnifiedConfigManager.setCloudflared(newConfig)
-                        // Allow write to settle
-                        Thread.sleep(200)
+                        val success = UnifiedConfigManager.setCloudflared(newConfig)
                         
-                        // RESTART tunnel if it was running to apply changes immediately
-                        daemonsViewModel.getState(DaemonType.CLOUDFLARED_TUNNEL)?.let { state ->
-                            if (state.status == com.overdrive.app.ui.model.DaemonStatus.RUNNING || 
-                                state.status == com.overdrive.app.ui.model.DaemonStatus.STARTING) {
-                                // Stop then start to force new URL extraction
-                                daemonsViewModel.stopDaemon(DaemonType.CLOUDFLARED_TUNNEL)
-                                Thread.sleep(500)
-                                daemonsViewModel.startDaemon(DaemonType.CLOUDFLARED_TUNNEL)
+                        activity?.runOnUiThread {
+                            if (success) {
+                                Toast.makeText(context, context.getString(R.string.toast_cloudflared_saved_settings), Toast.LENGTH_SHORT).show()
                             } else {
-                                daemonsViewModel.refreshDaemonStatus(DaemonType.CLOUDFLARED_TUNNEL)
+                                Toast.makeText(context, "ERROR: Could not save Cloudflared settings. Check if Camera Daemon is running.", Toast.LENGTH_LONG).show()
                             }
-                        } ?: daemonsViewModel.refreshDaemonStatus(DaemonType.CLOUDFLARED_TUNNEL)
+                        }
+
+                        if (success) {
+                            // Allow write to settle
+                            Thread.sleep(200)
+                            
+                            // RESTART tunnel if it was running to apply changes immediately
+                            daemonsViewModel.getState(DaemonType.CLOUDFLARED_TUNNEL)?.let { state ->
+                                if (state.status == com.overdrive.app.ui.model.DaemonStatus.RUNNING || 
+                                    state.status == com.overdrive.app.ui.model.DaemonStatus.STARTING) {
+                                    // Stop then start to force new URL extraction
+                                    daemonsViewModel.stopDaemon(DaemonType.CLOUDFLARED_TUNNEL)
+                                    Thread.sleep(500)
+                                    daemonsViewModel.startDaemon(DaemonType.CLOUDFLARED_TUNNEL)
+                                } else {
+                                    daemonsViewModel.refreshDaemonStatus(DaemonType.CLOUDFLARED_TUNNEL)
+                                }
+                            } ?: daemonsViewModel.refreshDaemonStatus(DaemonType.CLOUDFLARED_TUNNEL)
+                        }
                     }.start()
-                    
-                    Toast.makeText(context, context.getString(R.string.toast_cloudflared_saved_settings), Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton(context.getString(R.string.action_cancel), null)
