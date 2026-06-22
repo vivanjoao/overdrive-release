@@ -109,7 +109,7 @@ public class PanoramicCameraGpu {
     private static Method sRmTextureMethod;
     private static boolean sReflectionInitialized = false;
 
-    // Array imutável estático para evitar alocações recorrentes
+    // Static immutable array to avoid recurring allocations
     private static final float[] DEFAULT_OFFSETS = new float[]{0.75f, 0.50f, 0.00f, 0.25f};
 
     private static synchronized void ensureReflectionCache() {
@@ -121,7 +121,7 @@ public class PanoramicCameraGpu {
                 sRmTextureMethod.setAccessible(true);
             } catch (NoSuchMethodException ignored) {}
         } catch (Throwable t) {
-            DaemonLogger.getInstance("PanoramicCameraGpu").warn("Falha ao inicializar cache de reflexão: " + t.getMessage());
+            DaemonLogger.getInstance("PanoramicCameraGpu").warn("Failed to initialize reflection cache: " + t.getMessage());
         }
         sReflectionInitialized = true;
     }
@@ -1375,15 +1375,11 @@ public class PanoramicCameraGpu {
      *  Legacy path: only steps 5+6 — BydCameraCoordinator.closeCamera. */
     private void closeCameraForPath(Object cam) {
         if (cam == null) return;
+        // Release our viewpoint token. Mirrors esco C5920a.m26747m.
+        // Observer-set semantics: this only writes viewpoint=0 if we were the last holder.
+        BydApaViewpointHelper.release(viewpointToken);
+
         if (USE_ESCO_SURFACE_TEXTURE_PATH) {
-            // Step 1 — release our viewpoint token. Mirrors esco C5920a.m26747m
-            // (gl/C5920a.java:323 — C6498a.f26622a.m28933k(this)). Observer-set
-            // semantics: this only writes viewpoint=0 + disableDevice if WE were
-            // the last holder. If a sentry-restart caller acquired its own token
-            // before stop() was invoked (ACC-OFF straddle), the set stays
-            // non-empty and the HAL is never told to drop mosaic — that's what
-            // keeps frames flowing across the close+reopen on this car.
-            BydApaViewpointHelper.release(viewpointToken);
             // Step 2 — remove our texture binding from the HAL.
             detachSurfaceTextureFromCamera(cam);
             // Steps 3+4 — null callback proxies on the AVMCamera.
@@ -1688,31 +1684,15 @@ public class PanoramicCameraGpu {
             cameraCoordinator.notifyPreOpenCamera();
         }
 
-        // esco-parity: tell the BYDAutoManager Panorama device (1031) to switch
-        // its viewpoint to mosaic-output BEFORE opening AVMCamera. On byd_apa /
-        // apa firmware variants the HAL boots in single-camera (dashcam) mode
-        // and stays there until this setIntArray write flips it. Mirrors esco
-        // gl.C5920a.mo26750v:386-388.
-        //
-        // Gated on the DiLink 4 path: on legacy pano_h/pano_l boards the
-        // disable counterpart in closeCameraForPath is also gated, so we
-        // keep the pair symmetric. The helper would warn-log on legacy
-        // anyway (no panorama device exposed), but skipping the call also
-        // skips a binder round-trip per camera open.
-        if (USE_ESCO_SURFACE_TEXTURE_PATH) {
-            // Acquire our viewpoint token. Mirrors esco C5920a.mo26750v
-            // (gl/C5920a.java:387 — C6498a.f26622a.m28930h(this)). If
-            // we're the only holder this writes viewpoint=2012 and registers
-            // the listener; if a sentry-restart caller is already holding a
-            // token, this just re-issues the viewpoint write idempotently
-            // (matches esco's "size>1 already, no enableDevice/listener" branch).
-            BydApaViewpointHelper.acquire(viewpointToken);
+        // Re-assert viewpoint to mosaic output. On DiLink 3/4/5/6 builds the HAL
+        // often needs this before opening or frames are black/no-signal on the AVM.
+        // The helper handles missing device support gracefully.
+        BydApaViewpointHelper.acquire(viewpointToken);
 
-            // Release the static sentry-bridge token NOW (set transitions
-            // bridge+pano → pano on the same lock acquire as our add — no
-            // empty-set window). Idempotent + harmless if no bridge was held.
-            releaseSentryBridgeViewpoint();
-        }
+        // Release the static sentry-bridge token NOW (set transitions
+        // bridge+pano → pano on the same lock acquire as our add — no
+        // empty-set window). Idempotent + harmless if no bridge was held.
+        releaseSentryBridgeViewpoint();
 
         Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
 
@@ -2006,10 +1986,10 @@ public class PanoramicCameraGpu {
         try {
             st.updateTexImage();
         } catch (IllegalStateException e) {
-            // OTIMIZAÇÃO: O BufferQueue pode ser abandonado pelo HAL da BYD de forma
-            // assíncrona (especialmente durante transições de marcha ou abertura do AVM).
-            // Fazer o drop do frame graciosamente evita que a GL Thread exploda.
-            logger.warn("BufferQueue abandonado pelo HAL, ignorando frame: " + e.getMessage());
+            // OPTIMIZATION: The BufferQueue can be abandoned by the BYD HAL asynchronously
+            // (especially during gear transitions or AVM opening).
+            // Dropping the frame gracefully prevents the GL Thread from exploding.
+            logger.warn("BufferQueue abandoned by HAL, ignoring frame: " + e.getMessage());
             return false;
         } catch (Throwable t) {
             logger.warn("updateTexImage failed: " + t.getMessage());
@@ -2194,8 +2174,8 @@ public class PanoramicCameraGpu {
         probeFrameCount++;
         if (probeFrameCount % PROBE_EVERY_N_FRAMES != 0) return;
 
-        // OTIMIZAÇÃO: A leitura síncrona glReadPixels foi desativada para evitar
-        // pipeline flushes na GPU Adreno, eliminando stutters a cada 1 segundo.
+        // OPTIMIZATION: Synchronous glReadPixels reading was disabled to avoid
+        // GPU pipeline flushes on Adreno, eliminating stutters every 1 second.
         /*
         if (!ensureProbeResources()) return;
         if (cameraTextureId == 0) return;
@@ -2511,9 +2491,9 @@ public class PanoramicCameraGpu {
             synchronized (frameSync) {
                 if (!imagePending && !stFramePending) {
                     try {
-                        // Retornado para 100ms. O timeout de 50ms causava dessincronização
-                        // e "spinning" do Handler, quebrando o frame pacing.
-                        frameSync.wait(100);
+                        // Reduced to 40ms to improve reactivity on DiLink 3.
+                        // 100ms was too long and could lead to jitter/stuttering.
+                        frameSync.wait(40);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -3019,19 +2999,19 @@ public class PanoramicCameraGpu {
                 releaseAiLaneOnGlThread();
             }
             AiLaneGl localAiLane = aiLaneGl;
-            // PASS 2 + 3: AI lane - Apenas trata a sinalização da thread secundária
+            // PASS 2 + 3: AI lane - Only handles signaling for the secondary thread
             if (localAiLane != null && localAiLane.isRunning() && aiLaneNeeded) {
                 if (cameraFrameSeq.get() % AI_READBACK_FRAME_MODULO == 0) {
-                    // Força o despacho imediato dos comandos GL pendentes nesta thread
-                    // antes que a thread de IA tente ler a textura compartilhada
+                    // Force immediate dispatch of pending GL commands on this thread
+                    // before the AI thread tries to read the shared texture
                     android.opengl.GLES20.glFlush();
                     localAiLane.notifyFrame(cameraFrameSeq.get());
                 }
             }
 
-            // CORREÇÃO DEFINITIVA: O glFlush() tem de ser totalmente ISOLADO e INCONDICIONAL.
-            // Executado no final do frame, garante que tanto os comandos do Encoder (gravação)
-            // como os do AVM (ecrã do carro) sejam despachados imediatamente para a GPU.
+            // DEFINITIVE FIX: glFlush() must be fully ISOLATED and UNCONDITIONAL.
+            // Executed at the end of the frame, it ensures that both Encoder (recording)
+            // and AVM (car screen) commands are dispatched immediately to the GPU.
             android.opengl.GLES20.glFlush();
 
             // Per-stage timing roll-up. Track only the worst frame per 30 s
@@ -3372,23 +3352,15 @@ public class PanoramicCameraGpu {
                             // Reset lastFrameTime to prevent repeated triggers
                             lastFrameTime = now;
 
-                            // ESCO-PARITY: dilink4 has NO frame-stall-driven
-                            // restart. esco's PanoCameraRecord (`gl/C5920a.java`,
-                            // `PanoCameraRecordService.java:174-200`) only
-                            // restarts on actual `onCameraError` HAL events,
-                            // capped at 5 retries with backoff. There is NO
-                            // 4 s no-frame watchdog in esco. On parked cars
-                            // the HAL routinely pauses frame emission (no
-                            // consumer, AVC reaped) and a stall-driven
-                            // close+reopen produces the all-zero frames the
-                            // user reports. The HAL onEvent path
-                            // (BydCameraCoordinator → onCameraError) still
-                            // catches genuine fatal events (8/1000/1002) and
-                            // routes through the throttled restart at
-                            // line 547 (DILINK4_ERROR_RESTART_MIN_INTERVAL_MS).
-                            boolean dilink4SkipStallRestart = USE_ESCO_SURFACE_TEXTURE_PATH;
-                            if (dilink4SkipStallRestart) {
-                                logger.info("Frame stall on dilink4 — NOT restarting (esco-parity, await real HAL error)");
+                            // NO-SIGNAL GUARD: On DiLink 3/4/5/6, re-asserting the viewpoint
+                            // can often restore the AVM signal on the car's screen without
+                            // needing a full camera restart.
+                            logger.info("Frame stall detected — re-asserting viewpoint (no-signal recovery)");
+                            BydApaViewpointHelper.acquire(viewpointToken);
+
+                            boolean skipFullRestart = USE_ESCO_SURFACE_TEXTURE_PATH;
+                            if (skipFullRestart) {
+                                logger.info("Stall on dilink4+ — viewpoint re-asserted, awaiting HAL recovery");
                             } else if (cameraCoordinator != null) {
                                 if (nativeActive) {
                                     // Contention path: require consecutive stalls before yielding
@@ -4288,8 +4260,8 @@ public class PanoramicCameraGpu {
             }
         }
 
-        try { stopWindshieldCameraOnGlThread(); } catch (Throwable t) { logger.warn("Erro windshield em releaseGl: " + t.getMessage()); }
-        try { releaseCameraConsumer(); } catch (Throwable t) { logger.warn("Erro consumer em releaseGl: " + t.getMessage()); }
+        try { stopWindshieldCameraOnGlThread(); } catch (Throwable t) { logger.warn("Windshield error in releaseGl: " + t.getMessage()); }
+        try { releaseCameraConsumer(); } catch (Throwable t) { logger.warn("Consumer error in releaseGl: " + t.getMessage()); }
 
         if (imageReaderThread != null) {
             try { imageReaderThread.quitSafely(); } catch (Throwable ignored) {}
@@ -4302,14 +4274,14 @@ public class PanoramicCameraGpu {
                 GlUtil.deleteTexture(cameraTextureId);
                 cameraTextureId = 0;
             }
-        } catch (Throwable t) { logger.warn("Erro ao deletar cameraTextureId: " + t.getMessage()); }
+        } catch (Throwable t) { logger.warn("Error deleting cameraTextureId: " + t.getMessage()); }
 
         try {
             if (windshieldTextureId != 0) {
                 GlUtil.deleteTexture(windshieldTextureId);
                 windshieldTextureId = 0;
             }
-        } catch (Throwable t) { logger.warn("Erro ao deletar windshieldTextureId: " + t.getMessage()); }
+        } catch (Throwable t) { logger.warn("Error deleting windshieldTextureId: " + t.getMessage()); }
 
         try {
             if (probeFbo != 0) {
@@ -4336,17 +4308,17 @@ public class PanoramicCameraGpu {
             if (dummySurface != null && eglCore != null) {
                 eglCore.destroySurface(dummySurface);
             }
-        } catch (Throwable t) { logger.warn("Erro ao destruir dummySurface: " + t.getMessage()); }
+        } catch (Throwable t) { logger.warn("Error destroying dummySurface: " + t.getMessage()); }
         dummySurface = null;
 
         try {
             if (eglCore != null) {
                 eglCore.release();
             }
-        } catch (Throwable t) { logger.warn("Erro crítico ao liberar eglCore: " + t.getMessage()); }
+        } catch (Throwable t) { logger.warn("Critical error releasing eglCore: " + t.getMessage()); }
         eglCore = null;
 
-        logger.info("OpenGL resources released (Teardown fortificado com sucesso)");
+        logger.info("OpenGL resources released (Fortified teardown successful)");
     }
 
     /**
@@ -4786,7 +4758,7 @@ public class PanoramicCameraGpu {
             logger.warn("sampleFullResMosaicJpeg early-exit sampler=" + (sampler != null) + " textureId=" + cameraTextureId);
             return null;
         }
-        // Usa a referência imutável estática em vez de alocar arrays curtos e clonar continuamente
+        // Use the static immutable reference instead of allocating short arrays and cloning continuously
         float[] offsets = quadrantStripOffsetX != null ? quadrantStripOffsetX : DEFAULT_OFFSETS;
         return sampler.sampleFullMosaicJpeg(cameraTextureId, width, height, offsets);
     }
