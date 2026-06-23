@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">代币是安全存储的,并且在应用程序和代モン进程之间共享.</string>
     <string name="zrok_reset_environment">重置Zrok环境</string>
     <string name="zrok_reset_environment_desc">您需要使用您的代币重新启用 (使用设备插槽).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">令牌安全地存储并在应用程序和守护进程之间共享。</string>
-    <string name="cloudflared_token_hint">输入云端令牌</string>
-    <string name="cloudflare_paid_version">Cloudflare已付费版本</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">重新设置数据</string>
     <string name="reset_subtitle">按类别清除积累的数据</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">严重性</string>
     <string name="recording_lib_filter_section_type">类型</string>
     <string name="recording_lib_filter_section_place">地方</string>
+    <string name="recording_lib_filter_section_storage">存储</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">内部设置</string>
+    <string name="recording_lib_storage_filter_sd">SD 卡</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">正常</string>
     <string name="recording_lib_chip_type_proximity">邻近度</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">物品栏</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">SD</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">内置</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">正在分享 %1$d 录音</string>
     <!-- fragment_sentry_config -->
@@ -505,10 +512,6 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">:globe_with_meridians：云端设置</string>
-    <string name="dialog_cloudflared_settings_message">定义您是在使用付费云层还是自行车。如果您正在使用付费云层，请输入您的隧道令牌。</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">如果您设置为付费版本，令牌不能为空</string>
-    <string name="toast_cloudflared_saved_settings">已保存云端设置</string>
     <string name="toast_no_config_needed">对于%1$s没有配置</string>
     <string name="dialog_zrok_token_title">Zrok道标志</string>
     <string name="dialog_zrok_token_message">输入Zrok启用代币.</string>
@@ -657,6 +660,33 @@
     <string name="settings_about_version_label">版本</string>
     <string name="settings_about_package_label">建设</string>
     <string name="settings_about_check_update_value">检查最新的GitHub版本，如果更新，请安装。</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">导出设置</string>
+    <string name="settings_backup_export_value">保存您当前设置的备份文件。保持隐私 — — 它持有您的凭据。</string>
+    <string name="settings_backup_import_title">还原设置</string>
+    <string name="settings_backup_import_value">加载在同一头部设备上的备份文件。</string>
+    <string name="settings_backup_default_filename">超驱动器备份.json</string>
+    <string name="settings_backup_exporting">Building backup…</string>
+    <string name="settings_backup_export_failed">备份导出失败</string>
+    <string name="settings_backup_saved">备份已保存</string>
+    <string name="settings_backup_saved_to">备份保存到 %1$s</string>
+    <string name="settings_backup_save_failed">无法保存备份文件</string>
+    <string name="settings_backup_pick_file">选择备份以恢复</string>
+    <string name="settings_backup_no_files">未找到备份文件。先导出一个或复制一个备份.json到 %1$s，然后重试。</string>
+    <string name="settings_backup_read_failed">无法读取文件</string>
+    <string name="settings_backup_invalid_file">该文件不是有效的Overdric 备份</string>
+    <string name="settings_backup_restoring">正在恢复…</string>
+    <string name="settings_backup_restored">设置已恢复</string>
+    <string name="settings_backup_restore_failed">还原失败</string>
+    <string name="settings_backup_daemon_down">相机服务必须运行到备份或还原。从守护进程启动，然后重试。</string>
+    <string name="settings_backup_restore_confirm_title">还原设置？</string>
+    <string name="settings_backup_restore_confirm_msg">这将用备份和重新加载服务取代您当前的超载驱动器设置。它只能在备份的同一个头部设备上工作。</string>
+    <string name="settings_backup_restore_confirm_btn">恢复</string>
+    <string name="settings_backup_restart_hint">设置已恢复。重启相机守护进程 (Daemons = 相机-> 重启) 以确保每个恢复的设置都已应用。</string>
+    <string name="settings_backup_trips_prompt">包括您的旅行历史记录(距离、能源、成本、分数、起始/结束位置？不包括每次旅行的详细遥测数据。 该文件将包含您的位置历史记录——保持其隐私。</string>
+    <string name="settings_backup_settings_only">仅设置</string>
+    <string name="settings_backup_with_trips">包括旅行</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1070,6 +1100,9 @@
     <string name="roadsense_map_routing">Finding route…</string>
     <string name="roadsense_map_route_failed">找不到路由。再试一次。</string>
     <string name="roadsense_map_need_key">在 RoadSense 设置中添加路由键以导航。</string>
+    <string name="roadsense_map_route_key_rejected">路由键被拒绝。请在“RoadSense”设置中检查您的键值。</string>
+    <string name="roadsense_map_route_network">网络太慢无法找到路由。请检查您的连接，然后重试。</string>
+    <string name="roadsense_map_route_http">路由服务错误 (%1$d)。请稍后再试。</string>
     <string name="roadsense_map_rerouting">关闭路由 - 重新计算…</string>
     <string name="roadsense_map_arrived">你已经抵达。</string>
     <string name="roadsense_map_nav_started">导航到 %1$s</string>
@@ -1163,4 +1196,13 @@
     <string name="roadsense_map_search_to_save">搜索要设置为 %1$s 的地点</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">旅行已恢复</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">令牌安全地存储并在应用程序和守护进程之间共享。</string>
+    <string name="cloudflared_token_hint">输入云端令牌</string>
+    <string name="cloudflare_paid_version">Cloudflare已付费版本</string>
+    <string name="dialog_cloudflared_settings_title">:globe_with_meridians：云端设置</string>
+    <string name="dialog_cloudflared_settings_message">定义您是在使用付费云层还是自行车。如果您正在使用付费云层，请输入您的隧道令牌。</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">如果您设置为付费版本，令牌不能为空</string>
+    <string name="toast_cloudflared_token_invalid">无效的令牌：只使用字母、数字和 . _ - = 字符</string>
+    <string name="toast_cloudflared_saved_settings">已保存云端设置</string>
 </resources>
