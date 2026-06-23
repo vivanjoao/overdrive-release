@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Token wordt veilig opgeslagen en gedeeld tussen app en daemon processen.</string>
     <string name="zrok_reset_environment">Zrok omgeving opnieuw instellen</string>
     <string name="zrok_reset_environment_desc">Verwijdert omgeving en token. Je zult opnieuw moeten activeren met je token (gebruikt een apparaat slot).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Token wordt veilig opgeslagen en gedeeld tussen app en daemon processen.</string>
+    <string name="cloudflared_token_hint">Voer cloudflared token in</string>
+    <string name="cloudflare_paid_version">Cloudflare Betaalde Versie</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Resetgegevens</string>
     <string name="reset_subtitle">Verwijder de verzamelde gegevens per categorie</string>
@@ -504,6 +508,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
+    <string name="dialog_cloudflared_settings_message">Bepaal of je betaald Cloudflare of trycloudflare. Als je betaalde Cloudflare gebruikt, voer dan je tunneltoken in.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Als je op de betaalde versie hebt gezet, mag de token niet leeg zijn</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared instellingen opgeslagen</string>
     <string name="toast_no_config_needed">Geen configuratie nodig voor %1$s</string>
     <string name="dialog_zrok_token_title">Zrok Tunnel Token</string>
     <string name="dialog_zrok_token_message">Voer je Zrok activeren token in.\nKrijg er een op: zrok.io</string>
