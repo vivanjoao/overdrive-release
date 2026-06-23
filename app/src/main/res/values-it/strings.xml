@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Il token viene salvato in modo sicuro e condiviso tra app e processi daemon.</string>
     <string name="zrok_reset_environment">Reimposta ambiente Zrok</string>
     <string name="zrok_reset_environment_desc">Rimuove ambiente e token. Dovrai riabilitare Zrok con il tuo token (usa uno slot dispositivo).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Il token è memorizzato in modo sicuro e condiviso tra i processi di app e demoni.</string>
+    <string name="cloudflared_token_hint">Inserisci il token nuvoloso</string>
+    <string name="cloudflare_paid_version">Versione A Pagamento Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Reimposta dati</string>
     <string name="reset_subtitle">Cancella i dati accumulati per categoria</string>
@@ -504,6 +508,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Impostazioni Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Definire se si utilizza Cloudflare a pagamento o trycloudflare. Se si utilizza Cloudflare a pagamento, inserire il token del tunnel.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Se si imposta la versione a pagamento, il token non può essere vuoto</string>
+    <string name="toast_cloudflared_saved_settings">Impostazioni Cloudflared salvate</string>
     <string name="toast_no_config_needed">Nessuna configurazione richiesta per %1$s</string>
     <string name="dialog_zrok_token_title">Token tunnel Zrok</string>
     <string name="dialog_zrok_token_message">Inserisci il token di abilitazione Zrok.
@@ -669,7 +677,7 @@ Questa azione non puo essere annullata.</string>
     <string name="settings_about_license_title">Licenza</string>
     <string name="settings_about_license_value">MIT — open source. Tocca per vedere il testo completo.</string>
     <string name="settings_about_source_title">Codice sorgente</string>
-    <string name="settings_about_source_value">github.com/yash-srivastava/Overdrive-release</string>
+    <string name="settings_about_source_value">github.com/yash-srivastava/OverDrive-release</string>
     <string name="settings_about_star_title">Metti una stella su GitHub</string>
     <string name="settings_about_star_value">Ci vuole un secondo. Conta molto.</string>
     <string name="settings_about_thanks_title">Grazie</string>
