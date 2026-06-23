@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">トークンは安全に保存され,アプリとデモンプロセス間で共有されます.</string>
     <string name="zrok_reset_environment">Zrok 環境をリセットする</string>
     <string name="zrok_reset_environment_desc">環境とトークンを削除します. トークンを再び有効にする必要があります (デバイススロットを使用します).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">トークンは安全に保管され、アプリとデーモンプロセス間で共有されます。</string>
+    <string name="cloudflared_token_hint">クラウドフレアトークンを入力</string>
+    <string name="cloudflare_paid_version">Cloudflareの有料バージョン</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">データをリセットする</string>
     <string name="reset_subtitle">カテゴリー別で蓄積されたデータを消す</string>
@@ -501,6 +505,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
+    <string name="dialog_cloudflared_settings_message">有料Cloudflareまたはtrycloudflareを使用しているかどうかを定義します。有料Cloudflareを使用している場合は、トンネルトークンを入力します。</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">有料版に設定した場合、トークンは空にできません</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
     <string name="toast_no_config_needed">%1$s の設定は必要ありません</string>
     <string name="dialog_zrok_token_title">Zrokトンネルトークン</string>
     <string name="dialog_zrok_token_message">Zrokの有効化トークンを入力します.</string>
@@ -607,7 +615,7 @@
          or only the keepalive survived an OOM respawn. -->
     <string name="daemon_keepalive_notif_title">Overdrive 有効</string>
     <string name="daemon_keepalive_notif_text">車両システムの監視</string>
-    <string name="overdrive_status_summary_title">Overdrive</string>
+    <string name="overdrive_status_summary_title">オーバードライブ</string>
     <string name="overdrive_status_summary_text">バックグラウンドサービスを実行中</string>
     <!-- ============================================================== -->
     <!-- M3 Revamp: navigation rail + settings sub-rail + theme picker  -->
