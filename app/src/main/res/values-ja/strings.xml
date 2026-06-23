@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">トークンは安全に保存され,アプリとデモンプロセス間で共有されます.</string>
     <string name="zrok_reset_environment">Zrok 環境をリセットする</string>
     <string name="zrok_reset_environment_desc">環境とトークンを削除します. トークンを再び有効にする必要があります (デバイススロットを使用します).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">トークンは安全に保管され、アプリとデーモンプロセス間で共有されます。</string>
-    <string name="cloudflared_token_hint">クラウドフレアトークンを入力</string>
-    <string name="cloudflare_paid_version">Cloudflareの有料バージョン</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">データをリセットする</string>
     <string name="reset_subtitle">カテゴリー別で蓄積されたデータを消す</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">重度</string>
     <string name="recording_lib_filter_section_type">タイプ</string>
     <string name="recording_lib_filter_section_place">場所</string>
+    <string name="recording_lib_filter_section_storage">ストレージ</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">内部</string>
+    <string name="recording_lib_storage_filter_sd">SD カード</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">標準</string>
     <string name="recording_lib_chip_type_proximity">距離</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">イベント</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">SD</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">%1$d 録音を共有</string>
     <!-- fragment_sentry_config -->
@@ -505,10 +512,6 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
-    <string name="dialog_cloudflared_settings_message">有料Cloudflareまたはtrycloudflareを使用しているかどうかを定義します。有料Cloudflareを使用している場合は、トンネルトークンを入力します。</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">有料版に設定した場合、トークンは空にできません</string>
-    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
     <string name="toast_no_config_needed">%1$s の設定は必要ありません</string>
     <string name="dialog_zrok_token_title">Zrokトンネルトークン</string>
     <string name="dialog_zrok_token_message">Zrokの有効化トークンを入力します.</string>
@@ -657,6 +660,33 @@
     <string name="settings_about_version_label">バージョン</string>
     <string name="settings_about_package_label">建設する</string>
     <string name="settings_about_check_update_value">最新のGitHubリリースを確認し、新しい場合はインストールします。</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">設定をエクスポート</string>
+    <string name="settings_backup_export_value">現在の設定のバックアップファイルを保存します。非公開にしてください。認証情報は保持されます。</string>
+    <string name="settings_backup_import_title">設定を復元</string>
+    <string name="settings_backup_import_value">この同じヘッドユニットに作成されたバックアップファイルをロードします。</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">Building backup…</string>
+    <string name="settings_backup_export_failed">バックアップのエクスポートに失敗しました</string>
+    <string name="settings_backup_saved">バックアップを保存しました</string>
+    <string name="settings_backup_saved_to">%1$sにバックアップを保存しました</string>
+    <string name="settings_backup_save_failed">バックアップファイルを保存できませんでした</string>
+    <string name="settings_backup_pick_file">復元するバックアップを選択してください</string>
+    <string name="settings_backup_no_files">バックアップファイルが見つかりませんでした。最初にエクスポートするか、バックアップ .json を %1$sにコピーしてから、もう一度やり直してください。</string>
+    <string name="settings_backup_read_failed">ファイルを読み込めませんでした</string>
+    <string name="settings_backup_invalid_file">そのファイルは有効なオーバードライブバックアップではありません</string>
+    <string name="settings_backup_restoring">Restoring…</string>
+    <string name="settings_backup_restored">設定を復元しました</string>
+    <string name="settings_backup_restore_failed">復元に失敗しました</string>
+    <string name="settings_backup_daemon_down">カメラサービスがバックアップまたは復元するために実行されている必要があります。デーモンから起動してから、もう一度やり直してください。</string>
+    <string name="settings_backup_restore_confirm_title">設定を復元しますか？</string>
+    <string name="settings_backup_restore_confirm_msg">これにより、現在のOverdrive設定がバックアップとリロードされます。バックアップが行われたのと同じヘッドユニットでのみ動作します。</string>
+    <string name="settings_backup_restore_confirm_btn">復元</string>
+    <string name="settings_backup_restart_hint">設定が復元されました。カメラデーモンを再起動して、復元されたすべての設定が適用されていることを確認します。</string>
+    <string name="settings_backup_trips_prompt">旅行履歴(距離、エネルギー、スコア、スタート/エンドの場所)を含めてください。旅行ごとの詳細な遠隔測定は含まれていません。 ファイルにはあなたのロケーション履歴が含まれています。プライベートにしてください。</string>
+    <string name="settings_backup_settings_only">設定のみ</string>
+    <string name="settings_backup_with_trips">旅行を含む</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1070,6 +1100,9 @@
     <string name="roadsense_map_routing">Finding route…</string>
     <string name="roadsense_map_route_failed">ルートが見つかりませんでした。もう一度やり直してください。</string>
     <string name="roadsense_map_need_key">RoadSense設定でルーティングキーを追加してナビゲートします。</string>
+    <string name="roadsense_map_route_key_rejected">ルーティングキーが拒否されました。RoadSense設定でキーを確認してください。</string>
+    <string name="roadsense_map_route_network">ルートを見つけるにはネットワークが遅すぎます。接続を確認して再度お試し下さい。</string>
+    <string name="roadsense_map_route_http">ルーティングサービスエラー (%1$d) 。しばらくしてから再試行してください。</string>
     <string name="roadsense_map_rerouting">Off route — recalculating…</string>
     <string name="roadsense_map_arrived">お着きになりました。</string>
     <string name="roadsense_map_nav_started">%1$s へ移動</string>
@@ -1163,4 +1196,13 @@
     <string name="roadsense_map_search_to_save">%1$sとして設定する場所を検索します</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">トリップが復元されました</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">トークンは安全に保管され、アプリとデーモンプロセス間で共有されます。</string>
+    <string name="cloudflared_token_hint">クラウドフレアトークンを入力</string>
+    <string name="cloudflare_paid_version">Cloudflareの有料バージョン</string>
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
+    <string name="dialog_cloudflared_settings_message">有料Cloudflareまたはtrycloudflareを使用しているかどうかを定義します。有料Cloudflareを使用している場合は、トンネルトークンを入力します。</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">有料版に設定した場合、トークンは空にできません</string>
+    <string name="toast_cloudflared_token_invalid">無効なトークン: 使用する文字、数字、および . _ - = 文字</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
 </resources>
