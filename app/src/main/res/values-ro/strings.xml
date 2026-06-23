@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Tokenul este stocat în siguranță și partajat între procesele aplicației și vitezei.</string>
     <string name="zrok_reset_environment">Resetează mediul Zrok</string>
     <string name="zrok_reset_environment_desc">Elimină mediul și tokenul. Va trebui să reactivați cu token-ul dvs. (utilizează slotul unui dispozitiv).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Tokenul este stocat în siguranță și partajat între procesele aplicației și vitezei.</string>
+    <string name="cloudflared_token_hint">Introduceți token cloudflared</string>
+    <string name="cloudflare_paid_version">Versiune cu plată Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Resetare date</string>
     <string name="reset_subtitle">Ştergeţi datele acumulate pe categorii</string>
@@ -507,6 +511,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Setări Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Define whether you are using paid Cloudflare or trycloudflare. If you are using paid Cloudflare, enter your tunnel token.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">If you set to paid version the token cannot be empty</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
     <string name="toast_no_config_needed">Nu este necesară nicio configurare pentru %1$s</string>
     <string name="dialog_zrok_token_title">Tunelul Zrok Token</string>
     <string name="dialog_zrok_token_message">Introduceți tokenul de activare Zrok.\nObțineți unul la: zrok.io</string>
