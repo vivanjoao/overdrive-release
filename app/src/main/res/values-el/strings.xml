@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Το διακριτικό αποθηκεύεται με ασφάλεια και μοιράζεται μεταξύ των διεργασιών εφαρμογής και δαίμονα.</string>
     <string name="zrok_reset_environment">Επαναφορά Περιβάλλοντος Zrok</string>
     <string name="zrok_reset_environment_desc">Αφαιρεί το περιβάλλον και το διακριτικό. Θα πρέπει να ενεργοποιήσετε ξανά με το διακριτικό σας (χρησιμοποιεί μια υποδοχή συσκευής).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Το διακριτικό αποθηκεύεται με ασφάλεια και μοιράζεται μεταξύ των διεργασιών εφαρμογής και δαίμονα.</string>
+    <string name="cloudflared_token_hint">Εισάγετε το cloudflared token</string>
+    <string name="cloudflare_paid_version">Έκδοση Cloudflare Πληρωμένη</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Επαναφορά Δεδομένων</string>
     <string name="reset_subtitle">Εκκαθάριση συσσωρευμένων δεδομένων ανά κατηγορία</string>
@@ -504,6 +508,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Ρυθμίσεις Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Ορίστε αν χρησιμοποιείτε πληρωμένη Cloudflare ή trycloudflare. Αν χρησιμοποιείτε πληρωμένη Cloudflare, πληκτρολογήστε το διακριτικό του tunnel σας.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Αν ορίσετε σε πληρωμένη έκδοση το διακριτικό δεν μπορεί να είναι κενό</string>
+    <string name="toast_cloudflared_saved_settings">Οι ρυθμίσεις Cloudflared αποθηκεύτηκαν</string>
     <string name="toast_no_config_needed">Δεν απαιτείται ρύθμιση παραμέτρων για το %1$s</string>
     <string name="dialog_zrok_token_title">Διακριτικό Σήραγγας Zrok</string>
     <string name="dialog_zrok_token_message">Εισάγετε Zrok σας ενεργοποίηση token.\nΑποκτήστε ένα στο: zrok.io</string>
