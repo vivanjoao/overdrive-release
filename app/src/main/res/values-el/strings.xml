@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">Το διακριτικό αποθηκεύεται με ασφάλεια και μοιράζεται μεταξύ των διεργασιών εφαρμογής και δαίμονα.</string>
     <string name="zrok_reset_environment">Επαναφορά Περιβάλλοντος Zrok</string>
     <string name="zrok_reset_environment_desc">Αφαιρεί το περιβάλλον και το διακριτικό. Θα πρέπει να ενεργοποιήσετε ξανά με το διακριτικό σας (χρησιμοποιεί μια υποδοχή συσκευής).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">Το διακριτικό αποθηκεύεται με ασφάλεια και μοιράζεται μεταξύ των διεργασιών εφαρμογής και δαίμονα.</string>
-    <string name="cloudflared_token_hint">Εισάγετε το cloudflared token</string>
-    <string name="cloudflare_paid_version">Έκδοση Cloudflare Πληρωμένη</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Επαναφορά Δεδομένων</string>
     <string name="reset_subtitle">Εκκαθάριση συσσωρευμένων δεδομένων ανά κατηγορία</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">Σοβαρότητα</string>
     <string name="recording_lib_filter_section_type">Τύπος</string>
     <string name="recording_lib_filter_section_place">Τόπος</string>
+    <string name="recording_lib_filter_section_storage">Αποθήκευση</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">Εσωτερική</string>
+    <string name="recording_lib_storage_filter_sd">Κάρτα SD</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">Κανονικό</string>
     <string name="recording_lib_chip_type_proximity">Εγγύτητα</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">EVENT</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">ΚΑΕ</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">SD</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Κοινή χρήση %1$d εγγραφών</string>
     <!-- fragment_sentry_config -->
@@ -508,10 +515,6 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">🌐 Ρυθμίσεις Cloudflared</string>
-    <string name="dialog_cloudflared_settings_message">Ορίστε αν χρησιμοποιείτε πληρωμένη Cloudflare ή trycloudflare. Αν χρησιμοποιείτε πληρωμένη Cloudflare, πληκτρολογήστε το διακριτικό του tunnel σας.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">Αν ορίσετε σε πληρωμένη έκδοση το διακριτικό δεν μπορεί να είναι κενό</string>
-    <string name="toast_cloudflared_saved_settings">Οι ρυθμίσεις Cloudflared αποθηκεύτηκαν</string>
     <string name="toast_no_config_needed">Δεν απαιτείται ρύθμιση παραμέτρων για το %1$s</string>
     <string name="dialog_zrok_token_title">Διακριτικό Σήραγγας Zrok</string>
     <string name="dialog_zrok_token_message">Εισάγετε Zrok σας ενεργοποίηση token.\nΑποκτήστε ένα στο: zrok.io</string>
@@ -660,6 +663,33 @@
     <string name="settings_about_version_label">Έκδοση</string>
     <string name="settings_about_package_label">Κατασκευή</string>
     <string name="settings_about_check_update_value">Ελέγξτε την τελευταία έκδοση του GitHub και εγκαταστήστε αν είναι νεότερη.</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">Εξαγωγή ρυθμίσεων</string>
+    <string name="settings_backup_export_value">Αποθηκεύστε ένα αρχείο αντιγράφου ασφαλείας των τρεχουσών ρυθμίσεων σας. Κρατήστε το ιδιωτικό - περιέχει τα στοιχεία σας.</string>
+    <string name="settings_backup_import_title">Επαναφορά ρυθμίσεων</string>
+    <string name="settings_backup_import_value">Φόρτωση ενός αρχείου αντιγράφου ασφαλείας που έγινε σε αυτήν την ίδια μονάδα κεφαλής.</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">Δημιουργία αντιγράφων ασφαλείας…</string>
+    <string name="settings_backup_export_failed">Η εξαγωγή αντιγράφου ασφαλείας απέτυχε</string>
+    <string name="settings_backup_saved">Το αντίγραφο ασφαλείας αποθηκεύτηκε</string>
+    <string name="settings_backup_saved_to">Το αντίγραφο ασφαλείας αποθηκεύτηκε στο %1$s</string>
+    <string name="settings_backup_save_failed">Δεν ήταν δυνατή η αποθήκευση του αρχείου αντιγράφου ασφαλείας</string>
+    <string name="settings_backup_pick_file">Επιλέξτε ένα αντίγραφο ασφαλείας για επαναφορά</string>
+    <string name="settings_backup_no_files">Δεν βρέθηκαν αρχεία αντιγράφων ασφαλείας. Εξάγετε ένα πρώτο, ή αντιγράψτε ένα αντίγραφο ασφαλείας .json σε %1$s, και προσπαθήστε ξανά.</string>
+    <string name="settings_backup_read_failed">Αδυναμία ανάγνωσης του αρχείου</string>
+    <string name="settings_backup_invalid_file">Αυτό το αρχείο δεν είναι έγκυρο αντίγραφο ασφαλείας Overdrive</string>
+    <string name="settings_backup_restoring">Επαναφορά…</string>
+    <string name="settings_backup_restored">Οι ρυθμίσεις επαναφέρθηκαν</string>
+    <string name="settings_backup_restore_failed">Η επαναφορά απέτυχε</string>
+    <string name="settings_backup_daemon_down">Η υπηρεσία της κάμερας πρέπει να εκτελείται για δημιουργία αντιγράφων ασφαλείας ή επαναφορά. Ξεκινήστε την από δαίμονες και προσπαθήστε ξανά.</string>
+    <string name="settings_backup_restore_confirm_title">Επαναφορά ρυθμίσεων?</string>
+    <string name="settings_backup_restore_confirm_msg">Αυτό αντικαθιστά τις τρέχουσες ρυθμίσεις Overdrive με τις υπηρεσίες δημιουργίας αντιγράφων ασφαλείας και επαναφόρτωσης. Λειτουργεί μόνο στην ίδια κεφαλή μονάδα όπου έγινε το αντίγραφο ασφαλείας.</string>
+    <string name="settings_backup_restore_confirm_btn">Επαναφορά</string>
+    <string name="settings_backup_restart_hint">Οι ρυθμίσεις αποκαταστάθηκαν. Επανεκκίνηση του δαίμονα φωτογραφικής μηχανής (δαίμονες → Κάμερα → Επανεκκίνηση) για να βεβαιωθείτε ότι εφαρμόζεται κάθε ρύθμιση που έχει αποκατασταθεί.</string>
+    <string name="settings_backup_trips_prompt">Συμπεριλάβετε το ιστορικό του ταξιδιού σας (απόσταση, ενέργεια, κόστος, βαθμολογίες, σημεία έναρξης/λήξης)? Λεπτομερής τηλεμετρία ανά ταξίδι δεν συμπεριλαμβάνεται. Το αρχείο θα περιέχει το ιστορικό τοποθεσίας σας - κρατήστε το ιδιωτικό.</string>
+    <string name="settings_backup_settings_only">Μόνο ρυθμίσεις</string>
+    <string name="settings_backup_with_trips">Συμπερίληψη διαδρομών</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1080,6 +1110,9 @@
     <string name="roadsense_map_routing">Finding route…</string>
     <string name="roadsense_map_route_failed">Αδυναμία εύρεσης διαδρομής. Δοκιμάστε ξανά.</string>
     <string name="roadsense_map_need_key">Προσθέστε ένα κλειδί δρομολόγησης στις ρυθμίσεις του RoadSense για πλοήγηση.</string>
+    <string name="roadsense_map_route_key_rejected">Το κλειδί δρομολόγησης απορρίφθηκε. Ελέγξτε το κλειδί σας στις ρυθμίσεις RoadSense.</string>
+    <string name="roadsense_map_route_network">Δίκτυο πολύ αργό για να βρείτε μια διαδρομή. Ελέγξτε τη σύνδεσή σας και προσπαθήστε ξανά.</string>
+    <string name="roadsense_map_route_http">Σφάλμα δρομολόγησης υπηρεσίας (%1$d). Δοκιμάστε ξανά σύντομα.</string>
     <string name="roadsense_map_rerouting">Off route — recalculating…</string>
     <string name="roadsense_map_arrived">Έχετε φτάσει.</string>
     <string name="roadsense_map_nav_started">Πλοήγηση στο %1$s</string>
@@ -1173,4 +1206,13 @@
     <string name="roadsense_map_search_to_save">Αναζητήστε ένα μέρος για να ορίσετε ως %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">Η διαδρομή επαναφέρθηκε</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">Το διακριτικό αποθηκεύεται με ασφάλεια και μοιράζεται μεταξύ των διεργασιών εφαρμογής και δαίμονα.</string>
+    <string name="cloudflared_token_hint">Εισάγετε το cloudflared token</string>
+    <string name="cloudflare_paid_version">Έκδοση Cloudflare Πληρωμένη</string>
+    <string name="dialog_cloudflared_settings_title">🌐 Ρυθμίσεις Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Ορίστε αν χρησιμοποιείτε πληρωμένη Cloudflare ή trycloudflare. Αν χρησιμοποιείτε πληρωμένη Cloudflare, πληκτρολογήστε το διακριτικό του tunnel σας.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Αν ορίσετε σε πληρωμένη έκδοση το διακριτικό δεν μπορεί να είναι κενό</string>
+    <string name="toast_cloudflared_token_invalid">Μη έγκυρο διακριτικό: χρησιμοποιήστε μόνο γράμματα, αριθμούς και . _ - = χαρακτήρες</string>
+    <string name="toast_cloudflared_saved_settings">Οι ρυθμίσεις Cloudflared αποθηκεύτηκαν</string>
 </resources>
