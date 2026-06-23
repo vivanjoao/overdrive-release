@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Токен хранится безопасно и делится между процессами приложения и демона.</string>
     <string name="zrok_reset_environment">Перезагрузка окружающей среды Zrok</string>
     <string name="zrok_reset_environment_desc">Удалить среду и токен. Вам нужно будет повторно включить с помощью своего токен (использует слот устройства).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Токен надежно хранится между приложениями и демонами.</string>
+    <string name="cloudflared_token_hint">Ввести в облачный токен</string>
+    <string name="cloudflare_paid_version">Платная версия Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Перезагрузка данных</string>
     <string name="reset_subtitle">Стерть накопленные данные по категориям</string>
@@ -510,6 +514,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Настройки облака</string>
+    <string name="dialog_cloudflared_settings_message">Определите, используете ли вы платный Cloudflare или trycloudflare. Если вы используете платный Cloudflare, введите свой маркер туннеля.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Если вы установили платную версию, токен не может быть пустым</string>
+    <string name="toast_cloudflared_saved_settings">Настройки облака сохранены</string>
     <string name="toast_no_config_needed">Не требуется конфигурации для %1$s</string>
     <string name="dialog_zrok_token_title">Токен туннеля Zrok</string>
     <string name="dialog_zrok_token_message">Введите свой токен Zrok включить.\nПолучайте один на: zrok.io</string>
