@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">Le jeton est stocké en toute sécurité et partagé entre les processus de l\'application et du daemon.</string>
     <string name="zrok_reset_environment">Réinitialiser l\'environnement Zrok</string>
     <string name="zrok_reset_environment_desc">Vous devrez réactiver avec votre jeton (utilisez un emplacement d\'appareil).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">Le jeton est stocké de manière sécurisée et partagé entre les processus d\'application et de démon.</string>
-    <string name="cloudflared_token_hint">Entrez le jeton cloudflared</string>
-    <string name="cloudflare_paid_version">Version payante de Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Réinitialisation des données</string>
     <string name="reset_subtitle">Effacer les données accumulées par catégorie</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">La gravité</string>
     <string name="recording_lib_filter_section_type">Type</string>
     <string name="recording_lib_filter_section_place">Le lieu</string>
+    <string name="recording_lib_filter_section_storage">Stockage</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">Interne</string>
+    <string name="recording_lib_storage_filter_sd">Carte SD</string>
+    <string name="recording_lib_storage_filter_usb">Clés USB</string>
     <string name="recording_lib_place_search_hint">Rechercher des lieux…</string>
     <string name="recording_lib_chip_type_normal">Normale</string>
     <string name="recording_lib_chip_type_proximity">Proximité</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">ÉVÉNEMENT</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">Carte SD</string>
+    <string name="recording_lib_storage_usb">Clés USB</string>
+    <string name="recording_lib_storage_internal">INTÉGRÉ</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Partage des enregistrements %1$d</string>
     <!-- fragment_sentry_config -->
@@ -508,10 +515,6 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">🌐 Paramètres Cloudflared</string>
-    <string name="dialog_cloudflared_settings_message">Définissez si vous utilisez une fusée nuageuse ou une fusée éclairante payante. Si vous utilisez une fusée nuageuse payante, entrez le jeton de votre tunnel.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">Si vous définissez une version payante, le jeton ne peut pas être vide</string>
-    <string name="toast_cloudflared_saved_settings">Paramètres Cloudflared enregistrés</string>
     <string name="toast_no_config_needed">Aucune configuration n\'est nécessaire pour %1$s</string>
     <string name="dialog_zrok_token_title">Token du tunnel Zrok</string>
     <string name="dialog_zrok_token_message">Entrez votre jeton Zrok activé.\n Obtenez un à: zrok.io</string>
@@ -660,6 +663,33 @@
     <string name="settings_about_version_label">La version</string>
     <string name="settings_about_package_label">Construire</string>
     <string name="settings_about_check_update_value">Vérifiez la dernière version de GitHub et installez-la si elle est plus récente.</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">Exporter les paramètres</string>
+    <string name="settings_backup_export_value">Enregistrez un fichier de sauvegarde de vos paramètres actuels. Gardez-le privé - il contient vos identifiants.</string>
+    <string name="settings_backup_import_title">Restaurer les paramètres</string>
+    <string name="settings_backup_import_value">Charger un fichier de sauvegarde fait sur cette même unité de tête.</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">Construction de la sauvegarde…</string>
+    <string name="settings_backup_export_failed">L\'exportation de la sauvegarde a échoué</string>
+    <string name="settings_backup_saved">Sauvegarde enregistrée</string>
+    <string name="settings_backup_saved_to">Sauvegarde enregistrée vers %1$s</string>
+    <string name="settings_backup_save_failed">Impossible d\'enregistrer le fichier de sauvegarde</string>
+    <string name="settings_backup_pick_file">Choisir une sauvegarde à restaurer</string>
+    <string name="settings_backup_no_files">Aucun fichier de sauvegarde trouvé. Exportez un premier, ou copiez une sauvegarde .json dans %1$s, puis réessayez.</string>
+    <string name="settings_backup_read_failed">Impossible de lire le fichier</string>
+    <string name="settings_backup_invalid_file">Ce fichier n\'est pas une sauvegarde Overdrive valide</string>
+    <string name="settings_backup_restoring">Restauration de…</string>
+    <string name="settings_backup_restored">Paramètres restaurés</string>
+    <string name="settings_backup_restore_failed">Échec de la restauration</string>
+    <string name="settings_backup_daemon_down">Le service de caméra doit être en cours d\'exécution pour la sauvegarde ou la restauration. Démarrez-le à partir des démons, puis réessayez.</string>
+    <string name="settings_backup_restore_confirm_title">Restaurer les paramètres?</string>
+    <string name="settings_backup_restore_confirm_msg">Ceci remplace les paramètres actuels de Overdrive par la sauvegarde et recharge les services. Il ne fonctionne que sur la même unité principale sur laquelle la sauvegarde a été effectuée.</string>
+    <string name="settings_backup_restore_confirm_btn">Restaurer</string>
+    <string name="settings_backup_restart_hint">Paramètres restaurés. Redémarrez le démon de la caméra (Daemons → Caméra → Redémarrer) pour vous assurer que tous les paramètres restaurés sont appliqués.</string>
+    <string name="settings_backup_trips_prompt">Inclure l\'historique de votre voyage (distance, énergie, coûts, scores, emplacements de début/fin) ? La télémétrie détaillée par trajet n\'est pas incluse. Le fichier contiendra votre historique d\'emplacement — le garder privé.</string>
+    <string name="settings_backup_settings_only">Paramètres uniquement</string>
+    <string name="settings_backup_with_trips">Inclure les courses</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1080,6 +1110,9 @@
     <string name="roadsense_map_routing">Recherche de la route…</string>
     <string name="roadsense_map_route_failed">Impossible de trouver un itinéraire. Veuillez réessayer.</string>
     <string name="roadsense_map_need_key">Ajoutez une clé de routage dans les paramètres RoadSense pour naviguer.</string>
+    <string name="roadsense_map_route_key_rejected">La clé de routage a été rejetée. Vérifiez votre clé dans les paramètres RoadSense.</string>
+    <string name="roadsense_map_route_network">Réseau trop lent pour trouver un itinéraire. Vérifiez votre connexion et réessayez.</string>
+    <string name="roadsense_map_route_http">Erreur du service de routage (%1$d). Réessayez sous peu.</string>
     <string name="roadsense_map_rerouting">Hors route — recalcul de…</string>
     <string name="roadsense_map_arrived">Vous êtes arrivé.</string>
     <string name="roadsense_map_nav_started">Naviguer vers %1$s</string>
@@ -1173,4 +1206,13 @@
     <string name="roadsense_map_search_to_save">Rechercher un lieu à définir comme %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">La course a été restaurée</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">Le jeton est stocké de manière sécurisée et partagé entre les processus d\'application et de démon.</string>
+    <string name="cloudflared_token_hint">Entrez le jeton cloudflared</string>
+    <string name="cloudflare_paid_version">Version payante de Cloudflare</string>
+    <string name="dialog_cloudflared_settings_title">🌐 Paramètres Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Définissez si vous utilisez une fusée nuageuse ou une fusée éclairante payante. Si vous utilisez une fusée nuageuse payante, entrez le jeton de votre tunnel.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Si vous définissez une version payante, le jeton ne peut pas être vide</string>
+    <string name="toast_cloudflared_token_invalid">Token invalide : utilisez uniquement des lettres, des chiffres et . _ - = des caractères</string>
+    <string name="toast_cloudflared_saved_settings">Paramètres Cloudflared enregistrés</string>
 </resources>
