@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">El token se almacena de forma segura y se comparte entre los procesos de aplicación y daemon.</string>
     <string name="zrok_reset_environment">Resete el entorno Zrok</string>
     <string name="zrok_reset_environment_desc">Elimina el entorno y el token. Tendrá que volver a habilitar con su token (utiliza una ranura de dispositivo).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">El token se almacena de forma segura y se comparte entre los procesos de aplicación y daemon.</string>
-    <string name="cloudflared_token_hint">Introducir token cloudflared</string>
-    <string name="cloudflare_paid_version">Versión pagada de Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Datos de restablecimiento</string>
     <string name="reset_subtitle">Eliminar los datos acumulados por categoría</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">La gravedad</string>
     <string name="recording_lib_filter_section_type">Tipo</string>
     <string name="recording_lib_filter_section_place">Lugar</string>
+    <string name="recording_lib_filter_section_storage">Almacenamiento</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">Interno</string>
+    <string name="recording_lib_storage_filter_sd">Tarjeta SD</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Buscar lugares…</string>
     <string name="recording_lib_chip_type_normal">Normal</string>
     <string name="recording_lib_chip_type_proximity">Proximidad</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">EVENTUD</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">D</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">Entrada</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Compartiendo grabaciones %1$d</string>
     <!-- fragment_sentry_config -->
@@ -508,10 +515,6 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">🌐 Configuración de Cloudflared</string>
-    <string name="dialog_cloudflared_settings_message">Define si estás usando Cloudflare de pago o trycloudflare. Si estás usando Cloudflare de pago, introduce tu token de túnel.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">Si estableces una versión de pago, el token no puede estar vacío</string>
-    <string name="toast_cloudflared_saved_settings">Configuración de Cloudflared guardada</string>
     <string name="toast_no_config_needed">No se necesita ninguna configuración para %1$s</string>
     <string name="dialog_zrok_token_title">Zrok Token del túnel</string>
     <string name="dialog_zrok_token_message">Ingrese su Zrok activar el token.\nObtenga uno en: zrok.io</string>
@@ -660,6 +663,33 @@
     <string name="settings_about_version_label">Versión</string>
     <string name="settings_about_package_label">Construir</string>
     <string name="settings_about_check_update_value">Compruebe la última versión de GitHub e instálela si es más reciente.</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">Exportar ajustes</string>
+    <string name="settings_backup_export_value">Guarda un archivo de copia de seguridad de tus ajustes actuales. Manténgalo privado — guarda tus credenciales.</string>
+    <string name="settings_backup_import_title">Restaurar ajustes</string>
+    <string name="settings_backup_import_value">Cargar un archivo de copia de seguridad hecho en esta misma unidad de cabeza.</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">Building backup…</string>
+    <string name="settings_backup_export_failed">Error al exportar la copia de seguridad</string>
+    <string name="settings_backup_saved">Copia guardada</string>
+    <string name="settings_backup_saved_to">Copia de seguridad guardada en %1$s</string>
+    <string name="settings_backup_save_failed">No se pudo guardar el archivo de copia de seguridad</string>
+    <string name="settings_backup_pick_file">Escoge una copia de seguridad para restaurar</string>
+    <string name="settings_backup_no_files">No se han encontrado archivos de copia de seguridad. Exporta uno primero, o copia una copia de seguridad .json en %1$s, luego vuelve a intentarlo.</string>
+    <string name="settings_backup_read_failed">No se pudo leer el archivo</string>
+    <string name="settings_backup_invalid_file">Ese archivo no es una copia de seguridad válida de la sobreunidad</string>
+    <string name="settings_backup_restoring">Restaurando…</string>
+    <string name="settings_backup_restored">Ajustes restaurados</string>
+    <string name="settings_backup_restore_failed">Restauración fallida</string>
+    <string name="settings_backup_daemon_down">El servicio de cámara debe estar ejecutándose para hacer una copia de seguridad o restaurar. Iniciarlo desde Daemons y vuelva a intentarlo.</string>
+    <string name="settings_backup_restore_confirm_title">¿Restaurar ajustes?</string>
+    <string name="settings_backup_restore_confirm_msg">Esto reemplaza la configuración actual de la sobreunidad con los servicios de copia de seguridad y recarga. Sólo funciona en la misma unidad de cabeza en la que se realizó la copia de seguridad.</string>
+    <string name="settings_backup_restore_confirm_btn">Restaurar</string>
+    <string name="settings_backup_restart_hint">Configuración restaurada. Reinicie el daemon de la cámara (Daemons → Cámara → Reiniciar) para asegurarse de que cada ajuste restaurado se aplique.</string>
+    <string name="settings_backup_trips_prompt">Incluye tu historial de viaje (distancia, energía, costo, partituras, ubicaciones de inicio y final)? La telemetría detallada por viaje no está incluida. El archivo contendrá su historial de ubicaciones — manténgalo privado.</string>
+    <string name="settings_backup_settings_only">Sólo ajustes</string>
+    <string name="settings_backup_with_trips">Incluye viajes</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1080,6 +1110,9 @@
     <string name="roadsense_map_routing">Buscando ruta…</string>
     <string name="roadsense_map_route_failed">No se pudo encontrar una ruta. Inténtelo de nuevo.</string>
     <string name="roadsense_map_need_key">Añade una tecla de enrutamiento en la configuración de RoadSense para navegar.</string>
+    <string name="roadsense_map_route_key_rejected">Clave de ruta rechazada. Compruebe su clave en la configuración de RoadSense.</string>
+    <string name="roadsense_map_route_network">Red demasiado lenta para encontrar una ruta. Comprueba tu conexión e inténtalo de nuevo.</string>
+    <string name="roadsense_map_route_http">Error de servicio de ruta (%1$d). Inténtalo de nuevo en breve.</string>
     <string name="roadsense_map_rerouting">Fuera de ruta — recalculando…</string>
     <string name="roadsense_map_arrived">Ha llegado.</string>
     <string name="roadsense_map_nav_started">Navegando a %1$s</string>
@@ -1173,4 +1206,13 @@
     <string name="roadsense_map_search_to_save">Busca un lugar para establecer como %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">Viaje restaurado</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">El token se almacena de forma segura y se comparte entre los procesos de aplicación y daemon.</string>
+    <string name="cloudflared_token_hint">Introducir token cloudflared</string>
+    <string name="cloudflare_paid_version">Versión pagada de Cloudflare</string>
+    <string name="dialog_cloudflared_settings_title">🌐 Configuración de Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Define si estás usando Cloudflare de pago o trycloudflare. Si estás usando Cloudflare de pago, introduce tu token de túnel.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Si estableces una versión de pago, el token no puede estar vacío</string>
+    <string name="toast_cloudflared_token_invalid">Token no válido: utilice sólo letras, números y . _ - = caracteres</string>
+    <string name="toast_cloudflared_saved_settings">Configuración de Cloudflared guardada</string>
 </resources>
