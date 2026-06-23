@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">يتم تخزين الرمز المميز بشكل آمن ويتم تقاسمه بين عمليات التطبيق والعملية الرمزية.</string>
     <string name="zrok_reset_environment">إعادة تعيين بيئة السكر</string>
     <string name="zrok_reset_environment_desc">إزالة البيئة والرمز المميز. سوف تحتاج إلى إعادة التمكين باستخدام الرمز المميز الخاص بك (يستخدم فتحة الجهاز).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">يتم تخزين الرمز المميز بشكل آمن ويتم تقاسمه بين عمليات التطبيق والعملية الرمزية.</string>
-    <string name="cloudflared_token_hint">أدخل رمز Cloudflared</string>
-    <string name="cloudflare_paid_version">إصدار Cloudflare مدفوع</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">إعادة تعيين البيانات</string>
     <string name="reset_subtitle">مسح البيانات المتراكمة حسب الفئة</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">الخطورة</string>
     <string name="recording_lib_filter_section_type">نوع</string>
     <string name="recording_lib_filter_section_place">مكان</string>
+    <string name="recording_lib_filter_section_storage">التخزين</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">داخلي</string>
+    <string name="recording_lib_storage_filter_sd">بطاقة SD</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">البحث عن الأماكن…</string>
     <string name="recording_lib_chip_type_normal">عادي</string>
     <string name="recording_lib_chip_type_proximity">القرب</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">إنش</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">الذاكرة</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">إنترنت</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">مشاركة تسجيلات %1$d</string>
     <!-- fragment_sentry_config -->
@@ -520,10 +527,6 @@
     <string name="clip_label_url">الرابط</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">إعدادات Cloudflared 🌐</string>
-    <string name="dialog_cloudflared_settings_message">حدد ما إذا كنت تستخدم Cloudflare أو trycloudflare. إذا كنت تستخدم Cloudflare، أدخل رمز النفق الخاص بك.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">إذا قمت بتعيين النسخة المدفوعة، لا يمكن أن يكون الرمز المميز فارغاً</string>
-    <string name="toast_cloudflared_saved_settings">تم حفظ إعدادات Cloudflared</string>
     <string name="toast_no_config_needed">لا توجد اعدادات مطلوبة ل %1$s</string>
     <string name="dialog_zrok_token_title">الرمز المميز للنفق</string>
     <string name="dialog_zrok_token_message">Enter your Zrok enable token.\nGet one at: zrok.io</string>
@@ -672,6 +675,33 @@
     <string name="settings_about_version_label">الإصدار</string>
     <string name="settings_about_package_label">بناء</string>
     <string name="settings_about_check_update_value">تحقق من أحدث إصدار لـ GitHub وتثبيته إذا كان أحدث.</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">إعدادات التصدير</string>
+    <string name="settings_backup_export_value">حفظ ملف النسخ الاحتياطي من إعداداتك الحالية. ابقه خاصًا - يحفظ بيانات الاعتماد الخاصة بك.</string>
+    <string name="settings_backup_import_title">إستعادة الإعدادات</string>
+    <string name="settings_backup_import_value">تحميل ملف نسخة احتياطية مصنوعة على نفس وحدة الرأس.</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">بناء النسخ الاحتياطي…</string>
+    <string name="settings_backup_export_failed">فشل تصدير النسخ الاحتياطي</string>
+    <string name="settings_backup_saved">تم حفظ النسخ الاحتياطي</string>
+    <string name="settings_backup_saved_to">تم حفظ النسخ الاحتياطي إلى %1$s</string>
+    <string name="settings_backup_save_failed">تعذر حفظ ملف النسخ الاحتياطي</string>
+    <string name="settings_backup_pick_file">اختر نسخة احتياطية للاستعادة</string>
+    <string name="settings_backup_no_files">لم يتم العثور على ملفات النسخ الاحتياطي. قم بتصدير واحد أولاً، أو نسخ نسخة احتياطية من .json إلى %1$s، ثم حاول مرة أخرى.</string>
+    <string name="settings_backup_read_failed">تعذر قراءة الملف</string>
+    <string name="settings_backup_invalid_file">هذا الملف ليس نسخة احتياطية صالحة لـ Overrip</string>
+    <string name="settings_backup_restoring">إستعادة…</string>
+    <string name="settings_backup_restored">تم استعادة الإعدادات</string>
+    <string name="settings_backup_restore_failed">فشل الاستعادة</string>
+    <string name="settings_backup_daemon_down">يجب أن تكون خدمة الكاميرا جاهزة للنسخ الاحتياطي أو الاستعادة. ابدأها من دايمونز، ثم حاول مرة أخرى.</string>
+    <string name="settings_backup_restore_confirm_title">استعادة الإعدادات؟</string>
+    <string name="settings_backup_restore_confirm_msg">هذا يستبدل الإعدادات الحالية فوق القرص مع خدمات النسخ الاحتياطي وإعادة التحميل. يعمل فقط على نفس وحدة الرأس التي تم إجراء النسخ الاحتياطي عليها.</string>
+    <string name="settings_backup_restore_confirm_btn">إستعادة</string>
+    <string name="settings_backup_restart_hint">تمت استعادة الإعدادات. أعد تشغيل الكاميرا الرديمون (آيمونunnamed@@2 الكاميرا → إعادة التشغيل) للتأكد من تطبيق كل إعدادات مستعادة.</string>
+    <string name="settings_backup_trips_prompt">تشمل تاريخ رحلتك (المسافة، الطاقة، التكلفة، النقاط، مواقع البدء/النهاية)؟ لا يتضمن القياس التفصيلي للرحلة الواحدة. سيحتوي الملف على تاريخ موقعك - ابقائه خاصًا.</string>
+    <string name="settings_backup_settings_only">الإعدادات فقط</string>
+    <string name="settings_backup_with_trips">تضمين الرحلات</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1120,6 +1150,9 @@
     <string name="roadsense_map_routing">العثور على المسار…</string>
     <string name="roadsense_map_route_failed">تعذر العثور على مسار. حاول مرة أخرى.</string>
     <string name="roadsense_map_need_key">إضافة مفتاح توجيه في إعدادات RoadSense للتنقل.</string>
+    <string name="roadsense_map_route_key_rejected">تم رفض مفتاح التوجيه. تحقق من المفتاح الخاص بك في إعدادات الـ RoadSense</string>
+    <string name="roadsense_map_route_network">الشبكة بطيئة جدا للعثور على مسار. تحقق من اتصالك وحاول مرة أخرى.</string>
+    <string name="roadsense_map_route_http">خطأ في توجيه الخدمة (%1$d). حاول مرة أخرى قريبا.</string>
     <string name="roadsense_map_rerouting">إيقاف المسار - إعادة حساب…</string>
     <string name="roadsense_map_arrived">لقد وصلت.</string>
     <string name="roadsense_map_nav_started">الانتقال إلى %1$s</string>
@@ -1213,4 +1246,13 @@
     <string name="roadsense_map_search_to_save">البحث عن مكان لتعيينه كـ %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">تم استعادة الرحلة</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">يتم تخزين الرمز المميز بشكل آمن ويتم تقاسمه بين عمليات التطبيق والعملية الرمزية.</string>
+    <string name="cloudflared_token_hint">أدخل رمز Cloudflared</string>
+    <string name="cloudflare_paid_version">إصدار Cloudflare مدفوع</string>
+    <string name="dialog_cloudflared_settings_title">إعدادات Cloudflared 🌐</string>
+    <string name="dialog_cloudflared_settings_message">حدد ما إذا كنت تستخدم Cloudflare أو trycloudflare. إذا كنت تستخدم Cloudflare، أدخل رمز النفق الخاص بك.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">إذا قمت بتعيين النسخة المدفوعة، لا يمكن أن يكون الرمز المميز فارغاً</string>
+    <string name="toast_cloudflared_token_invalid">الرمز المميز غير صالح: استخدم فقط الأحرف والأرقام و _ - = الأحرف</string>
+    <string name="toast_cloudflared_saved_settings">تم حفظ إعدادات Cloudflared</string>
 </resources>
