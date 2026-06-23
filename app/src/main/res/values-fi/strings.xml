@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">Tunnus on tallennettu turvallisesti ja jaettu sovelluksen ja taustaprosessien välillä.</string>
     <string name="zrok_reset_environment">Nollaa Zrok-ympäristö</string>
     <string name="zrok_reset_environment_desc">Poistaa ympäristön ja tokenin. Sinun täytyy ottaa käyttöön tokenilla (käyttää laiterajaa).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">Tunnus on tallennettu turvallisesti ja jaettu sovelluksen ja taustaprosessien välillä.</string>
-    <string name="cloudflared_token_hint">Syötä pilvipohjainen tunnus</string>
-    <string name="cloudflare_paid_version">Cloudflare Maksettu Versio</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Nollaa Tiedot</string>
     <string name="reset_subtitle">Pyyhi kerätyt tiedot luokittain</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">Vakavuus</string>
     <string name="recording_lib_filter_section_type">Tyyppi</string>
     <string name="recording_lib_filter_section_place">Paikka</string>
+    <string name="recording_lib_filter_section_storage">Tallennustila</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">Sisäinen</string>
+    <string name="recording_lib_storage_filter_sd">SD-kortti</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Etsi paikkoja…</string>
     <string name="recording_lib_chip_type_normal">Normaali</string>
     <string name="recording_lib_chip_type_proximity">Läheisyys</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">TAPAHTUMA</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">SD</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Jaetaan %1$d äänitystä</string>
     <!-- fragment_sentry_config -->
@@ -508,10 +515,6 @@
     <string name="clip_label_url">URL-osoite</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared asetukset</string>
-    <string name="dialog_cloudflared_settings_message">Määritä, käytätkö maksullista Cloudflare tai trycloudflare. Jos käytät maksettu Cloudflare, kirjoita tunneli tunneliin.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">Jos asetettu maksulliseen versioon, tunnus ei voi olla tyhjä</string>
-    <string name="toast_cloudflared_saved_settings">Cloudflared asetukset tallennettu</string>
     <string name="toast_no_config_needed">%1$s ei tarvita konfiguraatiota</string>
     <string name="dialog_zrok_token_title">Zrok Tunnel Token</string>
     <string name="dialog_zrok_token_message">Anna Zrok ottaa käyttöön token.\nHanki yksi osoitteessa: zrok.io</string>
@@ -660,6 +663,33 @@
     <string name="settings_about_version_label">Versio</string>
     <string name="settings_about_package_label">Koosta</string>
     <string name="settings_about_check_update_value">Tarkista uusin GitHub julkaisu ja asenna jos uudempi.</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">Vie asetukset</string>
+    <string name="settings_backup_export_value">Tallenna varmuuskopiotiedosto nykyisistä asetuksista. Pidä se yksityisenä — sillä on käyttäjätunnuksesi.</string>
+    <string name="settings_backup_import_title">Palauta asetukset</string>
+    <string name="settings_backup_import_value">Lataa samasta pääyksiköstä tehty varmuuskopio</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">Rakennetaan varmuuskopio…</string>
+    <string name="settings_backup_export_failed">Varmuuskopioinnin vienti epäonnistui</string>
+    <string name="settings_backup_saved">Varmuuskopio tallennettu</string>
+    <string name="settings_backup_saved_to">Varmuuskopio tallennettu %1$s</string>
+    <string name="settings_backup_save_failed">Varmuuskopiotiedostoa ei voitu tallentaa</string>
+    <string name="settings_backup_pick_file">Valitse varmuuskopio palauttaaksesi</string>
+    <string name="settings_backup_no_files">Varmuuskopiotiedostoja ei löytynyt. Vie ensin tai kopioi varmuuskopio .json %1$sja yritä sitten uudelleen.</string>
+    <string name="settings_backup_read_failed">Tiedostoa ei voitu lukea</string>
+    <string name="settings_backup_invalid_file">Tiedosto ei ole kelvollinen Overdrive varmuuskopio</string>
+    <string name="settings_backup_restoring">Palautetaan…</string>
+    <string name="settings_backup_restored">Asetukset palautettu</string>
+    <string name="settings_backup_restore_failed">Palautus epäonnistui</string>
+    <string name="settings_backup_daemon_down">Kamerapalvelun on oltava käynnissä varmuuskopioidaksesi tai palautettavaksi. Aloita se Daemonista ja yritä sitten uudelleen.</string>
+    <string name="settings_backup_restore_confirm_title">Palauta asetukset?</string>
+    <string name="settings_backup_restore_confirm_msg">Tämä korvaa nykyiset Overdrive asetukset varmuuskopioinnilla ja uudelleenlatauksella. Se toimii vain samassa pääyksikössä, johon varmuuskopiointi on tehty.</string>
+    <string name="settings_backup_restore_confirm_btn">Palauta</string>
+    <string name="settings_backup_restart_hint">Asetukset palautettu. Käynnistä kameran taustakuva uudelleen (Daemons → Kamera → Käynnistä uudelleen) varmistaaksesi, että jokainen palautettu asetus on käytössä.</string>
+    <string name="settings_backup_trips_prompt">Sisällytä matkahistoriasi (etäisyys, energia, kustannukset, pisteet, aloitus- ja lopetussijainnit)? Yksityiskohtaiset matkakohtaiset telemetriat eivät sisälly hintaan. Tiedosto sisältää sijaintihistoriasi — pitää se yksityisenä.</string>
+    <string name="settings_backup_settings_only">Vain asetukset</string>
+    <string name="settings_backup_with_trips">Sisällytä matkat</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1080,6 +1110,9 @@
     <string name="roadsense_map_routing">Finding route…</string>
     <string name="roadsense_map_route_failed">Reittiä ei löytynyt. Yritä uudelleen.</string>
     <string name="roadsense_map_need_key">Lisää reititysavain RoadSensen asetuksiin navigoidaksesi.</string>
+    <string name="roadsense_map_route_key_rejected">Reititysavain hylätty. Tarkista avaimesi RoadSensen asetuksista.</string>
+    <string name="roadsense_map_route_network">Verkko liian hidas löytääksesi reitin. Tarkista yhteytesi ja yritä uudelleen.</string>
+    <string name="roadsense_map_route_http">Reitityspalveluvirhe (%1$d). Yritä hetken kuluttua uudelleen.</string>
     <string name="roadsense_map_rerouting">Off route — recalculating…</string>
     <string name="roadsense_map_arrived">Olet saapunut.</string>
     <string name="roadsense_map_nav_started">Navigoidaan kohteeseen %1$s</string>
@@ -1173,4 +1206,13 @@
     <string name="roadsense_map_search_to_save">Etsi paikka joka asetetaan %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">Matka palautettu</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">Tunnus on tallennettu turvallisesti ja jaettu sovelluksen ja taustaprosessien välillä.</string>
+    <string name="cloudflared_token_hint">Syötä pilvipohjainen tunnus</string>
+    <string name="cloudflare_paid_version">Cloudflare Maksettu Versio</string>
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared asetukset</string>
+    <string name="dialog_cloudflared_settings_message">Määritä, käytätkö maksullista Cloudflare tai trycloudflare. Jos käytät maksettu Cloudflare, kirjoita tunneli tunneliin.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Jos asetettu maksulliseen versioon, tunnus ei voi olla tyhjä</string>
+    <string name="toast_cloudflared_token_invalid">Virheellinen tunniste: käytä vain kirjaimia, numeroita ja . _ - = merkkiä</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared asetukset tallennettu</string>
 </resources>
