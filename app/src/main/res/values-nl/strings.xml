@@ -219,10 +219,6 @@
     <string name="zrok_token_storage_note">Token wordt veilig opgeslagen en gedeeld tussen app en daemon processen.</string>
     <string name="zrok_reset_environment">Zrok omgeving opnieuw instellen</string>
     <string name="zrok_reset_environment_desc">Verwijdert omgeving en token. Je zult opnieuw moeten activeren met je token (gebruikt een apparaat slot).</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">Token wordt veilig opgeslagen en gedeeld tussen app en daemon processen.</string>
-    <string name="cloudflared_token_hint">Voer cloudflared token in</string>
-    <string name="cloudflare_paid_version">Cloudflare Betaalde Versie</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Resetgegevens</string>
     <string name="reset_subtitle">Verwijder de verzamelde gegevens per categorie</string>
@@ -266,6 +262,12 @@
     <string name="recording_lib_filter_section_severity">Zwaarheid</string>
     <string name="recording_lib_filter_section_type">Type</string>
     <string name="recording_lib_filter_section_place">Plaats</string>
+    <string name="recording_lib_filter_section_storage">Opslagruimte</string>
+    <!-- Storage filter chip labels (full words; the tile badge uses the short
+         SD/USB/INT forms above). -->
+    <string name="recording_lib_storage_filter_internal">Intern</string>
+    <string name="recording_lib_storage_filter_sd">SD-kaart</string>
+    <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">Normaal</string>
     <string name="recording_lib_chip_type_proximity">Nabijheid</string>
@@ -306,6 +308,11 @@
     <string name="recording_lib_type_event">EVENEMENT</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
+    <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
+         silent SD→internal fallback (SD bridged behind the USB power rail). -->
+    <string name="recording_lib_storage_sd">SA</string>
+    <string name="recording_lib_storage_usb">USB</string>
+    <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Delen van %1$d opnamen</string>
     <!-- fragment_sentry_config -->
@@ -508,10 +515,6 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
-    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
-    <string name="dialog_cloudflared_settings_message">Bepaal of je betaald Cloudflare of trycloudflare. Als je betaalde Cloudflare gebruikt, voer dan je tunneltoken in.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">Als je op de betaalde versie hebt gezet, mag de token niet leeg zijn</string>
-    <string name="toast_cloudflared_saved_settings">Cloudflared instellingen opgeslagen</string>
     <string name="toast_no_config_needed">Geen configuratie nodig voor %1$s</string>
     <string name="dialog_zrok_token_title">Zrok Tunnel Token</string>
     <string name="dialog_zrok_token_message">Voer je Zrok activeren token in.\nKrijg er een op: zrok.io</string>
@@ -660,6 +663,33 @@
     <string name="settings_about_version_label">Versie</string>
     <string name="settings_about_package_label">Bouwen</string>
     <string name="settings_about_check_update_value">Controleer de nieuwste GitHub-release en installeer indien nieuwer.</string>
+    <!-- Backup & Restore (same-device). The backup file contains credentials +
+         the device key, so the copy warns the user to keep it private. -->
+    <string name="settings_backup_export_title">Exporteer instellingen</string>
+    <string name="settings_backup_export_value">Een reservekopiebestand van uw huidige instellingen opslaan. Houd het privé - het bevat uw inloggegevens.</string>
+    <string name="settings_backup_import_title">Instellingen herstellen</string>
+    <string name="settings_backup_import_value">Een back-upbestand van dezelfde hoofdeenheid laden.</string>
+    <string name="settings_backup_default_filename">overdrive-backup.json</string>
+    <string name="settings_backup_exporting">Building backup…</string>
+    <string name="settings_backup_export_failed">Back-up exporteren mislukt</string>
+    <string name="settings_backup_saved">Back-up opgeslagen</string>
+    <string name="settings_backup_saved_to">Back-up opgeslagen in %1$s</string>
+    <string name="settings_backup_save_failed">Kon het back-up bestand niet opslaan</string>
+    <string name="settings_backup_pick_file">Kies een back-up om te herstellen</string>
+    <string name="settings_backup_no_files">Geen reservekopiebestanden gevonden. Exporteer er één, of kopieer een backup .json naar %1$s, en probeer het dan opnieuw.</string>
+    <string name="settings_backup_read_failed">Kon het bestand niet lezen</string>
+    <string name="settings_backup_invalid_file">Dat bestand is geen geldige Overdrive back-up</string>
+    <string name="settings_backup_restoring">Restoring…</string>
+    <string name="settings_backup_restored">Instellingen hersteld</string>
+    <string name="settings_backup_restore_failed">Herstellen mislukt</string>
+    <string name="settings_backup_daemon_down">De camera-service moet worden uitgevoerd om een back-up te maken of te herstellen. Start het vanaf Daemons en probeer het opnieuw.</string>
+    <string name="settings_backup_restore_confirm_title">Instellingen herstellen?</string>
+    <string name="settings_backup_restore_confirm_msg">Dit vervangt uw huidige instellingen van Overdrive met de back-up en herlaadt services. Het werkt alleen op dezelfde hoofdeenheid waarop de back-up is gemaakt.</string>
+    <string name="settings_backup_restore_confirm_btn">Herstellen</string>
+    <string name="settings_backup_restart_hint">Instellingen hersteld. Herstart de cameradaemon (Daemons → Camera → Herstart) om ervoor te zorgen dat elke herstelde instelling wordt toegepast.</string>
+    <string name="settings_backup_trips_prompt">Inclusief je reisgeschiedenis (afstand, energie, kosten, scores, start- en eindlocaties)? Gedetailleerde telemetrie wordt niet meegenomen. Het bestand zal je locatiegeschiedenis bevatten - houd het privé.</string>
+    <string name="settings_backup_settings_only">Alleen instellingen</string>
+    <string name="settings_backup_with_trips">Inclusief ritten</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1080,6 +1110,9 @@
     <string name="roadsense_map_routing">Route vinden…</string>
     <string name="roadsense_map_route_failed">Kon geen route vinden. Probeer het opnieuw.</string>
     <string name="roadsense_map_need_key">Voeg een routing key toe in RoadSense instellingen om te navigeren.</string>
+    <string name="roadsense_map_route_key_rejected">Route sleutel geweigerd. Controleer je sleutel in de RoadSense instellingen.</string>
+    <string name="roadsense_map_route_network">Netwerk te langzaam om een route te vinden. Controleer je verbinding en probeer het opnieuw.</string>
+    <string name="roadsense_map_route_http">Fout in de routing service (%1$d). Probeer het binnenkort opnieuw.</string>
     <string name="roadsense_map_rerouting">Route uitschakelen - opnieuw berekenen…</string>
     <string name="roadsense_map_arrived">U bent gearriveerd.</string>
     <string name="roadsense_map_nav_started">Navigeer naar %1$s</string>
@@ -1173,4 +1206,13 @@
     <string name="roadsense_map_search_to_save">Zoek een plaats om in te stellen als %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">Rit hersteld</string>
+    <!-- Cloudflared paid-tunnel settings -->
+    <string name="cloudflared_token_storage_note">Token wordt veilig opgeslagen en gedeeld tussen app en daemon processen.</string>
+    <string name="cloudflared_token_hint">Voer cloudflared token in</string>
+    <string name="cloudflare_paid_version">Cloudflare Betaalde Versie</string>
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
+    <string name="dialog_cloudflared_settings_message">Bepaal of je betaald Cloudflare of trycloudflare. Als je betaalde Cloudflare gebruikt, voer dan je tunneltoken in.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Als je op de betaalde versie hebt gezet, mag de token niet leeg zijn</string>
+    <string name="toast_cloudflared_token_invalid">Ongeldige sleutel: gebruik alleen letters, cijfers en . _ - = tekens</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared instellingen opgeslagen</string>
 </resources>
