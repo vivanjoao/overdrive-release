@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">टोकन को सुरक्षित रूप से संग्रहीत किया जाता है और ऐप और डेमन प्रक्रियाओं के बीच साझा किया जाता है।</string>
     <string name="zrok_reset_environment">Zrok पर्यावरण को रीसेट करें</string>
     <string name="zrok_reset_environment_desc">पर्यावरण और टोकन को हटा देता है। आपको अपने टोकन के साथ फिर से सक्षम करना होगा (डिवाइस स्लॉट का उपयोग करता है) ।</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Token is stored securely and shared between app and daemon processes.</string>
+    <string name="cloudflared_token_hint">Enter cloudflared token</string>
+    <string name="cloudflare_paid_version">Cloudflare Paid Version</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">डेटा रीसेट करें</string>
     <string name="reset_subtitle">श्रेणी के अनुसार संचित डेटा मिटाएं</string>
@@ -504,6 +508,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
+    <string name="dialog_cloudflared_settings_message">Define whether you are using paid Cloudflare or trycloudflare. If you are using paid Cloudflare, enter your tunnel token.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">If you set to paid version the token cannot be empty</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
     <string name="toast_no_config_needed">%1$s के लिए कोई कॉन्फ़िगरेशन आवश्यक नहीं है</string>
     <string name="dialog_zrok_token_title">Zrok सुरंग टोकन</string>
     <string name="dialog_zrok_token_message">अपने Zrok सक्षम टोकन दर्ज करें.</string>
