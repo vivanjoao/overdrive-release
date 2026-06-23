@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Token lagres sikkert og delt mellom app og daemon-prosesser.</string>
     <string name="zrok_reset_environment">Tilbakestill Zrok miljø</string>
     <string name="zrok_reset_environment_desc">Fjerner miljø og token. Du må aktivere på nytt med tokenet (bruker en enhets spor).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Token lagres sikkert og delt mellom app og daemon-prosesser.</string>
+    <string name="cloudflared_token_hint">Angi skyvnet token</string>
+    <string name="cloudflare_paid_version">Cloudflare betalt versjon</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Tilbakestill data</string>
     <string name="reset_subtitle">Oppsamlet data etter kategori</string>
@@ -504,6 +508,10 @@
     <string name="clip_label_url">Nettadresse</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Innstillinger for Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Definer om du bruker betalt Cloudflare eller trycloudflare. Hvis du bruker betalt Cloudflare, skriv inn tunnel token.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Hvis du har satt til betalt versjon, kan tokenet ikke være tomt</string>
+    <string name="toast_cloudflared_saved_settings">Innstillinger lagret i skyflensen</string>
     <string name="toast_no_config_needed">Ingen konfigurasjon nødvendig for %1$s</string>
     <string name="dialog_zrok_token_title">Zrok Tunnel Token</string>
     <string name="dialog_zrok_token_message">Skriv inn din Zrok aktiver koden.\nFå en på: zrok.io</string>
