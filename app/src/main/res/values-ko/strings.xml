@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">토큰은 안전하게 저장되어 앱과 데몬 프로세스 사이에 공유됩니다.</string>
     <string name="zrok_reset_environment">Zrok 환경을 다시 설정</string>
     <string name="zrok_reset_environment_desc">환경과 토큰을 제거합니다. 토큰으로 다시 활성화해야 합니다 (기기 슬롯을 사용합니다).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Token is stored securely and shared between app and daemon processes.</string>
+    <string name="cloudflared_token_hint">Enter cloudflared token</string>
+    <string name="cloudflare_paid_version">Cloudflare Paid Version</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">재설정 데이터</string>
     <string name="reset_subtitle">축적된 데이터를 카테고리별로 삭제</string>
@@ -501,6 +505,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Cloudflared Settings</string>
+    <string name="dialog_cloudflared_settings_message">Define whether you are using paid Cloudflare or trycloudflare. If you are using paid Cloudflare, enter your tunnel token.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">If you set to paid version the token cannot be empty</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
     <string name="toast_no_config_needed">%1$s에 대한 구성이 필요하지 않습니다.</string>
     <string name="dialog_zrok_token_title">Zrok 터널 토큰</string>
     <string name="dialog_zrok_token_message">Zrok 활성화 토큰을 입력합니다.</string>
