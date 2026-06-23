@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">يتم تخزين الرمز المميز بشكل آمن ويتم تقاسمه بين عمليات التطبيق والعملية الرمزية.</string>
     <string name="zrok_reset_environment">إعادة تعيين بيئة السكر</string>
     <string name="zrok_reset_environment_desc">إزالة البيئة والرمز المميز. سوف تحتاج إلى إعادة التمكين باستخدام الرمز المميز الخاص بك (يستخدم فتحة الجهاز).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">يتم تخزين الرمز المميز بشكل آمن ويتم تقاسمه بين عمليات التطبيق والعملية الرمزية.</string>
+    <string name="cloudflared_token_hint">أدخل رمز Cloudflared</string>
+    <string name="cloudflare_paid_version">إصدار Cloudflare مدفوع</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">إعادة تعيين البيانات</string>
     <string name="reset_subtitle">مسح البيانات المتراكمة حسب الفئة</string>
@@ -516,6 +520,10 @@
     <string name="clip_label_url">الرابط</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">إعدادات Cloudflared 🌐</string>
+    <string name="dialog_cloudflared_settings_message">حدد ما إذا كنت تستخدم Cloudflare أو trycloudflare. إذا كنت تستخدم Cloudflare، أدخل رمز النفق الخاص بك.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">إذا قمت بتعيين النسخة المدفوعة، لا يمكن أن يكون الرمز المميز فارغاً</string>
+    <string name="toast_cloudflared_saved_settings">تم حفظ إعدادات Cloudflared</string>
     <string name="toast_no_config_needed">لا توجد اعدادات مطلوبة ل %1$s</string>
     <string name="dialog_zrok_token_title">الرمز المميز للنفق</string>
     <string name="dialog_zrok_token_message">Enter your Zrok enable token.\nGet one at: zrok.io</string>
