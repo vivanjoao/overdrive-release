@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Token jest przechowywany bezpiecznie i udostępniany między aplikacjami i procesami demonów.</string>
     <string name="zrok_reset_environment">Zresetuj środowisko Zrok</string>
     <string name="zrok_reset_environment_desc">Usuwa środowisko i token. Będziesz musiał ponownie włączyć swój token (używa gniazda urządzenia).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Token jest przechowywany bezpiecznie i udostępniany między aplikacjami i procesami demonów.</string>
+    <string name="cloudflared_token_hint">Wprowadź token w chmurze</string>
+    <string name="cloudflare_paid_version">Wersja płatna Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Resetuj dane</string>
     <string name="reset_subtitle">Wyczyść zebrane dane według kategorii</string>
@@ -510,6 +514,10 @@
     <string name="clip_label_url">Adres URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Ustawienia kloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Określ czy używasz płatnej Cloudflare czy trycloudflare. Jeśli używasz płatnej Cloudflare, wprowadź swój token tunelu.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Jeśli ustawisz wersję płatną, token nie może być pusty</string>
+    <string name="toast_cloudflared_saved_settings">Zapisano w chmurze ustawienia</string>
     <string name="toast_no_config_needed">Konfiguracja nie jest wymagana dla %1$s</string>
     <string name="dialog_zrok_token_title">Token tunelu Zrok</string>
     <string name="dialog_zrok_token_message">Wprowadź swój token włączający Zrok.\nPobierz tak: zrok.io</string>
