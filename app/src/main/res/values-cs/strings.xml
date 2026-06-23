@@ -219,6 +219,10 @@
     <string name="zrok_token_storage_note">Token je bezpečně uložen a sdílen mezi aplikacemi a démonovými procesy.</string>
     <string name="zrok_reset_environment">Obnovit Zrok prostředí</string>
     <string name="zrok_reset_environment_desc">Odstraní prostředí a token. Budete muset znovu povolit s tokenem (používá slot zařízení).</string>
+    <!-- dialog_cloudflared_settings -->
+    <string name="cloudflared_token_storage_note">Token je bezpečně uložen a sdílen mezi aplikacemi a démonovými procesy.</string>
+    <string name="cloudflared_token_hint">Vstoupit do cloudflared token</string>
+    <string name="cloudflare_paid_version">Placená verze Cloudflare</string>
     <!-- dialog_reset_data -->
     <string name="reset_title">Resetovat data</string>
     <string name="reset_subtitle">Vymazat shromážděná data podle kategorie</string>
@@ -510,6 +514,10 @@
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
     <!-- Daemons fragment -->
+    <string name="dialog_cloudflared_settings_title">🌐 Nastavení Cloudflared</string>
+    <string name="dialog_cloudflared_settings_message">Definujte, zda používáte placené Cloudflare nebo trycloudflare. Pokud používáte placené Cloudflare, zadejte svůj tunel tokenu.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Pokud jste nastavili na placenou verzi, token nemůže být prázdný</string>
+    <string name="toast_cloudflared_saved_settings">Nastavení oblačnosti uloženo</string>
     <string name="toast_no_config_needed">Pro %1$s není potřeba žádná konfigurace</string>
     <string name="dialog_zrok_token_title">Zrok tunelový token</string>
     <string name="dialog_zrok_token_message">Zadejte svůj Zrok povolit token.\nZískejte jeden na: zrok.io</string>
