@@ -187,6 +187,107 @@
     <string name="setup_overlay_title">Tillåt visning över andra appar</string>
     <string name="setup_overlay_body">Aktivera detta för att visa en flytande status indikator för inspelning och resa spårning ovanpå andra appar.</string>
     <string name="setup_overlay_button">Öppna inställningar för överlagring</string>
+    <!-- Onboarding guide (novice track). Parked-only, glanceable. Overdrive is a
+         protected brand name — keep it verbatim. -->
+    <!-- Shared button labels -->
+    <string name="onboarding_next">Nästa</string>
+    <string name="onboarding_back">Tillbaka</string>
+    <string name="onboarding_skip">Hoppa</string>
+    <string name="onboarding_later">Gör detta senare</string>
+    <string name="onboarding_dismiss">Avfärda</string>
+    <string name="onboarding_exit">Avsluta rundtur</string>
+    <string name="onboarding_done_short">Jag fattar</string>
+    <!-- Step 0: authorize the daemon (system ADB popup) -->
+    <string name="onboarding_authorize_title">Väck överväxel</string>
+    <string name="onboarding_authorize_body">Overdrive kör dina kameror genom en liten hjälpare på enheten. Android kommer att be en gång att tillåta USB-felsökning — tryck på <b>Tillåt</b> och kontrollera <b>Tillåt alltid från denna enhet</b> så att den stannar kvar efter varje omstart.</string>
+    <string name="onboarding_authorize_button">Tillåt åtkomst</string>
+    <string name="onboarding_authorize_waiting_title">Väntar på tillstånd…</string>
+    <string name="onboarding_authorize_waiting_body">Acceptera Android popup. Om du inte ser det, kan det redan beviljas — detta kommer att fortsätta på egen hand.</string>
+    <string name="onboarding_authorize_retry_title">Fortfarande inte ansluten</string>
+    <string name="onboarding_authorize_retry_body">Hjälparen körs inte ännu. Android-behörigheten kan ha avfärdats. Försök igen och kom ihåg att kontrollera <b>Tillåt alltid</b>.</string>
+    <string name="onboarding_authorize_retry_button">Försök igen</string>
+    <!-- Camera mapping chapter -->
+    <string name="onboarding_camera_step_label">Kamera · steg %1$d %2$d</string>
+    <string name="onboarding_camera_intro_title">Konfigurera dina kameror</string>
+    <string name="onboarding_camera_intro_body">Låt oss berätta Overdrive vilken kamera som är din 360 vy och vilken som är din dashcam. Det tar ungefär en minut, och du kan ändra den senare.</string>
+    <string name="onboarding_camera_intro_primary">Starta</string>
+    <string name="onboarding_camera_opening_title">Öppnar kamerainställning…</string>
+    <string name="onboarding_camera_opening_body">Laddar en förhandsvisning i realtid från dina kameror. Detta kan ta några sekunder.</string>
+    <string name="onboarding_camera_pano_title">Detta är din 360 vy</string>
+    <string name="onboarding_camera_pano_body">Använd pilarna för att hitta den sydda 4-up-bilden. Läs den från BOTTOM: nederst till vänster är REAR, nederst till höger är VÄNSTER sidan.</string>
+    <string name="onboarding_camera_dashcam_title">Hitta nu road-ahead kameran</string>
+    <string name="onboarding_camera_dashcam_body">Kliv igenom kamerorna med pilarna och stanna på den som visar vindrutan / framåt utsikt. Notera dess nummer — du väljer den härnäst.</string>
+    <string name="onboarding_camera_pick_title">Välj din 360 kamera</string>
+    <string name="onboarding_camera_pick_body">I det översta kortet, välj numret för din 360 / normala kamera. Osäker? Lämna det på AUTO och Overdrive siffror ut.</string>
+    <string name="onboarding_camera_pick_primary">Nästa</string>
+    <string name="onboarding_camera_pick_dash_title">Välj din instrumentkamera</string>
+    <string name="onboarding_camera_pick_dash_body">I detta kort väljer du vilket strecknummer du hittade tidigare – eller så lämnar du det på AUTO.</string>
+    <string name="onboarding_camera_save_primary">Spara &amp; starta om</string>
+    <string name="onboarding_camera_applying_title">Tillämpar — startar om kameror</string>
+    <string name="onboarding_camera_applying_body">Flödet kommer att gå mörkt och blinka i ca 10 sekunder. Detta är normalt - häng tight.</string>
+    <string name="onboarding_camera_verify_title">Snabb kontroll</string>
+    <string name="onboarding_camera_verify_body">Visar 360 vyn den sydda bilden och streckkameran visar vägen framåt? Om ett flöde ser fel trycker du på Re-pick — ingenting bryts.</string>
+    <string name="onboarding_camera_verify_ok">Ser ut rätt</string>
+    <string name="onboarding_camera_verify_repick">Välj igen</string>
+    <string name="onboarding_camera_windshield_title">Road-ahead band på inspelningar? (valfritt)</string>
+    <string name="onboarding_camera_windshield_body">För OEM dashcam layout — vindrutekameran som en remsa ovanpå din inspelning — plocka Windshield i rollmenyn, välj framåt kameran, och Spara. De flesta ägare kan hoppa över detta.</string>
+    <string name="onboarding_camera_windshield_primary">Visa mig</string>
+    <string name="onboarding_camera_windshield_skip">Nej tack</string>
+    <!-- Vehicle profile chapter -->
+    <string name="onboarding_vehicle_title">Berätta för Overdrive ditt batteri</string>
+    <string name="onboarding_vehicle_body">Välj din modell och vi fyller i kWh, eller skriv den själv (15–120). Detta gör räckvidd och laddning uppskattningar exakt. Du kan hoppa över och ställa in det senare.</string>
+    <string name="onboarding_vehicle_primary">Ställ in batteri</string>
+    <!-- Dashboard orientation chapter -->
+    <string name="onboarding_dash_tiles_title">Din sittbrunn i korthet</string>
+    <string name="onboarding_dash_tiles_body">Dessa kort är knappar — tryck för att öppna Live-kameror, Inspelningar, Tjänster eller ditt fordon.</string>
+    <string name="onboarding_dash_chips_title">Dessa visar bara status</string>
+    <string name="onboarding_dash_chips_body">De chips upp topp visar inspelning, tjänster och din fjärrlänk. De uppdaterar på egen hand - de är inte knappar.</string>
+    <string name="onboarding_dash_chips_body_land">Din livestatus – inspelning, tjänster och fjärranslutning – visas här. Den uppdateras på egen hand.</string>
+    <!-- Completion -->
+    <string name="onboarding_done_title">Sittbrunn klar</string>
+    <string name="onboarding_done_body">Kameror är mappade och batteridrivna. Tryck på Live för att titta på dina flöden – eller utforska de djupare inställningarna när som helst.</string>
+    <string name="onboarding_done_primary">Klar</string>
+    <string name="onboarding_done_secondary">Utforska installation</string>
+    <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
+    <string name="onboarding_help_cd">Guidad tur</string>
+    <string name="onboarding_reset_toast">Återställning av registrering — spela om guiden</string>
+    <string name="onboarding_expert_chapter_label">Kapitel %1$d av %2$d</string>
+    <string name="onboarding_expert_finish">Avsluta</string>
+    <string name="onboarding_expert_menu_title">Guidad tur</string>
+    <string name="onboarding_expert_menu_body">En snabb promenad genom den djupare installationen – din fordonsprofil, integrationer, övervakning, diagnostik, tjänster och säkerhet. Du kan stanna när som helst.</string>
+    <string name="onboarding_expert_menu_start">Starta rundtur</string>
+    <string name="onboarding_expert_vehicle_title">Fordonets profil</string>
+    <string name="onboarding_expert_vehicle_body">Tryck på Fordonstativet för att ställa in batteriets storlek och modell — den ger exakta beräkningar på intervall och hälsa.</string>
+    <string name="onboarding_expert_recordings_title">Dina inspelningar</string>
+    <string name="onboarding_expert_recordings_body">Växla mellan Dashcam (kontinuerliga + närhetsklipp) och Övervakning (parkerade vakthändelser) med denna växla — var och en behåller sitt eget bibliotek. Tryck på ett klipp för att spela upp det.</string>
+    <string name="onboarding_expert_live_title">Live kameror</string>
+    <string name="onboarding_expert_live_body">Öppna Live härifrån för att titta på alla kameror i realtid. Praktiskt för att kontrollera vyn innan en enhet eller medan parkerad i närheten.</string>
+    <string name="onboarding_expert_trips_title">Resans historik</string>
+    <string name="onboarding_expert_trips_body">Resor loggar varje enhet - rutt, avstånd, varaktighet och energianvändning - så att du kan granska var bilen har varit.</string>
+    <string name="onboarding_expert_roadsense_title">RoadSense</string>
+    <string name="onboarding_expert_roadsense_body">RoadSense använder bilens rörelsesensorer och GPS för att upptäcka vägfaror – stötar, gropar, hastighetsbrytare – och varnar dig före kända. Dess flikar täcker upptäckt, riskkartan, varningschimes och Blind Spot. Slå på huvudströmbrytaren för att använda något av den.</string>
+    <string name="onboarding_expert_blindspot_title">Blind Spot</string>
+    <string name="onboarding_expert_blindspot_body">Aktivera Blind Spot i fliken här och när du signalerar en sväng, en sidokamera-vy visas automatiskt på skärmen — vänster för en vänster signal, höger för en höger — sedan döljer sig strax efter. Det går bara när en vändsignal är på.</string>
+    <string name="onboarding_expert_maps_title">Navigation</string>
+    <string name="onboarding_expert_maps_body">Öppna kartan för full sväng-för-sväng-navigering — sök en destination, få routing och live-vägledning, plus närliggande sevärdheter och eventuella vägfaror RoadSense har loggat längs vägen. Du kan också automatiskt projicera den på instrumentklustret när du börjar köra — som växlar liv i RoadSense kartfliken.</string>
+    <string name="onboarding_expert_integrations_title">Integrationer</string>
+    <string name="onboarding_expert_integrations_body">Anslut Telegram varningar, en bättre Routeplanner, MQTT eller BYD Cloud. Varje kort öppnar sin konfiguration inne i appen. Pillret upp på toppen blir grönt när allt är kopplat.</string>
+    <string name="onboarding_expert_bydcloud_title">BYD Cloud låser upp fjärrkontrollen</string>
+    <string name="onboarding_expert_bydcloud_body">Länka ditt BYD-konto här möjliggör fjärrlås, blixt och horn från telefonen. Behandla det länkade kontot och åtkomstkoden som känslig.</string>
+    <string name="onboarding_expert_surveillance_title">Övervakning &amp; inspelning</string>
+    <string name="onboarding_expert_surveillance_body">Finjustera detektion, kvalitet och lagring här. Dessa öppna som in-app konfigurationssidor som serveras från din bil — en tom skärm betyder bara att hjälparen fortfarande startar.</string>
+    <string name="onboarding_expert_camprobe_title">Kamerasond — försiktig</string>
+    <string name="onboarding_expert_camprobe_body">Denna kartlägger vilken fysisk kamera som matar varje roll och startar om kamerorna. Ändra bara om ett flöde ser fel ut – du ställer in det tidigare i guiden.</string>
+    <string name="onboarding_expert_traffic_title">Trafikövervakning — krävs för fjärråtkomst</string>
+    <string name="onboarding_expert_traffic_body">BYDs inbyggda Traffic Monitor blockerar andra appar från att använda bilens inbyggda SIM. Om du vill nå din bil på distans över BYD SIM, måste du inaktivera den här. Huvudenheten startar om för att tillämpa ändringen.</string>
+    <string name="onboarding_expert_daemons_title">Tjänster — hantera med omsorg</string>
+    <string name="onboarding_expert_daemons_body">Dessa växlar startar och stoppar bakgrundstjänster. Stänga av kameran, övervakning eller ACC Sentry stoppar inspelningen och håller dem borta tills du slår på dem igen — även efter en omstart.</string>
+    <string name="onboarding_expert_security_title">Lås med en PIN-kod</string>
+    <string name="onboarding_expert_security_body">Ställ in en PIN-kod för att stänga av appen för delade fordon. Övervakning och inspelning fortsätter att köras medan appen är låst. En bortglömd PIN-kod kan endast rensas från en dator över USB.</string>
+    <string name="onboarding_expert_reset_title">Återställ data — permanent</string>
+    <string name="onboarding_expert_reset_body">Detta raderar inspelningar, händelser och inställningar och kan inte ångras. Det är här om du någonsin säljer bilen - inte en del av normal användning.</string>
+    <string name="onboarding_expert_done_title">Det är turen</string>
+    <string name="onboarding_expert_done_body">Du har sett de djupare inställningarna. Öppna den här guiden när som helst från hjälpknappen.</string>
     <!-- Language picker (drawer footer + bottom sheet) -->
     <string name="cd_close">Stäng</string>
     <string name="language_picker_title">Språk</string>
@@ -632,6 +733,7 @@
     <string name="rail_recordings">Inspelningar</string>
     <string name="rail_vehicle">Fordon</string>
     <string name="rail_trips">Resor</string>
+    <string name="rail_charging">Laddar</string>
     <string name="rail_integrations">Integrationer</string>
     <string name="rail_diagnostics">Diagnostik</string>
     <string name="rail_settings">Inställningar</string>
