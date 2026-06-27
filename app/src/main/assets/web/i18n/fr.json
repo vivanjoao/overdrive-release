@@ -2063,7 +2063,7 @@
   },
   "backup": {
     "section_title": "Sauvegarde & Restauration",
-    "section_sub": "Save your Overdrive settings to a file, or restore them on this same head unit. The file includes your credentials — keep it private.",
+    "section_sub": "Enregistrer vos paramètres Overdrive dans un fichier, ou les restaurer sur cette même unité principale. Le fichier contient vos identifiants — gardez-le privé.",
     "export_title": "Exporter les paramètres",
     "export_value": "Téléchargez un fichier de sauvegarde de vos paramètres actuels.",
     "export_done": "Sauvegarde téléchargée",
@@ -2185,7 +2185,7 @@
     "connectivity_updates": "Mise à jour de la connectivité",
     "connectivity_updates_desc": "Il est utile pour le diagnostic, charmant dans l'utilisation normale.",
     "motion_text": "Alertes de texte de motion",
-    "motion_text_desc": "Send a motion alert (text, plus the snapshot photo when one is available) when surveillance detects motion. Video clips have their own toggle below.",
+    "motion_text_desc": "Envoyer une alerte de mouvement (texte, plus la photo d'instantané quand elle est disponible) lorsque la surveillance détecte le mouvement. Les clips vidéo ont leur propre bascule ci-dessous.",
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Démarrage automatique lorsque le véhicule est éteint",
     "auto_start_acc_off_desc": "Lancez le daemon de robot Telegram automatiquement lorsque le véhicule passe à ACC OFF, de sorte que les commandes fonctionnent pendant que le véhicule est stationné.",
