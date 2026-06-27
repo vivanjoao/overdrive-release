@@ -1312,7 +1312,7 @@
     <string name="cloudflared_token_storage_note">O token é armazenado de forma segura e compartilhado entre o aplicativo e os processos daemon.</string>
     <string name="cloudflared_token_hint">Digite o token cloudflared</string>
     <string name="cloudflare_paid_version">Versão paga do Cloudflare</string>
-    <string name="dialog_cloudflared_settings_title">Configurações do Cloudflared</string>
+    <string name="dialog_cloudflared_settings_title">Configurações Cloudflared</string>
     <string name="dialog_cloudflared_settings_message">Defina se você está usando o Cloudflare pago ou o trycloudflare. Se você estiver usando o Cloudflare, insira o token do túnel.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Se você definir para versão paga o token não pode estar vazio</string>
     <string name="toast_cloudflared_token_invalid">Token inválido: use apenas letras, números e . _ - = caracteres</string>
