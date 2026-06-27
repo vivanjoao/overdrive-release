@@ -204,7 +204,7 @@
     <string name="onboarding_authorize_waiting_title">في انتظار الإذن…</string>
     <string name="onboarding_authorize_waiting_body">اقبل منبثق اندرويد. اذا لم تراه، قد يتم منحه بالفعل – هذا سوف يستمر بنفسه.</string>
     <string name="onboarding_authorize_retry_title">لا يزال غير متصل</string>
-    <string name="onboarding_authorize_retry_body">The helper isn\'t running yet. The Android permission may have been dismissed. Try again and remember to check <b>Always allow</b>.</string>
+    <string name="onboarding_authorize_retry_body">لم يتم تشغيل المساعد بعد. ربما تم رفض إذن ANDROID. حاول مرة أخرى وتذكر التحقق من <b>دائماً السماح</b>.</string>
     <string name="onboarding_authorize_retry_button">حاول مرة أخرى</string>
     <!-- Camera mapping chapter -->
     <string name="onboarding_camera_step_label">الكاميرا · الخطوة %1$d من %2$d</string>
@@ -221,7 +221,7 @@
     <string name="onboarding_camera_pick_body">في البطاقة العلوية، اختر رقم الكاميرا 360 / الكاميرا العادية. ليس متأكداً؟ تركها على أوتوتو (AUTO) ورقمها فوق.</string>
     <string name="onboarding_camera_pick_primary">التالي</string>
     <string name="onboarding_camera_pick_dash_title">اختر كاميرا داشكامك</string>
-    <string name="onboarding_camera_pick_dash_body">في هذه البطاقة، اختر رقم المخيم الذي وجدته في وقت سابق - أو اتركه على AUTO.</string>
+    <string name="onboarding_camera_pick_dash_body">في هذه البطاقة، اختر رَقْم المخيم الذي وجدته في وقت سابق - أو اتركه على AUTO.</string>
     <string name="onboarding_camera_save_primary">حفظ &amp; إعادة تشغيل</string>
     <string name="onboarding_camera_applying_title">تطبيق — إعادة تشغيل الكاميرات</string>
     <string name="onboarding_camera_applying_body">ستصبح التغذية مظلمة ومربوطة لحوالي 10 ثوان. وهذا أمر طبيعي - ضيق.</string>
@@ -251,7 +251,7 @@
     <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
     <string name="onboarding_help_cd">الجولة المصحوبة بمرشدين</string>
     <string name="onboarding_reset_toast">إعادة تعيين أونبوارديند- إعادة تشغيل الدليل</string>
-    <string name="onboarding_expert_chapter_label">Chapter %1$d of %2$d</string>
+    <string name="onboarding_expert_chapter_label">الفصل %1$d من %2$d</string>
     <string name="onboarding_expert_finish">إنهاء</string>
     <string name="onboarding_expert_menu_title">الجولة المصحوبة بمرشدين</string>
     <string name="onboarding_expert_menu_body">المشي السريع خلال الإعداد الأعمق - الملف الشخصي لمركبتك، التكامل، المراقبة، التشخيص، الخدمات والأمن. يمكنك التوقف في أي وقت.</string>
@@ -283,7 +283,7 @@
     <string name="onboarding_expert_daemons_title">الخدمات - التعامل مع الرعاية</string>
     <string name="onboarding_expert_daemons_body">وتبدأ هذه المفاتيح خدمات الخلفية وتوقفها. إيقاف تشغيل الكاميرا أو المراقبة أو حراسة ACC يتوقف عن التسجيل ويبقيها متوقفة حتى تقوم بتشغيلها مرة أخرى - حتى بعد إعادة تشغيلها.</string>
     <string name="onboarding_expert_security_title">قفل باستخدام رمز PIN</string>
-    <string name="onboarding_expert_security_body">تعيين رمز PIN لبوابة التطبيق للمركبات المشتركة. يستمر تشغيل المراقبة والتسجيل أثناء قفل التطبيق. لا يمكن إزالة رمز PIN المنسي إلا من جهاز كمبيوتر عبر USB.</string>
+    <string name="onboarding_expert_security_body">تعيين رمز PIN لبوابة التطبيق للمركبات المشتركة. يستمر تشغيل المراقبة والتسجيل خلال قُفْل التطبيق. لا يمكن إزالة رمز PIN المنسي إلا من جهاز حاسوب عبر USB.</string>
     <string name="onboarding_expert_reset_title">إعادة تعيين البيانات - دائم</string>
     <string name="onboarding_expert_reset_body">هذا يمحو التسجيلات والأحداث والإعدادات ولا يمكن التراجع عنها. إنه هنا إذا قمت ببيع السيارة - وليس جزءا من الاستخدام العادي.</string>
     <string name="onboarding_expert_done_title">هذه هي الجولة</string>
@@ -501,7 +501,7 @@
     <string name="toast_updated_to">تم التحديث إلى %1$s</string>
     <string name="toast_update_install_failed">فشل تثبيت التحديث: %1$s</string>
     <string name="toast_checking_for_updates">التحقق من وجود تحديثات…</string>
-    <string name="toast_app_up_to_date">App is up to date (%1$s)</string>
+    <string name="toast_app_up_to_date">التطبيق محدث (%1$s)</string>
     <string name="toast_update_check_failed">فشل التحقق من التحديث: %1$s</string>
     <!-- Update dialog + version picker -->
     <string name="update_dialog_available_title">التحديث متاح</string>
@@ -671,7 +671,7 @@
     <string name="log_header_truncated">ملاحظة: السجل مقتطف إلى آخر 10000 سطر (المجموع: %1$d سطر)</string>
     <!-- Braveheart log send (upload to Cloudflare or share-sheet) -->
     <string name="logs_send_title">إرسال سجل %1$s</string>
-    <string name="logs_send_title_plain">إرسال سجل دايمون</string>
+    <string name="logs_send_title_plain">إرسال سجل DAEMONS</string>
     <string name="logs_send_subtitle">%1$s · اختر كيفية إرساله إلينا</string>
     <string name="logs_send_upload">تحميل &amp; احصل على رمز</string>
     <string name="logs_send_upload_desc">يرسل السجل إلينا ويعطيك رمز قصير. أسهل للحصول على الدعم.</string>
@@ -696,7 +696,7 @@
     <string name="toast_batch_delete_partial">%1$d تم حذفه، %2$d فشل</string>
     <string name="play_with_chooser">اللعب مع</string>
     <!-- Setup guide -->
-    <string name="setup_version_banner">Updated to %1$s — re-confirm autostart, BYD wipes it on every install</string>
+    <string name="setup_version_banner">تم التحديث إلى %1$s — إعادة تأكيد التشغيل التلقائي، يمحو BYD على كل تثبيت. </string>
     <string name="setup_overlay_already_granted">مُنحت بالفعل</string>
     <!-- Setup guide — post-setup tips section -->
     <string name="setup_tips_header">نصائح &amp; استكشاف الأخطاء</string>
@@ -780,7 +780,7 @@
     <!-- Backup & Restore (same-device). The backup file contains credentials +
          the device key, so the copy warns the user to keep it private. -->
     <string name="settings_backup_export_title">إعدادات التصدير</string>
-    <string name="settings_backup_export_value">حفظ ملف النسخ الاحتياطي من إعداداتك الحالية. ابقه خاصًا - يحفظ بيانات الاعتماد الخاصة بك.</string>
+    <string name="settings_backup_export_value">حفظ مِلَفّ النسخ الاحتياطي من إعداداتك الحالية. أبقة خاصًا - يحفظ بيانات الاعتماد الخاصة بك.</string>
     <string name="settings_backup_import_title">إستعادة الإعدادات</string>
     <string name="settings_backup_import_value">تحميل ملف نسخة احتياطية مصنوعة على نفس وحدة الرأس.</string>
     <string name="settings_backup_default_filename">overdrive-backup.json</string>
@@ -1066,7 +1066,7 @@
     <string name="pin_lock_backspace_cd">المساحة الخلفية</string>
     <plurals name="pin_lock_dot_a11y">
         <item quantity="zero">تم إدخال أرقام %1$d</item>
-        <item quantity="one">تم إدخال رقم %1$d</item>
+        <item quantity="one">تم إدخال رَقْم %1$d</item>
         <item quantity="two">تم إدخال أرقام %1$d</item>
         <item quantity="few">تم إدخال أرقام %1$d</item>
         <item quantity="many">تم إدخال أرقام %1$d</item>
@@ -1196,7 +1196,7 @@
     <string name="roadsense_hazard_format">%1$s · %2$s</string>
     <!-- Zone readouts (D-032): cluster of hazards announced as one. -->
     <!-- "3 bumps ahead" — %1$d = count -->
-    <string name="roadsense_zone_count">%1$d bumps ahead</string>
+    <string name="roadsense_zone_count">%1$d الصدامات الأمامية</string>
     <!-- "Rough section · 40 m" — %1$d = length in metres -->
     <string name="roadsense_zone_rough">القسم المجمع · %1$d م</string>
     <!-- Calibration-Mode confirm card (R-OVL-6) -->
@@ -1253,7 +1253,7 @@
     <string name="roadsense_map_route_failed">تعذر العثور على مسار. حاول مرة أخرى.</string>
     <string name="roadsense_map_need_key">إضافة مفتاح توجيه في إعدادات RoadSense للتنقل.</string>
     <string name="roadsense_map_route_key_rejected">تم رفض مفتاح التوجيه. تحقق من المفتاح الخاص بك في إعدادات الـ RoadSense</string>
-    <string name="roadsense_map_route_network">الشبكة بطيئة جدا للعثور على مسار. تحقق من اتصالك وحاول مرة أخرى.</string>
+    <string name="roadsense_map_route_network">الشبكة بطيئة للغاية بحيث لا يمكن العثور على مسار. تيقن من اتصالك وحاول مرة أخرى.</string>
     <string name="roadsense_map_route_http">خطأ في توجيه الخدمة (%1$d). حاول مرة أخرى قريبا.</string>
     <string name="roadsense_map_rerouting">إيقاف المسار - إعادة حساب…</string>
     <string name="roadsense_map_arrived">لقد وصلت.</string>
@@ -1265,7 +1265,7 @@
     <!-- Hazard visibility filter -->
     <string name="roadsense_map_hazards_filter">رؤية الخطر</string>
     <string name="roadsense_map_hazards_all">إظهار جميع المخاطر</string>
-    <string name="roadsense_map_hazards_moderate">معتدلة وخطيرة</string>
+    <string name="roadsense_map_hazards_moderate">معتدلة شديد الْخَطَر</string>
     <string name="roadsense_map_hazards_severe">شديد فقط</string>
     <string name="roadsense_map_hazards_hidden">إخفاء المخاطر</string>
     <!-- POI along route (EV charging / fuel) -->
@@ -1292,7 +1292,7 @@
     <string name="roadsense_map_exit_n">الخروج %1$d</string>
     <!-- Hazards-along-route pills (%1$d = count) -->
     <string name="roadsense_map_pill_severe">%1$d حادة</string>
-    <string name="roadsense_map_pill_moderate">%1$d moderate</string>
+    <string name="roadsense_map_pill_moderate">%1$d معتدل</string>
     <string name="roadsense_map_pill_minor">%1$d قاصر</string>
     <!-- Shown briefly if the basemap can\'t be reached. -->
     <string name="roadsense_map_offline">بيانات الخريطة غير متوفرة دون اتصال</string>
@@ -1356,5 +1356,5 @@
     <string name="dialog_cloudflared_settings_message">حدد ما إذا كنت تستخدم Cloudflare أو trycloudflare. إذا كنت تستخدم Cloudflare، أدخل رمز النفق الخاص بك.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">إذا قمت بتعيين النسخة المدفوعة، لا يمكن أن يكون الرمز المميز فارغاً</string>
     <string name="toast_cloudflared_token_invalid">الرمز المميز غير صالح: استخدم فقط الأحرف والأرقام و _ - = الأحرف</string>
-    <string name="toast_cloudflared_saved_settings">تم حفظ إعدادات Cloudflared</string>
+    <string name="toast_cloudflared_saved_settings">تم حفظ إعدادات CLOUD-FLARED</string>
 </resources>
