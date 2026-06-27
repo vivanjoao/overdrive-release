@@ -187,6 +187,107 @@
     <string name="setup_overlay_title">Zezwalaj na wyświetlanie nad innymi aplikacjami</string>
     <string name="setup_overlay_body">Włącz tę opcję, aby pokazać pływający wskaźnik statusu dla nagrywania i śledzenia podróży na górze innych aplikacji.</string>
     <string name="setup_overlay_button">Otwórz ustawienia nakładki</string>
+    <!-- Onboarding guide (novice track). Parked-only, glanceable. Overdrive is a
+         protected brand name — keep it verbatim. -->
+    <!-- Shared button labels -->
+    <string name="onboarding_next">Następny</string>
+    <string name="onboarding_back">Powrót</string>
+    <string name="onboarding_skip">Pomiń</string>
+    <string name="onboarding_later">Zrób to później</string>
+    <string name="onboarding_dismiss">Odrzuć</string>
+    <string name="onboarding_exit">Wyjdź z wycieczki</string>
+    <string name="onboarding_done_short">Zrozumiałe</string>
+    <!-- Step 0: authorize the daemon (system ADB popup) -->
+    <string name="onboarding_authorize_title">Wybudź Przeciążenie</string>
+    <string name="onboarding_authorize_body">Przeciążenie uruchamia kamery przez małego pomocnika na urządzeniu. Android zapyta się raz o zezwolenie na debugowanie USB — dotknij <b>Zezwól</b> i zaznacz <b>Zawsze zezwalaj na działanie tego urządzenia</b> , aby pozostawało ono w mocy po każdym ponownym uruchomieniu.</string>
+    <string name="onboarding_authorize_button">Zezwalaj na dostęp</string>
+    <string name="onboarding_authorize_waiting_title">Oczekiwanie na uprawnienie…</string>
+    <string name="onboarding_authorize_waiting_body">Zaakceptuj wyskakujące okno Androida. Jeśli go nie widzisz, może być już przyznane — to będzie kontynuowane samodzielnie.</string>
+    <string name="onboarding_authorize_retry_title">Wciąż nie połączono</string>
+    <string name="onboarding_authorize_retry_body">Pomocnik jeszcze nie działa. Pozwolenie na Androida mogło zostać odrzucone. Spróbuj ponownie i pamiętaj, aby zaznaczyć <b>Zawsze zezwalaj na</b>.</string>
+    <string name="onboarding_authorize_retry_button">Spróbuj ponownie</string>
+    <!-- Camera mapping chapter -->
+    <string name="onboarding_camera_step_label">Aparat · krok %1$d %2$d</string>
+    <string name="onboarding_camera_intro_title">Skonfiguruj kamery</string>
+    <string name="onboarding_camera_intro_body">Powiedzmy OverDrive, który kamera jest Twoim 360 widokiem i który jest twoim myślnikiem. To zajmuje około minutę, a następnie możesz ją zmienić.</string>
+    <string name="onboarding_camera_intro_primary">Rozpocznij</string>
+    <string name="onboarding_camera_opening_title">Otwieranie konfiguracji kamery…</string>
+    <string name="onboarding_camera_opening_body">Ładowanie podglądu na żywo z kamer. Może to potrwać kilka sekund.</string>
+    <string name="onboarding_camera_pano_title">To jest twój 360 widok</string>
+    <string name="onboarding_camera_pano_body">Użyj strzałek, aby znaleźć ułożony 4-górny obraz. Przeczytaj go z BOTTOM: dolna lewa strona to REAR, dolna prawa strona LEFT.</string>
+    <string name="onboarding_camera_dashcam_title">Teraz znajdź kamerę z przodu</string>
+    <string name="onboarding_camera_dashcam_body">Przekrocz kamery ze strzałkami i zatrzymaj się na tym pokazującym szybę przednią / widok do przodu. Zauważ, że jego numer — wybierzesz go następnie.</string>
+    <string name="onboarding_camera_pick_title">Wybierz kamerę 360</string>
+    <string name="onboarding_camera_pick_body">Na górnej karcie wybierz liczbę 360 / normalną kamerę. Nie jesteś pewien? Pozostaw ją na AUTO i wykresach nadmiarowych.</string>
+    <string name="onboarding_camera_pick_primary">Następny</string>
+    <string name="onboarding_camera_pick_dash_title">Wybierz kamerę dashcam</string>
+    <string name="onboarding_camera_pick_dash_body">Na tej karcie wybierz numer dashcam, który znalazłeś wcześniej — lub zostaw go na AUTO.</string>
+    <string name="onboarding_camera_save_primary">Zapisz &amp; restart</string>
+    <string name="onboarding_camera_applying_title">Stosowanie — restartowanie kamer</string>
+    <string name="onboarding_camera_applying_body">Kanał będzie ciemny i mrugający przez około 10 sekund. Jest to normalne — powieszenie.</string>
+    <string name="onboarding_camera_verify_title">Szybkie sprawdzenie</string>
+    <string name="onboarding_camera_verify_body">Czy widok 360 pokazuje zszyty obraz, a dashcam pokazuje drogę naprzód? Jeśli kanał wygląda źle, naciśnij Ponownie wybierz - nic nie jest uszkodzone.</string>
+    <string name="onboarding_camera_verify_ok">Wygląda w prawo</string>
+    <string name="onboarding_camera_verify_repick">Podnieś ponownie</string>
+    <string name="onboarding_camera_windshield_title">Pasmo na następnej drodze na nagrywaniach? (opcjonalne)</string>
+    <string name="onboarding_camera_windshield_body">W przypadku układu dashcamu OEM — kamera szyby przedniej jako pasek na górze nagrania — wybrać osłonę wiatru w menu funkcji, wybierz przednią kamerę i zapisz. Większość właścicieli może to pominąć.</string>
+    <string name="onboarding_camera_windshield_primary">Pokaż mi</string>
+    <string name="onboarding_camera_windshield_skip">Nie, dziękuję</string>
+    <!-- Vehicle profile chapter -->
+    <string name="onboarding_vehicle_title">Powiedz o nadpisaniu baterii</string>
+    <string name="onboarding_vehicle_body">Wybierz swój model i wypełniamy kWh, lub wpisz go samodzielnie (15–120). To sprawia, że zakres i ładowanie są dokładne. Możesz pominąć i ustawić go później.</string>
+    <string name="onboarding_vehicle_primary">Ustaw baterię</string>
+    <!-- Dashboard orientation chapter -->
+    <string name="onboarding_dash_tiles_title">Twój kokpit na rzut oka</string>
+    <string name="onboarding_dash_tiles_body">Te karty są przyciskami - stuknij, aby otworzyć kamery na żywo, nagrania, usługi lub pojazd.</string>
+    <string name="onboarding_dash_chips_title">Pokazuj tylko status</string>
+    <string name="onboarding_dash_chips_body">Chipy w górę nagrywane, usługi i zdalny link. Aktualizują się samodzielnie — nie są to przyciski.</string>
+    <string name="onboarding_dash_chips_body_land">Twój status na żywo - nagrywanie, usługi i zdalny link - pojawiają się tutaj.</string>
+    <!-- Completion -->
+    <string name="onboarding_done_title">Kockpit gotowy</string>
+    <string name="onboarding_done_body">Kamery mapowane i zestaw baterii. Dotknij Live, aby obejrzeć kanały - lub poznaj głębsze ustawienia w dowolnym momencie.</string>
+    <string name="onboarding_done_primary">Gotowe</string>
+    <string name="onboarding_done_secondary">Przeglądaj ustawienia</string>
+    <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
+    <string name="onboarding_help_cd">Prowadzona wycieczka</string>
+    <string name="onboarding_reset_toast">Przywracanie ustawień - odtwarzanie przewodnika</string>
+    <string name="onboarding_expert_chapter_label">Chapter %1$d of %2$d</string>
+    <string name="onboarding_expert_finish">Zakończ</string>
+    <string name="onboarding_expert_menu_title">Prowadzona wycieczka</string>
+    <string name="onboarding_expert_menu_body">Szybkie przejście przez głębszą konfigurację — profil pojazdu, integracje, nadzór, diagnostykę, usługi i bezpieczeństwo. Możesz zatrzymać się w dowolnym momencie.</string>
+    <string name="onboarding_expert_menu_start">Rozpocznij wycieczkę</string>
+    <string name="onboarding_expert_vehicle_title">Profil pojazdu</string>
+    <string name="onboarding_expert_vehicle_body">Dotknij kafelka pojazdu, aby ustawić rozmiar baterii i model — umożliwia dokładne oszacowanie zasięgu i zdrowia.</string>
+    <string name="onboarding_expert_recordings_title">Twoje nagrania</string>
+    <string name="onboarding_expert_recordings_body">Przełączanie pomiędzy Dashcam (ciągłe + klipy zbliżeniowe) i Surveillance (zaparkowane zdarzenia sentry z tym przełącznikiem — każdy z nich zachowuje własną bibliotekę. Stuknij klip, aby go odtworzyć.</string>
+    <string name="onboarding_expert_live_title">Kamery na żywo</string>
+    <string name="onboarding_expert_live_body">Otwórz na żywo stąd, aby obejrzeć wszystkie kamery w czasie rzeczywistym. Przydatne do sprawdzania widoku przed napędem lub podczas zaparkowania w pobliżu.</string>
+    <string name="onboarding_expert_trips_title">Historia podróży</string>
+    <string name="onboarding_expert_trips_body">Przejazd rejestruje każdy przejazd — trasę, odległość, czas trwania i zużycie energii — dzięki temu możesz sprawdzić gdzie był samochód.</string>
+    <string name="onboarding_expert_roadsense_title">Drogowy Sense</string>
+    <string name="onboarding_expert_roadsense_body">RoadSense używa czujników ruchu samochodu i GPS do wykrywania zagrożeń na drodze – zderzeń, zderzeń, zderzaków, zderzaków prędkości – i ostrzega przed znanymi zagrożeniami. Jego zakładki obejmują wykrywanie niebezpiecznych map, obrazy ostrzegawcze i ślepe Spot. Włącz główny przełącznik, aby użyć dowolnego z nich.</string>
+    <string name="onboarding_expert_blindspot_title">Nieślepy punkt</string>
+    <string name="onboarding_expert_blindspot_body">Włącz Bled Spot w zakładce tutaj i kiedy sygnalizujesz turę, widok z kamery bocznej pojawia się automatycznie na ekranie — w lewo dla lewego sygnału, w prawo dla prawej — a następnie niedługo po nim się ukry. Działa tylko wtedy, gdy włączony jest sygnał zwrotny.</string>
+    <string name="onboarding_expert_maps_title">Navigation</string>
+    <string name="onboarding_expert_maps_body">Otwórz mapę dla pełnej nawigacji po zakręcie — przeszukaj miejsce docelowe, uzyskaj trasę i wskazówki na żywo Poza pobliskimi punktami zainteresowania i wszelkimi zagrożeniami drogowymi Drogi RoadSense znalazły się po drodze. Możesz również automatycznie projektować go na klastrze instrumentów, kiedy zaczniesz jeździć — to zmienia życie w zakładce Mapa RoadSense.</string>
+    <string name="onboarding_expert_integrations_title">Integracje</string>
+    <string name="onboarding_expert_integrations_body">Połącz alerty Telegram, lepsze planowanie tras, MQTT lub BYD Cloud. Każda karta otwiera swoją konfigurację wewnątrz aplikacji. Uchwyt górny staje się zielony, gdy wszystko jest połączone.</string>
+    <string name="onboarding_expert_bydcloud_title">BYD Cloud odblokowuje zdalne sterowanie</string>
+    <string name="onboarding_expert_bydcloud_body">Łączenie konta BYD umożliwia zdalną blokadę, flash i horn z telefonu. Traktuj połączone konto i uzyskaj dostęp do kodu jako wrażliwe.</string>
+    <string name="onboarding_expert_surveillance_title">Nagrywanie nadzoru &amp;</string>
+    <string name="onboarding_expert_surveillance_body">Dopasuj wykrywanie, jakość i przechowywanie tutaj. Te otwarte jako strony konfiguracyjne w aplikacji obsługiwane z samochodu — pusty ekran oznacza że pomocnik wciąż się uruchamia.</string>
+    <string name="onboarding_expert_camprobe_title">Sonda aparatu - uważna</string>
+    <string name="onboarding_expert_camprobe_body">To remapuje które fizyczne kamery zasilają każdą rolę i uruchamia ponownie kamerę. Zmień tylko wtedy, gdy kanał wygląda źle — ustawiasz to wcześniej w przewodniku.</string>
+    <string name="onboarding_expert_traffic_title">Monitor ruchu – wymagany do zdalnego dostępu</string>
+    <string name="onboarding_expert_traffic_body">Wbudowany Monitor ruchu BYD blokuje korzystanie z wbudowanej karty SIM przez inne aplikacje. Jeśli chcesz dotrzeć do samochodu zdalnie przez kartę SIM BYD, musisz ją wyłączyć tutaj. Jednostka nagłówka uruchamia się ponownie, aby zastosować zmianę.</string>
+    <string name="onboarding_expert_daemons_title">Usługi – obsługa z zachowaniem ostrożności</string>
+    <string name="onboarding_expert_daemons_body">Przełączniki te uruchamiają i zatrzymują usługi w tle. Wyłączanie aparatu, obserwacji lub wpisu ACC zatrzymuje nagrywanie i wyłącza się do momentu ich ponownego włączenia — nawet po ponownym uruchomieniu.</string>
+    <string name="onboarding_expert_security_title">Zablokuj PIN</string>
+    <string name="onboarding_expert_security_body">Ustaw PIN do bramki dla współdzielonych pojazdów. Obserwacja i nagrywanie są nadal uruchomione, gdy aplikacja jest zablokowana. Zapomniany PIN można usunąć tylko z komputera nad USB.</string>
+    <string name="onboarding_expert_reset_title">Zresetuj dane – stałe</string>
+    <string name="onboarding_expert_reset_body">To usuwa nagrania, wydarzenia i ustawienia i nie może być cofnięte. Jest tutaj jeśli kiedykolwiek sprzedasz samochód — nie jest częścią normalnego użytkowania.</string>
+    <string name="onboarding_expert_done_title">To jest wycieczka</string>
+    <string name="onboarding_expert_done_body">Widziałeś głębsze ustawienia. Otwórz ten przewodnik ponownie w dowolnym momencie z przycisku pomocy.</string>
     <!-- Language picker (drawer footer + bottom sheet) -->
     <string name="cd_close">Zamknij</string>
     <string name="language_picker_title">Język</string>
@@ -638,6 +739,7 @@
     <string name="rail_recordings">Nagrania</string>
     <string name="rail_vehicle">Pojazd</string>
     <string name="rail_trips">Przejazdy</string>
+    <string name="rail_charging">Ładowanie</string>
     <string name="rail_integrations">Integracje</string>
     <string name="rail_diagnostics">Diagnostyka</string>
     <string name="rail_settings">Ustawienia</string>
