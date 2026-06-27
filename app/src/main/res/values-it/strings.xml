@@ -489,7 +489,7 @@
     <string name="toast_updated_to">Aggiornato a %1$s</string>
     <string name="toast_update_install_failed">Installazione aggiornamento non riuscita: %1$s</string>
     <string name="toast_checking_for_updates">Controllo aggiornamenti...</string>
-    <string name="toast_app_up_to_date">App is up to date (%1$s)</string>
+    <string name="toast_app_up_to_date">L\'app è aggiornata (%1$s)</string>
     <string name="toast_update_check_failed">Controllo aggiornamenti non riuscito: %1$s</string>
     <!-- Update dialog + version picker -->
     <string name="update_dialog_available_title">Aggiornamento disponibile</string>
@@ -686,7 +686,7 @@ Questa azione non puo essere annullata.</string>
     <string name="toast_batch_delete_partial">%1$d eliminati, %2$d non riusciti</string>
     <string name="play_with_chooser">Riproduci con</string>
     <!-- Setup guide -->
-    <string name="setup_version_banner">Updated to %1$s — re-confirm autostart, BYD wipes it on every install</string>
+    <string name="setup_version_banner">Aggiornato a %1$s — riconferma avvio automatico, BYD lo cancella su ogni installazione</string>
     <string name="setup_overlay_already_granted">Gia concesso</string>
     <!-- Setup guide — post-setup tips section -->
     <string name="setup_tips_header">Suggerimenti e risoluzione dei problemi</string>
