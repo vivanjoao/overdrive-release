@@ -190,104 +190,104 @@
     <!-- Onboarding guide (novice track). Parked-only, glanceable. Overdrive is a
          protected brand name — keep it verbatim. -->
     <!-- Shared button labels -->
-    <string name="onboarding_next">Next</string>
-    <string name="onboarding_back">Back</string>
-    <string name="onboarding_skip">Skip</string>
-    <string name="onboarding_later">Do this later</string>
-    <string name="onboarding_dismiss">Dismiss</string>
-    <string name="onboarding_exit">Exit tour</string>
-    <string name="onboarding_done_short">Got it</string>
+    <string name="onboarding_next">다음</string>
+    <string name="onboarding_back">뒤로</string>
+    <string name="onboarding_skip">건너뛰기</string>
+    <string name="onboarding_later">나중에 하기</string>
+    <string name="onboarding_dismiss">닫기</string>
+    <string name="onboarding_exit">둘러보기 종료</string>
+    <string name="onboarding_done_short">확인</string>
     <!-- Step 0: authorize the daemon (system ADB popup) -->
-    <string name="onboarding_authorize_title">Wake up Overdrive</string>
-    <string name="onboarding_authorize_body">Overdrive runs your cameras through a small on-device helper. Android will ask once to allow USB debugging — tap <b>Allow</b> and check <b>Always allow from this device</b> so it stays on after every restart.</string>
-    <string name="onboarding_authorize_button">Allow access</string>
-    <string name="onboarding_authorize_waiting_title">Waiting for permission…</string>
-    <string name="onboarding_authorize_waiting_body">Accept the Android popup. If you don\'t see it, it may already be granted — this will continue on its own.</string>
-    <string name="onboarding_authorize_retry_title">Still not connected</string>
-    <string name="onboarding_authorize_retry_body">The helper isn\'t running yet. The Android permission may have been dismissed. Try again and remember to check <b>Always allow</b>.</string>
-    <string name="onboarding_authorize_retry_button">Try again</string>
+    <string name="onboarding_authorize_title">Overdrive 시작하기</string>
+    <string name="onboarding_authorize_body">Overdrive는 작은 기기 내 헬퍼를 통해 카메라를 구동합니다. Android가 USB 디버깅 허용을 한 번 요청합니다 — <b>허용</b>을 누르고 <b>이 기기에서 항상 허용</b>을 체크하면 재시작 후에도 계속 작동합니다.</string>
+    <string name="onboarding_authorize_button">접근 허용</string>
+    <string name="onboarding_authorize_waiting_title">권한을 기다리는 중…</string>
+    <string name="onboarding_authorize_waiting_body">Android 팝업을 수락하세요. 보이지 않는다면 이미 허용되었을 수 있으며, 자동으로 계속 진행됩니다.</string>
+    <string name="onboarding_authorize_retry_title">아직 연결되지 않음</string>
+    <string name="onboarding_authorize_retry_body">헬퍼가 아직 실행되지 않았습니다. Android 권한이 닫혔을 수 있습니다. 다시 시도하고 <b>항상 허용</b>을 체크하는 것을 잊지 마세요.</string>
+    <string name="onboarding_authorize_retry_button">다시 시도</string>
     <!-- Camera mapping chapter -->
-    <string name="onboarding_camera_step_label">Camera · step %1$d of %2$d</string>
-    <string name="onboarding_camera_intro_title">Set up your cameras</string>
-    <string name="onboarding_camera_intro_body">Let\'s tell Overdrive which camera is your 360 view and which is your dashcam. It takes about a minute, and you can change it later.</string>
-    <string name="onboarding_camera_intro_primary">Start</string>
-    <string name="onboarding_camera_opening_title">Opening camera setup…</string>
-    <string name="onboarding_camera_opening_body">Loading a live preview from your cameras. This can take a few seconds.</string>
-    <string name="onboarding_camera_pano_title">This is your 360 view</string>
-    <string name="onboarding_camera_pano_body">Use the arrows to find the stitched 4-up image. Read it from the BOTTOM: bottom-left is the REAR, bottom-right is the LEFT side.</string>
-    <string name="onboarding_camera_dashcam_title">Now find the road-ahead camera</string>
-    <string name="onboarding_camera_dashcam_body">Step through the cameras with the arrows and stop on the one showing the windshield / forward view. Note its number — you\'ll pick it next.</string>
-    <string name="onboarding_camera_pick_title">Pick your 360 camera</string>
-    <string name="onboarding_camera_pick_body">In the top card, choose the number for your 360 / normal camera. Not sure? Leave it on AUTO and Overdrive figures it out.</string>
-    <string name="onboarding_camera_pick_primary">Next</string>
-    <string name="onboarding_camera_pick_dash_title">Pick your dashcam camera</string>
-    <string name="onboarding_camera_pick_dash_body">In this card, choose the dashcam number you found earlier — or leave it on AUTO.</string>
-    <string name="onboarding_camera_save_primary">Save &amp; restart</string>
-    <string name="onboarding_camera_applying_title">Applying — restarting cameras</string>
-    <string name="onboarding_camera_applying_body">The feed will go dark and blink for about 10 seconds. This is normal — hang tight.</string>
-    <string name="onboarding_camera_verify_title">Quick check</string>
-    <string name="onboarding_camera_verify_body">Does the 360 view show the stitched image and the dashcam show the road ahead? If a feed looks wrong, tap Re-pick — nothing is broken.</string>
-    <string name="onboarding_camera_verify_ok">Looks right</string>
-    <string name="onboarding_camera_verify_repick">Re-pick</string>
-    <string name="onboarding_camera_windshield_title">Road-ahead band on recordings? (optional)</string>
-    <string name="onboarding_camera_windshield_body">For the OEM dashcam layout — the windshield camera as a strip on top of your recording — pick Windshield in the role menu, choose the forward camera, and Save. Most owners can skip this.</string>
-    <string name="onboarding_camera_windshield_primary">Show me</string>
-    <string name="onboarding_camera_windshield_skip">No thanks</string>
+    <string name="onboarding_camera_step_label">카메라 · %2$d단계 중 %1$d단계</string>
+    <string name="onboarding_camera_intro_title">카메라 설정하기</string>
+    <string name="onboarding_camera_intro_body">어떤 카메라가 360 화면이고 어떤 카메라가 dashcam인지 Overdrive에 알려주세요. 약 1분 정도 걸리며, 나중에 변경할 수 있습니다.</string>
+    <string name="onboarding_camera_intro_primary">시작</string>
+    <string name="onboarding_camera_opening_title">카메라 설정을 여는 중…</string>
+    <string name="onboarding_camera_opening_body">카메라에서 실시간 미리보기를 불러오는 중입니다. 몇 초 정도 걸릴 수 있습니다.</string>
+    <string name="onboarding_camera_pano_title">이것이 360 화면입니다</string>
+    <string name="onboarding_camera_pano_body">화살표를 사용해 4분할로 합쳐진 이미지를 찾으세요. 아래쪽부터 읽으세요: 왼쪽 아래가 후방, 오른쪽 아래가 왼쪽 측면입니다.</string>
+    <string name="onboarding_camera_dashcam_title">이제 전방 도로 카메라를 찾으세요</string>
+    <string name="onboarding_camera_dashcam_body">화살표로 카메라를 넘기면서 앞유리/전방 화면을 보여주는 카메라에서 멈추세요. 그 번호를 기억하세요 — 다음에 선택하게 됩니다.</string>
+    <string name="onboarding_camera_pick_title">360 카메라 선택</string>
+    <string name="onboarding_camera_pick_body">상단 카드에서 360/일반 카메라 번호를 선택하세요. 잘 모르겠으면 AUTO로 두면 Overdrive가 알아서 찾아냅니다.</string>
+    <string name="onboarding_camera_pick_primary">다음</string>
+    <string name="onboarding_camera_pick_dash_title">dashcam 카메라 선택</string>
+    <string name="onboarding_camera_pick_dash_body">이 카드에서 앞서 찾은 dashcam 번호를 선택하거나 AUTO로 두세요.</string>
+    <string name="onboarding_camera_save_primary">저장 &amp;amp; 재시작</string>
+    <string name="onboarding_camera_applying_title">적용 중 — 카메라 재시작</string>
+    <string name="onboarding_camera_applying_body">약 10초 동안 화면이 어두워지고 깜빡입니다. 정상적인 현상이니 잠시 기다려 주세요.</string>
+    <string name="onboarding_camera_verify_title">빠른 확인</string>
+    <string name="onboarding_camera_verify_body">360 화면에 합쳐진 이미지가 보이고 dashcam에 전방 도로가 보이나요? 화면이 잘못된 것 같으면 다시 선택을 누르세요 — 고장이 아닙니다.</string>
+    <string name="onboarding_camera_verify_ok">정상입니다</string>
+    <string name="onboarding_camera_verify_repick">다시 선택</string>
+    <string name="onboarding_camera_windshield_title">녹화에 전방 도로 띠를 표시할까요? (선택)</string>
+    <string name="onboarding_camera_windshield_body">OEM dashcam 레이아웃 — 녹화 영상 상단에 띠 형태로 앞유리 카메라를 표시 — 을 원하면 역할 메뉴에서 앞유리를 선택하고 전방 카메라를 고른 후 저장하세요. 대부분은 건너뛰어도 됩니다.</string>
+    <string name="onboarding_camera_windshield_primary">보여주기</string>
+    <string name="onboarding_camera_windshield_skip">괜찮습니다</string>
     <!-- Vehicle profile chapter -->
-    <string name="onboarding_vehicle_title">Tell Overdrive your battery</string>
-    <string name="onboarding_vehicle_body">Pick your model and we fill in the kWh, or type it yourself (15–120). This makes range and charging estimates accurate. You can skip and set it later.</string>
-    <string name="onboarding_vehicle_primary">Set battery</string>
+    <string name="onboarding_vehicle_title">Overdrive에 배터리 알려주기</string>
+    <string name="onboarding_vehicle_body">모델을 선택하면 kWh가 자동으로 채워지며, 직접 입력할 수도 있습니다(15–120). 이렇게 하면 주행거리와 충전 추정이 정확해집니다. 건너뛰고 나중에 설정할 수 있습니다.</string>
+    <string name="onboarding_vehicle_primary">배터리 설정</string>
     <!-- Dashboard orientation chapter -->
-    <string name="onboarding_dash_tiles_title">Your cockpit at a glance</string>
-    <string name="onboarding_dash_tiles_body">These cards are buttons — tap to open Live cameras, Recordings, Services or your Vehicle.</string>
-    <string name="onboarding_dash_chips_title">These just show status</string>
-    <string name="onboarding_dash_chips_body">The chips up top show recording, services and your remote link. They update on their own — they\'re not buttons.</string>
-    <string name="onboarding_dash_chips_body_land">Your live status — recording, services and remote link — shows up here. It updates on its own.</string>
+    <string name="onboarding_dash_tiles_title">한눈에 보는 콕핏</string>
+    <string name="onboarding_dash_tiles_body">이 카드들은 버튼입니다 — 탭하면 실시간 카메라, 녹화, 서비스 또는 차량을 엽니다.</string>
+    <string name="onboarding_dash_chips_title">이것들은 상태만 표시합니다</string>
+    <string name="onboarding_dash_chips_body">상단의 칩은 녹화, 서비스, 원격 연결 상태를 표시합니다. 자동으로 업데이트되며 버튼이 아닙니다.</string>
+    <string name="onboarding_dash_chips_body_land">녹화, 서비스, 원격 연결 등 실시간 상태가 여기에 표시됩니다. 자동으로 업데이트됩니다.</string>
     <!-- Completion -->
-    <string name="onboarding_done_title">Cockpit ready</string>
-    <string name="onboarding_done_body">Cameras mapped and battery set. Tap Live to watch your feeds — or explore the deeper settings any time.</string>
-    <string name="onboarding_done_primary">Done</string>
-    <string name="onboarding_done_secondary">Explore Setup</string>
+    <string name="onboarding_done_title">콕핏 준비 완료</string>
+    <string name="onboarding_done_body">카메라가 매핑되고 배터리가 설정되었습니다. 실시간을 눌러 영상을 보거나, 언제든 더 깊은 설정을 살펴보세요.</string>
+    <string name="onboarding_done_primary">완료</string>
+    <string name="onboarding_done_secondary">설정 둘러보기</string>
     <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
-    <string name="onboarding_help_cd">Guided tour</string>
-    <string name="onboarding_reset_toast">Onboarding reset — replaying the guide</string>
-    <string name="onboarding_expert_chapter_label">Chapter %1$d of %2$d</string>
-    <string name="onboarding_expert_finish">Finish</string>
-    <string name="onboarding_expert_menu_title">Guided tour</string>
-    <string name="onboarding_expert_menu_body">A quick walk through the deeper setup — your vehicle profile, integrations, surveillance, diagnostics, services and security. You can stop any time.</string>
-    <string name="onboarding_expert_menu_start">Start tour</string>
-    <string name="onboarding_expert_vehicle_title">Vehicle profile</string>
-    <string name="onboarding_expert_vehicle_body">Tap the Vehicle tile to set your battery size and model — it powers accurate range and health estimates.</string>
-    <string name="onboarding_expert_recordings_title">Your recordings</string>
-    <string name="onboarding_expert_recordings_body">Switch between Dashcam (continuous + proximity clips) and Surveillance (parked sentry events) with this toggle — each keeps its own library. Tap a clip to play it.</string>
-    <string name="onboarding_expert_live_title">Live cameras</string>
-    <string name="onboarding_expert_live_body">Open Live from here to watch all cameras in real time. Handy for checking the view before a drive or while parked nearby.</string>
-    <string name="onboarding_expert_trips_title">Trip history</string>
-    <string name="onboarding_expert_trips_body">Trips logs every drive — route, distance, duration and energy use — so you can review where the car has been.</string>
+    <string name="onboarding_help_cd">가이드 투어</string>
+    <string name="onboarding_reset_toast">온보딩 재설정 — 가이드를 다시 재생합니다</string>
+    <string name="onboarding_expert_chapter_label">%2$d장 중 %1$d장</string>
+    <string name="onboarding_expert_finish">완료</string>
+    <string name="onboarding_expert_menu_title">가이드 투어</string>
+    <string name="onboarding_expert_menu_body">차량 프로필, 통합, 감시, 진단, 서비스, 보안 등 더 깊은 설정을 빠르게 둘러봅니다. 언제든 중단할 수 있습니다.</string>
+    <string name="onboarding_expert_menu_start">투어 시작</string>
+    <string name="onboarding_expert_vehicle_title">차량 프로필</string>
+    <string name="onboarding_expert_vehicle_body">차량 타일을 눌러 배터리 용량과 모델을 설정하세요 — 정확한 주행거리 및 건강 추정의 기반이 됩니다.</string>
+    <string name="onboarding_expert_recordings_title">녹화 영상</string>
+    <string name="onboarding_expert_recordings_body">이 토글로 Dashcam(연속 + 근접 클립)과 감시(주차 감시 이벤트)를 전환하세요 — 각각 별도의 라이브러리를 유지합니다. 클립을 누르면 재생됩니다.</string>
+    <string name="onboarding_expert_live_title">실시간 카메라</string>
+    <string name="onboarding_expert_live_body">여기서 실시간을 열어 모든 카메라를 실시간으로 보세요. 주행 전 또는 근처에 주차된 동안 화면을 확인할 때 유용합니다.</string>
+    <string name="onboarding_expert_trips_title">주행 기록</string>
+    <string name="onboarding_expert_trips_body">주행 기록은 경로, 거리, 소요 시간, 에너지 사용량 등 모든 주행을 기록하여 차량이 어디를 다녔는지 검토할 수 있게 합니다.</string>
     <string name="onboarding_expert_roadsense_title">RoadSense</string>
-    <string name="onboarding_expert_roadsense_body">RoadSense uses the car\'s motion sensors and GPS to detect road hazards — bumps, potholes, speed breakers — and warns you before known ones. Its tabs cover detection, the hazard map, warning chimes, and Blind Spot. Turn on the master switch to use any of it.</string>
-    <string name="onboarding_expert_blindspot_title">Blind Spot</string>
-    <string name="onboarding_expert_blindspot_body">Enable Blind Spot in the tab here and, when you signal a turn, a side-camera view appears on screen automatically — left for a left signal, right for a right one — then hides shortly after. It only runs while a turn signal is on.</string>
-    <string name="onboarding_expert_maps_title">Navigation</string>
-    <string name="onboarding_expert_maps_body">Open the Map for full turn-by-turn navigation — search a destination, get routing and live guidance, plus nearby points of interest and any road hazards RoadSense has logged along the way. You can also auto-project it onto the instrument cluster when you start driving — that toggle lives in RoadSense\'s Map tab.</string>
-    <string name="onboarding_expert_integrations_title">Integrations</string>
-    <string name="onboarding_expert_integrations_body">Connect Telegram alerts, A Better Routeplanner, MQTT or BYD Cloud. Each card opens its setup inside the app. The pill up top turns green when everything\'s linked.</string>
-    <string name="onboarding_expert_bydcloud_title">BYD Cloud unlocks remote control</string>
-    <string name="onboarding_expert_bydcloud_body">Linking your BYD account here enables remote lock, flash and horn from your phone. Treat the linked account and access code as sensitive.</string>
-    <string name="onboarding_expert_surveillance_title">Surveillance &amp; recording</string>
-    <string name="onboarding_expert_surveillance_body">Fine-tune detection, quality and storage here. These open as in-app config pages served from your car — a blank screen just means the helper is still starting.</string>
-    <string name="onboarding_expert_camprobe_title">Camera probe — careful</string>
-    <string name="onboarding_expert_camprobe_body">This re-maps which physical camera feeds each role and restarts the cameras. Only change it if a feed looks wrong — you set this up earlier in the guide.</string>
-    <string name="onboarding_expert_traffic_title">Traffic monitor — required for remote access</string>
-    <string name="onboarding_expert_traffic_body">BYD\'s built-in Traffic Monitor blocks other apps from using the car\'s built-in SIM. If you want to reach your car remotely over the BYD SIM, you must disable it here. The head unit reboots to apply the change.</string>
-    <string name="onboarding_expert_daemons_title">Services — handle with care</string>
-    <string name="onboarding_expert_daemons_body">These switches start and stop background services. Turning OFF Camera, Surveillance or ACC Sentry stops recording and keeps them off until you turn them back on — even after a restart.</string>
-    <string name="onboarding_expert_security_title">Lock with a PIN</string>
-    <string name="onboarding_expert_security_body">Set a PIN to gate the app for shared vehicles. Surveillance and recording keep running while the app is locked. A forgotten PIN can only be cleared from a computer over USB.</string>
-    <string name="onboarding_expert_reset_title">Reset data — permanent</string>
-    <string name="onboarding_expert_reset_body">This erases recordings, events and settings and can\'t be undone. It\'s here if you ever sell the car — not part of normal use.</string>
-    <string name="onboarding_expert_done_title">That\'s the tour</string>
-    <string name="onboarding_expert_done_body">You\'ve seen the deeper settings. Open this guide again any time from the help button.</string>
+    <string name="onboarding_expert_roadsense_body">RoadSense는 차량의 모션 센서와 GPS를 사용해 요철, 포트홀, 과속방지턱 같은 도로 위험을 감지하고 알려진 위험에 대해 미리 경고합니다. 탭에는 감지, 위험 지도, 경고음, 사각지대가 있습니다. 이 중 무엇이든 사용하려면 마스터 스위치를 켜세요.</string>
+    <string name="onboarding_expert_blindspot_title">사각지대</string>
+    <string name="onboarding_expert_blindspot_body">여기 탭에서 사각지대를 활성화하면, 방향지시등을 켤 때 측면 카메라 화면이 자동으로 표시됩니다 — 좌측 지시등에는 왼쪽, 우측 지시등에는 오른쪽 — 그리고 잠시 후 사라집니다. 방향지시등이 켜져 있을 때만 작동합니다.</string>
+    <string name="onboarding_expert_maps_title">내비게이션</string>
+    <string name="onboarding_expert_maps_body">지도를 열어 완전한 턴바이턴 내비게이션을 사용하세요 — 목적지 검색, 경로 안내, 실시간 가이드와 함께 주변 관심 지점, 경로상 RoadSense가 기록한 도로 위험을 확인할 수 있습니다. 주행을 시작하면 계기판에 자동으로 투사할 수도 있습니다 — 해당 토글은 RoadSense의 지도 탭에 있습니다.</string>
+    <string name="onboarding_expert_integrations_title">통합</string>
+    <string name="onboarding_expert_integrations_body">Telegram 알림, A Better Routeplanner, MQTT 또는 BYD Cloud를 연결하세요. 각 카드는 앱 내에서 해당 설정을 엽니다. 모든 연결이 완료되면 상단의 알약 표시가 초록색으로 바뀝니다.</string>
+    <string name="onboarding_expert_bydcloud_title">BYD Cloud로 원격 제어 잠금 해제</string>
+    <string name="onboarding_expert_bydcloud_body">여기서 BYD 계정을 연결하면 휴대폰으로 원격 잠금, 라이트 점멸, 경적이 가능해집니다. 연결된 계정과 접근 코드는 민감 정보로 취급하세요.</string>
+    <string name="onboarding_expert_surveillance_title">감시 &amp;amp; 녹화</string>
+    <string name="onboarding_expert_surveillance_body">여기서 감지, 화질, 저장소를 세부 조정하세요. 이 항목들은 차량에서 제공되는 앱 내 설정 페이지로 열립니다 — 빈 화면은 헬퍼가 아직 시작 중이라는 의미입니다.</string>
+    <string name="onboarding_expert_camprobe_title">카메라 프로브 — 주의</string>
+    <string name="onboarding_expert_camprobe_body">이 설정은 각 역할에 어떤 물리 카메라 피드가 매핑될지 다시 지정하고 카메라를 재시작합니다. 화면이 잘못된 경우에만 변경하세요 — 가이드 앞부분에서 이미 설정했습니다.</string>
+    <string name="onboarding_expert_traffic_title">트래픽 모니터 — 원격 접속에 필요</string>
+    <string name="onboarding_expert_traffic_body">BYD의 내장 트래픽 모니터는 다른 앱이 차량 내장 SIM을 사용하지 못하도록 차단합니다. BYD SIM을 통해 차량에 원격으로 접속하려면 여기서 이를 비활성화해야 합니다. 변경 사항을 적용하기 위해 헤드 유닛이 재부팅됩니다.</string>
+    <string name="onboarding_expert_daemons_title">서비스 — 주의해서 다루기</string>
+    <string name="onboarding_expert_daemons_body">이 스위치들은 백그라운드 서비스를 시작하고 중지합니다. 카메라, 감시 또는 ACC Sentry를 끄면 녹화가 중지되고, 다시 켤 때까지 — 재시작 후에도 — 꺼진 상태로 유지됩니다.</string>
+    <string name="onboarding_expert_security_title">PIN으로 잠금</string>
+    <string name="onboarding_expert_security_body">공유 차량을 위해 PIN을 설정하여 앱을 잠그세요. 앱이 잠긴 동안에도 감시와 녹화는 계속 작동합니다. 잊어버린 PIN은 USB를 통해 컴퓨터에서만 해제할 수 있습니다.</string>
+    <string name="onboarding_expert_reset_title">데이터 초기화 — 영구적</string>
+    <string name="onboarding_expert_reset_body">이 작업은 녹화, 이벤트, 설정을 삭제하며 되돌릴 수 없습니다. 차량을 판매할 때를 위한 기능으로, 일반적인 사용의 일부가 아닙니다.</string>
+    <string name="onboarding_expert_done_title">투어 완료</string>
+    <string name="onboarding_expert_done_body">더 깊은 설정을 둘러보셨습니다. 도움말 버튼에서 언제든 이 가이드를 다시 열 수 있습니다.</string>
     <!-- Language picker (drawer footer + bottom sheet) -->
     <string name="cd_close">닫기</string>
     <string name="language_picker_title">언어</string>
@@ -363,11 +363,11 @@
     <string name="recording_lib_filter_section_severity">심각성</string>
     <string name="recording_lib_filter_section_type">유형</string>
     <string name="recording_lib_filter_section_place">장소</string>
-    <string name="recording_lib_filter_section_storage">Storage</string>
+    <string name="recording_lib_filter_section_storage">저장소</string>
     <!-- Storage filter chip labels (full words; the tile badge uses the short
          SD/USB/INT forms above). -->
-    <string name="recording_lib_storage_filter_internal">Internal</string>
-    <string name="recording_lib_storage_filter_sd">SD card</string>
+    <string name="recording_lib_storage_filter_internal">내부</string>
+    <string name="recording_lib_storage_filter_sd">SD 카드</string>
     <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">보통</string>
@@ -413,7 +413,7 @@
          silent SD→internal fallback (SD bridged behind the USB power rail). -->
     <string name="recording_lib_storage_sd">SD</string>
     <string name="recording_lib_storage_usb">USB</string>
-    <string name="recording_lib_storage_internal">INT</string>
+    <string name="recording_lib_storage_internal">내부</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Sharing %1$d recordings</string>
     <!-- fragment_sentry_config -->
@@ -730,7 +730,7 @@
     <string name="rail_recordings">녹화</string>
     <string name="rail_vehicle">차량</string>
     <string name="rail_trips">주행 기록</string>
-    <string name="rail_charging">Charging</string>
+    <string name="rail_charging">충전</string>
     <string name="rail_integrations">통합</string>
     <string name="rail_diagnostics">진단</string>
     <string name="rail_settings">설정</string>
@@ -764,31 +764,31 @@
     <string name="settings_about_check_update_value">최신 GitHub 릴리스를 확인하고 최신 버전인 경우 설치하십시오.</string>
     <!-- Backup & Restore (same-device). The backup file contains credentials +
          the device key, so the copy warns the user to keep it private. -->
-    <string name="settings_backup_export_title">Export settings</string>
-    <string name="settings_backup_export_value">Save a backup file of your current settings. Keep it private — it holds your credentials.</string>
-    <string name="settings_backup_import_title">Restore settings</string>
-    <string name="settings_backup_import_value">Load a backup file made on this same head unit.</string>
+    <string name="settings_backup_export_title">설정 내보내기</string>
+    <string name="settings_backup_export_value">현재 설정의 백업 파일을 저장합니다. 자격 증명이 담겨 있으니 외부에 공개하지 마세요.</string>
+    <string name="settings_backup_import_title">설정 복원</string>
+    <string name="settings_backup_import_value">이 동일한 헤드 유닛에서 만든 백업 파일을 불러옵니다.</string>
     <string name="settings_backup_default_filename">overdrive-backup.json</string>
-    <string name="settings_backup_exporting">Building backup…</string>
-    <string name="settings_backup_export_failed">Backup export failed</string>
-    <string name="settings_backup_saved">Backup saved</string>
-    <string name="settings_backup_saved_to">Backup saved to %1$s</string>
-    <string name="settings_backup_save_failed">Could not save the backup file</string>
-    <string name="settings_backup_pick_file">Pick a backup to restore</string>
-    <string name="settings_backup_no_files">No backup files found. Export one first, or copy a backup .json into %1$s, then try again.</string>
-    <string name="settings_backup_read_failed">Could not read the file</string>
-    <string name="settings_backup_invalid_file">That file is not a valid Overdrive backup</string>
-    <string name="settings_backup_restoring">Restoring…</string>
-    <string name="settings_backup_restored">Settings restored</string>
-    <string name="settings_backup_restore_failed">Restore failed</string>
-    <string name="settings_backup_daemon_down">The camera service must be running to back up or restore. Start it from Daemons, then try again.</string>
-    <string name="settings_backup_restore_confirm_title">Restore settings?</string>
-    <string name="settings_backup_restore_confirm_msg">This replaces your current Overdrive settings with the backup and reloads services. It only works on the same head unit the backup was made on.</string>
-    <string name="settings_backup_restore_confirm_btn">Restore</string>
-    <string name="settings_backup_restart_hint">Settings restored. Restart the camera daemon (Daemons → Camera → Restart) to make sure every restored setting is applied.</string>
-    <string name="settings_backup_trips_prompt">Include your trip history (distance, energy, cost, scores, start/end locations)? Detailed per-trip telemetry is not included. The file will contain your location history — keep it private.</string>
-    <string name="settings_backup_settings_only">Settings only</string>
-    <string name="settings_backup_with_trips">Include trips</string>
+    <string name="settings_backup_exporting">백업을 만드는 중…</string>
+    <string name="settings_backup_export_failed">백업 내보내기에 실패했습니다</string>
+    <string name="settings_backup_saved">백업이 저장되었습니다</string>
+    <string name="settings_backup_saved_to">백업이 %1$s에 저장되었습니다</string>
+    <string name="settings_backup_save_failed">백업 파일을 저장할 수 없습니다</string>
+    <string name="settings_backup_pick_file">복원할 백업을 선택하세요</string>
+    <string name="settings_backup_no_files">백업 파일을 찾을 수 없습니다. 먼저 하나를 내보내거나 백업 .json 파일을 %1$s에 복사한 후 다시 시도하세요.</string>
+    <string name="settings_backup_read_failed">파일을 읽을 수 없습니다</string>
+    <string name="settings_backup_invalid_file">이 파일은 유효한 Overdrive 백업이 아닙니다</string>
+    <string name="settings_backup_restoring">복원 중…</string>
+    <string name="settings_backup_restored">설정이 복원되었습니다</string>
+    <string name="settings_backup_restore_failed">복원에 실패했습니다</string>
+    <string name="settings_backup_daemon_down">백업 또는 복원을 하려면 카메라 서비스가 실행 중이어야 합니다. 데몬에서 시작한 후 다시 시도하세요.</string>
+    <string name="settings_backup_restore_confirm_title">설정을 복원하시겠습니까?</string>
+    <string name="settings_backup_restore_confirm_msg">현재 Overdrive 설정을 백업으로 교체하고 서비스를 다시 로드합니다. 이 작업은 백업을 만든 동일한 헤드 유닛에서만 작동합니다.</string>
+    <string name="settings_backup_restore_confirm_btn">복원</string>
+    <string name="settings_backup_restart_hint">설정이 복원되었습니다. 복원된 모든 설정이 적용되도록 카메라 데몬을 다시 시작하세요(데몬 → 카메라 → 재시작).</string>
+    <string name="settings_backup_trips_prompt">주행 기록(거리, 에너지, 비용, 점수, 시작/종료 위치)을 포함하시겠습니까? 주행별 상세 텔레메트리는 포함되지 않습니다. 이 파일에는 위치 기록이 포함되니 외부에 공개하지 마세요.</string>
+    <string name="settings_backup_settings_only">설정만</string>
+    <string name="settings_backup_with_trips">주행 기록 포함</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1202,9 +1202,9 @@
     <string name="roadsense_map_routing">경로 찾는 중…</string>
     <string name="roadsense_map_route_failed">경로를 찾을 수 없습니다. 다시 시도하세요.</string>
     <string name="roadsense_map_need_key">내비게이션을 위해 RoadSense 설정에서 라우팅 키를 추가하세요.</string>
-    <string name="roadsense_map_route_key_rejected">Routing key rejected. Check your key in RoadSense settings.</string>
-    <string name="roadsense_map_route_network">Network too slow to find a route. Check your connection and try again.</string>
-    <string name="roadsense_map_route_http">Routing service error (%1$d). Try again shortly.</string>
+    <string name="roadsense_map_route_key_rejected">경로 안내 키가 거부되었습니다. RoadSense 설정에서 키를 확인하세요.</string>
+    <string name="roadsense_map_route_network">네트워크가 너무 느려 경로를 찾을 수 없습니다. 연결을 확인하고 다시 시도하세요.</string>
+    <string name="roadsense_map_route_http">경로 안내 서비스 오류(%1$d). 잠시 후 다시 시도하세요.</string>
     <string name="roadsense_map_rerouting">경로 이탈 — 재계산 중…</string>
     <string name="roadsense_map_arrived">도착했습니다.</string>
     <string name="roadsense_map_nav_started">%1$s(으)로 내비게이션 중</string>
@@ -1299,12 +1299,12 @@
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">경로 복원됨</string>
     <!-- Cloudflared paid-tunnel settings -->
-    <string name="cloudflared_token_storage_note">Token is stored encrypted and shared between the app and daemon processes.</string>
-    <string name="cloudflared_token_hint">Enter cloudflared token</string>
-    <string name="cloudflare_paid_version">Cloudflare Paid Version</string>
-    <string name="dialog_cloudflared_settings_title">Cloudflared Settings</string>
-    <string name="dialog_cloudflared_settings_message">Define whether you are using paid Cloudflare or trycloudflare. If you are using paid Cloudflare, enter your tunnel token.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">If you set the paid version the token cannot be empty</string>
-    <string name="toast_cloudflared_token_invalid">Invalid token: use only letters, numbers and . _ - = characters</string>
-    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
+    <string name="cloudflared_token_storage_note">토큰은 암호화되어 저장되며 앱과 데몬 프로세스 간에 공유됩니다.</string>
+    <string name="cloudflared_token_hint">cloudflared 토큰 입력</string>
+    <string name="cloudflare_paid_version">Cloudflare 유료 버전</string>
+    <string name="dialog_cloudflared_settings_title">Cloudflared 설정</string>
+    <string name="dialog_cloudflared_settings_message">유료 Cloudflare를 사용할지 trycloudflare를 사용할지 정의하세요. 유료 Cloudflare를 사용하는 경우 터널 토큰을 입력하세요.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">유료 버전을 설정하면 토큰을 비워 둘 수 없습니다</string>
+    <string name="toast_cloudflared_token_invalid">잘못된 토큰: 문자, 숫자 및 . _ - = 문자만 사용하세요</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared 설정이 저장되었습니다</string>
 </resources>
