@@ -2185,7 +2185,7 @@
     "connectivity_updates": "Koblingsoppdatering",
     "connectivity_updates_desc": "Varsle når daemon starter, stoppes eller omstarter. Nyttig for diagnoser;chatty i normal bruk.",
     "motion_text": "Motion text varsler",
-    "motion_text_desc": "Send a motion alert (text, plus the snapshot photo when one is available) when surveillance detects motion. Video clips have their own toggle below.",
+    "motion_text_desc": "Send en bevegelsesvarsling (tekst, pluss bilde når en er tilgjengelig) når overvåking oppdager bevegelse. Videoklipp har sin egen av/på 'Visning' nedenfor.",
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Start automatisk når kjøretøyet er av",
     "auto_start_acc_off_desc": "Start Telegram bot daemon automatisk når kjøretøyet går til ACC OFF, så kommandoer virker mens parked. Patronen stopper når kjøretøyet starter opp.",
