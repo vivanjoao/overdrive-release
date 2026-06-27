@@ -187,6 +187,107 @@
     <string name="setup_overlay_title">Permite afişarea peste alte aplicaţii</string>
     <string name="setup_overlay_body">Activați această opțiune pentru a afișa un indicator de stare plutitor pentru înregistrarea și urmărirea cursei în partea superioară a altor aplicații.</string>
     <string name="setup_overlay_button">Deschide Setări Overlay</string>
+    <!-- Onboarding guide (novice track). Parked-only, glanceable. Overdrive is a
+         protected brand name — keep it verbatim. -->
+    <!-- Shared button labels -->
+    <string name="onboarding_next">Următoarea</string>
+    <string name="onboarding_back">Înapoi</string>
+    <string name="onboarding_skip">Omitere</string>
+    <string name="onboarding_later">Fă asta mai târziu</string>
+    <string name="onboarding_dismiss">Renunţaţi</string>
+    <string name="onboarding_exit">Ieșire din tur</string>
+    <string name="onboarding_done_short">Am înțeles</string>
+    <!-- Step 0: authorize the daemon (system ADB popup) -->
+    <string name="onboarding_authorize_title">Trezire Overdrive</string>
+    <string name="onboarding_authorize_body">Ignoră camerele de luat vederi prin intermediul unui dispozitiv de ajutor de mici dimensiuni. Android va cere o dată să permită depanarea USB - apăsați <b>Permiteți</b> și verificați <b>Permiteți întotdeauna accesul de pe acest dispozitiv</b> astfel încât să rămână activat după fiecare repornire.</string>
+    <string name="onboarding_authorize_button">Permiteți accesul</string>
+    <string name="onboarding_authorize_waiting_title">Se așteaptă permisiunea…</string>
+    <string name="onboarding_authorize_waiting_body">Acceptați popup-ul Android. Dacă nu îl vedeți, este posibil să fie deja acordat - acest lucru va continua pe cont propriu.</string>
+    <string name="onboarding_authorize_retry_title">Încă nu este conectat</string>
+    <string name="onboarding_authorize_retry_body">Ajutorul nu rulează încă. Este posibil ca permisiunea Android să fi fost respinsă. Încercați din nou și țineți minte să verificați <b>Permiteți întotdeauna</b>.</string>
+    <string name="onboarding_authorize_retry_button">Încercați din nou</string>
+    <!-- Camera mapping chapter -->
+    <string name="onboarding_camera_step_label">Camera · pasul %1$d din %2$d</string>
+    <string name="onboarding_camera_intro_title">Configurați camerele foto</string>
+    <string name="onboarding_camera_intro_body">Hai să spunem Overdrive care este camera ta de vizualizare 360 și care este camera ta. Durează cam un minut, și o poți schimba mai târziu.</string>
+    <string name="onboarding_camera_intro_primary">Pornire</string>
+    <string name="onboarding_camera_opening_title">Se deschide configurarea camerei…</string>
+    <string name="onboarding_camera_opening_body">Se încarcă o previzualizare live din camerele tale. Acest lucru poate dura câteva secunde.</string>
+    <string name="onboarding_camera_pano_title">Aceasta este vizualizarea de 360</string>
+    <string name="onboarding_camera_pano_body">Utilizaţi săgeţile pentru a găsi imaginea de 4 sus cusute. Citiţi-o din BOTTOM: partea de jos în stânga este REAR-ul, partea de jos în dreapta este partea de LEFT.</string>
+    <string name="onboarding_camera_dashcam_title">Acum găsește camera foto</string>
+    <string name="onboarding_camera_dashcam_body">Pașează prin camere cu săgețile și se oprește pe cel care afișează ecranul parbrizului/înainte. Notează numărul său — îl vei alege ulterior.</string>
+    <string name="onboarding_camera_pick_title">Alege camera de 360</string>
+    <string name="onboarding_camera_pick_body">În cartea de sus, alege numărul pentru camera ta de 360 / normală. Nu ești sigur? Lăsă-l pe AUTO și Overdrive calculează.</string>
+    <string name="onboarding_camera_pick_primary">Următoarea</string>
+    <string name="onboarding_camera_pick_dash_title">Alege camera foto</string>
+    <string name="onboarding_camera_pick_dash_body">În acest card, alegeți numărul de camera de control pe care l-ați găsit mai devreme - sau lăsați-l pe AUTO.</string>
+    <string name="onboarding_camera_save_primary">Salvează &amp; repornire</string>
+    <string name="onboarding_camera_applying_title">Aplicare - repornire camere</string>
+    <string name="onboarding_camera_applying_body">Furajul se va întuneca şi va clipi timp de aproximativ 10 secunde. Acest lucru este normal - agăţaţi strâns.</string>
+    <string name="onboarding_camera_verify_title">Verificare rapidă</string>
+    <string name="onboarding_camera_verify_body">Cele 360 de vizualizări afișează imaginea cusută și dashcam afișează drumul înainte? Dacă un flux arată greșit, apăsați Re-pick - nimic nu este stricat.</string>
+    <string name="onboarding_camera_verify_ok">Arată în dreapta</string>
+    <string name="onboarding_camera_verify_repick">Re-alege</string>
+    <string name="onboarding_camera_windshield_title">Bandă de drum pe înregistrări? (opțional)</string>
+    <string name="onboarding_camera_windshield_body">Pentru aranjarea camerelor de control OEM - camera de parbriz ca o bandă deasupra înregistrării - alege Windshield în meniul de rol, alege camera din față și Salvează. Majoritatea proprietarilor pot sări peste asta.</string>
+    <string name="onboarding_camera_windshield_primary">Arată-mi</string>
+    <string name="onboarding_camera_windshield_skip">Nu, mulțumesc</string>
+    <!-- Vehicle profile chapter -->
+    <string name="onboarding_vehicle_title">Spuneți „Suprapunerea” bateriei</string>
+    <string name="onboarding_vehicle_body">Alegeţi modelul şi completăm kWh, sau tastaţi-l singur (15-120). Aceasta face acurateţea estimărilor de rază şi încărcare. Puteţi sări şi seta mai târziu.</string>
+    <string name="onboarding_vehicle_primary">Setare baterie</string>
+    <!-- Dashboard orientation chapter -->
+    <string name="onboarding_dash_tiles_title">Cârligul tău dintr-o privire</string>
+    <string name="onboarding_dash_tiles_body">Aceste carduri sunt butoane - apasă pentru a deschide camere live, înregistrări, servicii sau vehicule.</string>
+    <string name="onboarding_dash_chips_title">Acestea doar arată starea</string>
+    <string name="onboarding_dash_chips_body">Cipurile de sus arată înregistrarea, serviciile și link-ul dvs. de la distanță. Ele se actualizează pe cont propriu — nu sunt butoane.</string>
+    <string name="onboarding_dash_chips_body_land">Starea ta live — înregistrare, servicii și link de la distanță — este afișată aici. Se actualizează singur.</string>
+    <!-- Completion -->
+    <string name="onboarding_done_title">Cockpit gata</string>
+    <string name="onboarding_done_body">Camere mapate și set de baterii. Apasă Live pentru a viziona feed-urile - sau explorează setările mai profunde în orice moment.</string>
+    <string name="onboarding_done_primary">Terminat</string>
+    <string name="onboarding_done_secondary">Explorează configurarea</string>
+    <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
+    <string name="onboarding_help_cd">Tur ghidat</string>
+    <string name="onboarding_reset_toast">Resetare înregistrare - reluarea ghidului</string>
+    <string name="onboarding_expert_chapter_label">Capitolul %1$d din %2$d</string>
+    <string name="onboarding_expert_finish">Terminare</string>
+    <string name="onboarding_expert_menu_title">Tur ghidat</string>
+    <string name="onboarding_expert_menu_body">O plimbare rapidă prin configurarea mai profundă - profilul vehiculului, integrările, supravegherea, diagnosticul, serviciile și securitatea. Puteți opri oricând.</string>
+    <string name="onboarding_expert_menu_start">Începe turul</string>
+    <string name="onboarding_expert_vehicle_title">Profil vehicul</string>
+    <string name="onboarding_expert_vehicle_body">Atingeți iconița vehiculului pentru a seta dimensiunea și modelul bateriei - puterea de estimare a distanței precise și a sănătății.</string>
+    <string name="onboarding_expert_recordings_title">Înregistrările dvs.</string>
+    <string name="onboarding_expert_recordings_body">Comută între Dashcam (clipuri de proximitate + continue) și Supraveghere (evenimente de santinare parcate) cu această comutare - fiecare își păstrează propria bibliotecă. Apasă un clip pentru a-l reda.</string>
+    <string name="onboarding_expert_live_title">Camere video în direct</string>
+    <string name="onboarding_expert_live_body">Deschideți live de aici pentru a viziona toate camerele în timp real. Manipulați pentru a verifica vizualizarea înainte de o unitate sau în timp ce sunteți parcat în apropiere.</string>
+    <string name="onboarding_expert_trips_title">Istoric curse</string>
+    <string name="onboarding_expert_trips_body">Cursele înregistrează fiecare traseu, distanță, durată și consum de energie - astfel încât să poți revedea unde a fost mașina.</string>
+    <string name="onboarding_expert_roadsense_title">RoadSense</string>
+    <string name="onboarding_expert_roadsense_body">RoadSense utilizează senzorii de mișcare ai mașinii și GPS-ul pentru a detecta pericolele rutiere - obstacole, gălbenușuri, spărgătoare de viteză - și te avertizează înainte de cele cunoscute. Tab-urile sale vor detecta, harta de pericole, mese de avertizare și spot oarbe. Activați comutatorul principal pentru a-l folosi.</string>
+    <string name="onboarding_expert_blindspot_title">Punct orb</string>
+    <string name="onboarding_expert_blindspot_body">Activați Blind Spot în fila de aici și, atunci când semnalizați o întoarcere, pe ecran apare automat o vedere de cameră laterală - la stânga pentru un semnal stânga, la dreapta pentru unul dreapta - apoi se ascunde la scurt timp după aceea. Se execută doar în timp ce este aprins un semnal de pornire.</string>
+    <string name="onboarding_expert_maps_title">Navigation</string>
+    <string name="onboarding_expert_maps_body">Deschideți harta pentru navigare completă la rând - căutați o destinație, obțineți rutare și ghiduri live, plus puncte de interes din apropiere şi orice pericol rutier RoadSense s-a logat pe drumuri. De asemenea, îl puteți auto-proiecta pe clusterul de instrumente când începeți să conduceți - care comută vieți în fila Harta RoadSense.</string>
+    <string name="onboarding_expert_integrations_title">Integrări</string>
+    <string name="onboarding_expert_integrations_body">Connect Telegram alerts, A Better Routeplanner, MQTT or BYD Cloud. Fiecare card își deschide configurația în interiorul aplicației. Partea superioară a tabletei devine verde când totul este legat.</string>
+    <string name="onboarding_expert_bydcloud_title">Control la distanță deblocare BYD Cloud</string>
+    <string name="onboarding_expert_bydcloud_body">Conectarea contului BYD aici permite blocarea la distanță, flash și cornul de pe telefonul dvs. Tratați contul asociat și codul de acces ca fiind sensibil.</string>
+    <string name="onboarding_expert_surveillance_title">Supravegherea &amp; înregistrare</string>
+    <string name="onboarding_expert_surveillance_body">Detectarea, calitatea și depozitarea perfectă aici. Aceste pagini deschise ca pagini de configurare în aplicație servite de mașina ta - un ecran gol înseamnă doar că ajutorul încă pornește.</string>
+    <string name="onboarding_expert_camprobe_title">Sondă cameră foto — cu atenție</string>
+    <string name="onboarding_expert_camprobe_body">Acest lucru re-mapează ce cameră fizică alimentează fiecare rol și repornește camerele. Schimbă-l doar dacă un flux arată greșit - ai configurat acest lucru mai devreme în ghid.</string>
+    <string name="onboarding_expert_traffic_title">Monitorizare trafic – necesară pentru accesul la distanță</string>
+    <string name="onboarding_expert_traffic_body">Monitorul traficului încorporat de BYD blochează alte aplicații de la utilizarea SIM-ului încorporat în mașină. Dacă vrei să ajungi la mașina ta de la distanță peste BYD SIM, trebuie să o dezactivezi aici. Unitatea capului pentru a aplica modificarea.</string>
+    <string name="onboarding_expert_daemons_title">Servicii — manipulare cu grijă</string>
+    <string name="onboarding_expert_daemons_body">Aceste comutatoare pornesc și opresc serviciile de fundal. Opriți camera, Supravegherea sau Sentry ACC oprește înregistrarea și le menține oprite până când le activați - chiar și după o repornire.</string>
+    <string name="onboarding_expert_security_title">Blocare cu un PIN</string>
+    <string name="onboarding_expert_security_body">Setați un PIN pentru poarta aplicației pentru vehiculele partajate. Supravegherea și înregistrarea continuă în timp ce aplicația este blocată. Un PIN uitat poate fi șters doar de pe un calculator peste USB.</string>
+    <string name="onboarding_expert_reset_title">Resetare date - permanent</string>
+    <string name="onboarding_expert_reset_body">Aceasta șterge înregistrările, evenimentele și setările și nu poate fi anulată. Este aici dacă vinzi vreodată mașina - nu parte a unei utilizări normale.</string>
+    <string name="onboarding_expert_done_title">Acesta este turul</string>
+    <string name="onboarding_expert_done_body">Aţi văzut setările mai profunde. Deschideţi acest ghid din nou de fiecare dată de la butonul de ajutor.</string>
     <!-- Language picker (drawer footer + bottom sheet) -->
     <string name="cd_close">Inchide</string>
     <string name="language_picker_title">Limba</string>
@@ -635,6 +736,7 @@
     <string name="rail_recordings">Înregistrări</string>
     <string name="rail_vehicle">Vehicul</string>
     <string name="rail_trips">Curse</string>
+    <string name="rail_charging">Încărcare</string>
     <string name="rail_integrations">Integrări</string>
     <string name="rail_diagnostics">Diagnosticare</string>
     <string name="rail_settings">Setări</string>
