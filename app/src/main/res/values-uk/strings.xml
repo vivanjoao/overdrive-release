@@ -187,6 +187,107 @@
     <string name="setup_overlay_title">Дозволити показ поверх інших програм</string>
     <string name="setup_overlay_body">Увімкніть це, щоб показувати індикатор плаваючого стану для запису та відслідковування поїздки на вершині інших програм.</string>
     <string name="setup_overlay_button">Відкрити налаштування накладання</string>
+    <!-- Onboarding guide (novice track). Parked-only, glanceable. Overdrive is a
+         protected brand name — keep it verbatim. -->
+    <!-- Shared button labels -->
+    <string name="onboarding_next">Уперед</string>
+    <string name="onboarding_back">Відмінити</string>
+    <string name="onboarding_skip">Пропустити</string>
+    <string name="onboarding_later">Зробити це пізніше</string>
+    <string name="onboarding_dismiss">Відхилити</string>
+    <string name="onboarding_exit">Вийти з туру</string>
+    <string name="onboarding_done_short">Зрозуміло</string>
+    <!-- Step 0: authorize the daemon (system ADB popup) -->
+    <string name="onboarding_authorize_title">Пробудження Overdrive</string>
+    <string name="onboarding_authorize_body">Overdrive runs your cameras through a small on-device helper. Android will ask once to allow USB debugging — tap <b>Allow</b> and check <b>Always allow from this device</b> so it stays on after every restart.</string>
+    <string name="onboarding_authorize_button">Надати доступ</string>
+    <string name="onboarding_authorize_waiting_title">Waiting for permission…</string>
+    <string name="onboarding_authorize_waiting_body">Приймайте спливаюче вікно Android. Якщо ви не бачите його, це може бути надано — ви будете продовжувати це самостійно.</string>
+    <string name="onboarding_authorize_retry_title">Досі не під\'єднано</string>
+    <string name="onboarding_authorize_retry_body">The helper isn\'t running yet. The Android permission may have been dismissed. Try again and remember to check <b>Always allow</b>.</string>
+    <string name="onboarding_authorize_retry_button">Спробуйте ще раз</string>
+    <!-- Camera mapping chapter -->
+    <string name="onboarding_camera_step_label">Камера · Крок %1$d від %2$d</string>
+    <string name="onboarding_camera_intro_title">Налаштувати камери</string>
+    <string name="onboarding_camera_intro_body">Розповімо про OverDrive, який фотоапарат є вашим 360 оглядом, це займе близько хвилини, ви можете змінити це пізніше.</string>
+    <string name="onboarding_camera_intro_primary">Старт</string>
+    <string name="onboarding_camera_opening_title">Opening camera setup…</string>
+    <string name="onboarding_camera_opening_body">Завантаження онлайн превью із Ваших камер. Це може тривати кілька секунд.</string>
+    <string name="onboarding_camera_pano_title">Це ваше зображення 360</string>
+    <string name="onboarding_camera_pano_body">Використовуйте стрілки щоб знайти деталізоване 4-те зображення. Очитайте його з BOTTOM: в нижньому лівому нижньому правому куті РАТИ.</string>
+    <string name="onboarding_camera_dashcam_title">Тепер знайдіть камеру з дорогою попереду</string>
+    <string name="onboarding_camera_dashcam_body">Крок із камерами зі стрілками, щоб зупинитися на тому, що показувати вітровий щит / переведений перегляд. Зверніть увагу на номер - ви виберете його далі.</string>
+    <string name="onboarding_camera_pick_title">Виберіть 360 камеру</string>
+    <string name="onboarding_camera_pick_body">У верхній карті, виберіть номер для вашої 360 / нормальної камери. Не впевнені? Залиште його в AUTO і передиску з\'ясовує.</string>
+    <string name="onboarding_camera_pick_primary">Уперед</string>
+    <string name="onboarding_camera_pick_dash_title">Збери роздільну камеру</string>
+    <string name="onboarding_camera_pick_dash_body">У цій картці виберіть номер розділу, який ви знайшли раніше - або залиште його на AUTO.</string>
+    <string name="onboarding_camera_save_primary">Зберегти &amp; перезавантажити</string>
+    <string name="onboarding_camera_applying_title">Застосування - перезапуск камер</string>
+    <string name="onboarding_camera_applying_body">Стрічка буде затемнятися і блимати приблизно за 10 секунд. Це нормально, навіть навантаження.</string>
+    <string name="onboarding_camera_verify_title">Швидкий вибір</string>
+    <string name="onboarding_camera_verify_body">Чи показує 360 вигляд обмеженого зображення і десктап показує дорогу попереду? Якщо подача виглядає неправильно, натисніть кнопку повторно - нічого не зіпсується.</string>
+    <string name="onboarding_camera_verify_ok">Виглядає праворуч</string>
+    <string name="onboarding_camera_verify_repick">Повторно вибрати</string>
+    <string name="onboarding_camera_windshield_title">Діапазон випередження на записах? (опціонально)</string>
+    <string name="onboarding_camera_windshield_body">Для розкладки OEM - вітрова камера в якості плівки на даху запису - вибрати щит в меню ролі оберіть передову камеру та збережіть. Більшість власників можуть пропустити це.</string>
+    <string name="onboarding_camera_windshield_primary">Показати мені</string>
+    <string name="onboarding_camera_windshield_skip">Ні, дякую</string>
+    <!-- Vehicle profile chapter -->
+    <string name="onboarding_vehicle_title">Дозволити Overdrive ваш акумулятор</string>
+    <string name="onboarding_vehicle_body">Обираємо свою модель і заповнюємо кВт або набираємо її собі (15–120). Це робить діапазон і ціну ціну ціну точними. Ви можете пропустити і встановити його пізніше.</string>
+    <string name="onboarding_vehicle_primary">Налаштувати акумулятор</string>
+    <!-- Dashboard orientation chapter -->
+    <string name="onboarding_dash_tiles_title">Твій кабіна з першого погляду</string>
+    <string name="onboarding_dash_tiles_body">Ці картки - кнопки - натисніть для відкриття живих камер, Записів, Послуг чи транспортного засобу.</string>
+    <string name="onboarding_dash_chips_title">Показати лише статус</string>
+    <string name="onboarding_dash_chips_body">Прокручувати запис топ-шоу, сервіси і ваше віддалене посилання. Вони оновлюються самостійно — вони не кнопки.</string>
+    <string name="onboarding_dash_chips_body_land">Ваш живий статус — запис, сервіси та віддалене посилання — з\'являються тут самостійно.</string>
+    <!-- Completion -->
+    <string name="onboarding_done_title">Кабіна готова</string>
+    <string name="onboarding_done_body">Камери, для відображення й набір акумуляторів. Натисніть \"Живі\", щоб дивитися на свої стрічки (див. або дослідіть більш глибокі налаштування в будь-який час.</string>
+    <string name="onboarding_done_primary">Виконано</string>
+    <string name="onboarding_done_secondary">Огляд налаштувань</string>
+    <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
+    <string name="onboarding_help_cd">Керований тур</string>
+    <string name="onboarding_reset_toast">Скидання адаптації - повторне відтворення посібника</string>
+    <string name="onboarding_expert_chapter_label">Розділ %1$d %2$d</string>
+    <string name="onboarding_expert_finish">Закінчити</string>
+    <string name="onboarding_expert_menu_title">Керований тур</string>
+    <string name="onboarding_expert_menu_body">Швидко пройдіть глибше налаштування - ваш профіль автомобіля, інтеграція, спостереження, діагностика, послуги та безпека. Ви можете зупинити будь-який час.</string>
+    <string name="onboarding_expert_menu_start">Почати знайомство</string>
+    <string name="onboarding_expert_vehicle_title">Профіль транспорту</string>
+    <string name="onboarding_expert_vehicle_body">Торкніться плитки \"ТЗ встановити розмір та модель акумулятора\" - вона робить їх точними діапазонами і оцінками здоров\'я.</string>
+    <string name="onboarding_expert_recordings_title">Ваші записи</string>
+    <string name="onboarding_expert_recordings_body">Переключитися між панелями (безперервними + кліпами наближення) та Surveillance (паркованими подіями) за допомогою цього перемикача — кожна зберігає власну бібліотеку. Торкніться кліпу, щоб програти.</string>
+    <string name="onboarding_expert_live_title">Камери в реальному часі</string>
+    <string name="onboarding_expert_live_body">Відкрий \"Наживо звідси, щоб дивитися всі камери в режимі реального часу. Здавайтесь для перевірки на Вигляд перед диском, або під час припаркування неподалік.</string>
+    <string name="onboarding_expert_trips_title">Історія поїздок</string>
+    <string name="onboarding_expert_trips_body">Журнали на кожному диску - маршрут, тривалість та використання енергії - тож можете переглянути, де була машина.</string>
+    <string name="onboarding_expert_roadsense_title">Роадсенсе</string>
+    <string name="onboarding_expert_roadsense_body">Середнє значення використовує датчики руху автомобіля та GPS для виявлення небезпек в дорогах, опорах, вимикачів швидкості - і попереджає вас перед відомими. Її приховування обкладинок, карта карт, попередження, а також плями на обличчі. Увімкніть перемикач \"небезпеки\", щоб використовувати будь-яку з них.</string>
+    <string name="onboarding_expert_blindspot_title">Сліпа пляма</string>
+    <string name="onboarding_expert_blindspot_body">Вмикає затрати на вкладці тут і сигналізує про поворот, побічна камера з\'являється автоматично на екрані - залишився для лівого сигналу, справа від одного, потім приховується незабаром після. Він працює лише коли ввімкнений сигнал.</string>
+    <string name="onboarding_expert_maps_title">Navigation</string>
+    <string name="onboarding_expert_maps_body">Відкрий карту для повноцінної по черзі — пошук місця призначення, отримання маршрутизації та прямих вказівок, плюс осторонні пункти інтересу та будь-яка небезпека дороги RoadSense протягом усього шляху. Ви також можете автоматично спроектувати його на кластер інструментів, коли почнете їздити - або переключити життя на вкладці мапи RoadSense.</string>
+    <string name="onboarding_expert_integrations_title">Ентеграції</string>
+    <string name="onboarding_expert_integrations_body">Підключіть Telegram оповіщення про краще, MQTT або BYD Cloud. Кожна картка відкриває налаштування у додатку. Ці таблетки стають зеленими, коли все пов\'язано.</string>
+    <string name="onboarding_expert_bydcloud_title">BYD Cloud розблокує віддалене управління</string>
+    <string name="onboarding_expert_bydcloud_body">Пов\'язування вашого BYD облікового запису тут дає можливість віддаленого блокування, спалаху та рогу з вашого телефону. Розгляньте зв\'язаний обліковий запис та код доступу, щоб отримати чутливий ключ.</string>
+    <string name="onboarding_expert_surveillance_title">Ознайомлення &amp; запис</string>
+    <string name="onboarding_expert_surveillance_body">Точне розпізнавання налаштувань, якість та зберігання тут. Вони відкриті як конфігураційні сторінки у додатках, які обслуговуються з вашого авто - порожній екран - лише означає, що помічник все ще запускається.</string>
+    <string name="onboarding_expert_camprobe_title">Аудіо-зонд - обережно</string>
+    <string name="onboarding_expert_camprobe_body">Це дозволяє перекодувати, які фізична камера подає кожну роль і перезапускає камери. Змінюйте лише тоді, коли стрічка виглядає не так - це налаштування раніше в інструкціях.</string>
+    <string name="onboarding_expert_traffic_title">Монітор трафіку — необхідний для віддаленого доступу</string>
+    <string name="onboarding_expert_traffic_body">BYD вбудований монітор трафіку блокує інші програми з використанням вбудованої SIM ки. Якщо ви хочете дистанційно досягти своєї машини над ВДД СІМ, ви повинні вимкнути її тут. Вказуй підрозділ для застосування змін.</string>
+    <string name="onboarding_expert_daemons_title">Сервіси — обробка з доглядом</string>
+    <string name="onboarding_expert_daemons_body">Ці перемикачі починаються і зупиняються на фонових службах. Увімкнення OFF камери, Surveillance або ACC Sentry зупиняє запис і зберігає їх, доки не увімкнете їх - навіть після перезапуску.</string>
+    <string name="onboarding_expert_security_title">Замкнути PIN-кодом</string>
+    <string name="onboarding_expert_security_body">Встановіть PIN-код для передачі автомобілів. Проводьте та записуйте його та працюйте поки додаток заблоковано. Забутий PIN-код можна очистити лише з комп\'ютера через USB.</string>
+    <string name="onboarding_expert_reset_title">Скинути дані — постійні</string>
+    <string name="onboarding_expert_reset_body">Ця ереада записується, події та налаштування не можуть бути відмінені. Тут ви, якщо ви колись продаєте авто — не є частиною звичайного використання.</string>
+    <string name="onboarding_expert_done_title">Ознайомитись із цією справою</string>
+    <string name="onboarding_expert_done_body">Ви бачили глибші налаштування. Відкрийте цей посібник знову в будь-який час від кнопки допомоги.</string>
     <!-- Language picker (drawer footer + bottom sheet) -->
     <string name="cd_close">Закрити</string>
     <string name="language_picker_title">Мова:</string>
@@ -638,6 +739,7 @@
     <string name="rail_recordings">Записи</string>
     <string name="rail_vehicle">Автомобіль</string>
     <string name="rail_trips">Поїздки</string>
+    <string name="rail_charging">Заряджання</string>
     <string name="rail_integrations">Ентеграції</string>
     <string name="rail_diagnostics">Діагностика</string>
     <string name="rail_settings">Налаштування</string>
