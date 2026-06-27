@@ -190,104 +190,104 @@
     <!-- Onboarding guide (novice track). Parked-only, glanceable. Overdrive is a
          protected brand name — keep it verbatim. -->
     <!-- Shared button labels -->
-    <string name="onboarding_next">Next</string>
-    <string name="onboarding_back">Back</string>
-    <string name="onboarding_skip">Skip</string>
-    <string name="onboarding_later">Do this later</string>
-    <string name="onboarding_dismiss">Dismiss</string>
-    <string name="onboarding_exit">Exit tour</string>
-    <string name="onboarding_done_short">Got it</string>
+    <string name="onboarding_next">İleri</string>
+    <string name="onboarding_back">Geri</string>
+    <string name="onboarding_skip">Atla</string>
+    <string name="onboarding_later">Bunu sonra yap</string>
+    <string name="onboarding_dismiss">Kapat</string>
+    <string name="onboarding_exit">Turdan çık</string>
+    <string name="onboarding_done_short">Anladım</string>
     <!-- Step 0: authorize the daemon (system ADB popup) -->
-    <string name="onboarding_authorize_title">Wake up Overdrive</string>
-    <string name="onboarding_authorize_body">Overdrive runs your cameras through a small on-device helper. Android will ask once to allow USB debugging — tap <b>Allow</b> and check <b>Always allow from this device</b> so it stays on after every restart.</string>
-    <string name="onboarding_authorize_button">Allow access</string>
-    <string name="onboarding_authorize_waiting_title">Waiting for permission…</string>
-    <string name="onboarding_authorize_waiting_body">Accept the Android popup. If you don\'t see it, it may already be granted — this will continue on its own.</string>
-    <string name="onboarding_authorize_retry_title">Still not connected</string>
-    <string name="onboarding_authorize_retry_body">The helper isn\'t running yet. The Android permission may have been dismissed. Try again and remember to check <b>Always allow</b>.</string>
-    <string name="onboarding_authorize_retry_button">Try again</string>
+    <string name="onboarding_authorize_title">Overdrive\'ı uyandır</string>
+    <string name="onboarding_authorize_body">Overdrive, kameralarınızı küçük bir cihaz içi yardımcı üzerinden çalıştırır. Android bir kez USB hata ayıklamaya izin vermenizi isteyecek — <b>İzin Ver</b>\'e dokunun ve her yeniden başlatmadan sonra açık kalması için <b>Bu cihazdan her zaman izin ver</b> seçeneğini işaretleyin.</string>
+    <string name="onboarding_authorize_button">Erişime izin ver</string>
+    <string name="onboarding_authorize_waiting_title">İzin bekleniyor…</string>
+    <string name="onboarding_authorize_waiting_body">Android açılır penceresini kabul edin. Görmüyorsanız zaten verilmiş olabilir — bu işlem kendi kendine devam edecektir.</string>
+    <string name="onboarding_authorize_retry_title">Hâlâ bağlanılamadı</string>
+    <string name="onboarding_authorize_retry_body">Yardımcı henüz çalışmıyor. Android izni kapatılmış olabilir. Tekrar deneyin ve <b>Her zaman izin ver</b> seçeneğini işaretlemeyi unutmayın.</string>
+    <string name="onboarding_authorize_retry_button">Tekrar dene</string>
     <!-- Camera mapping chapter -->
-    <string name="onboarding_camera_step_label">Camera · step %1$d of %2$d</string>
-    <string name="onboarding_camera_intro_title">Set up your cameras</string>
-    <string name="onboarding_camera_intro_body">Let\'s tell Overdrive which camera is your 360 view and which is your dashcam. It takes about a minute, and you can change it later.</string>
-    <string name="onboarding_camera_intro_primary">Start</string>
-    <string name="onboarding_camera_opening_title">Opening camera setup…</string>
-    <string name="onboarding_camera_opening_body">Loading a live preview from your cameras. This can take a few seconds.</string>
-    <string name="onboarding_camera_pano_title">This is your 360 view</string>
-    <string name="onboarding_camera_pano_body">Use the arrows to find the stitched 4-up image. Read it from the BOTTOM: bottom-left is the REAR, bottom-right is the LEFT side.</string>
-    <string name="onboarding_camera_dashcam_title">Now find the road-ahead camera</string>
-    <string name="onboarding_camera_dashcam_body">Step through the cameras with the arrows and stop on the one showing the windshield / forward view. Note its number — you\'ll pick it next.</string>
-    <string name="onboarding_camera_pick_title">Pick your 360 camera</string>
-    <string name="onboarding_camera_pick_body">In the top card, choose the number for your 360 / normal camera. Not sure? Leave it on AUTO and Overdrive figures it out.</string>
-    <string name="onboarding_camera_pick_primary">Next</string>
-    <string name="onboarding_camera_pick_dash_title">Pick your dashcam camera</string>
-    <string name="onboarding_camera_pick_dash_body">In this card, choose the dashcam number you found earlier — or leave it on AUTO.</string>
-    <string name="onboarding_camera_save_primary">Save &amp; restart</string>
-    <string name="onboarding_camera_applying_title">Applying — restarting cameras</string>
-    <string name="onboarding_camera_applying_body">The feed will go dark and blink for about 10 seconds. This is normal — hang tight.</string>
-    <string name="onboarding_camera_verify_title">Quick check</string>
-    <string name="onboarding_camera_verify_body">Does the 360 view show the stitched image and the dashcam show the road ahead? If a feed looks wrong, tap Re-pick — nothing is broken.</string>
-    <string name="onboarding_camera_verify_ok">Looks right</string>
-    <string name="onboarding_camera_verify_repick">Re-pick</string>
-    <string name="onboarding_camera_windshield_title">Road-ahead band on recordings? (optional)</string>
-    <string name="onboarding_camera_windshield_body">For the OEM dashcam layout — the windshield camera as a strip on top of your recording — pick Windshield in the role menu, choose the forward camera, and Save. Most owners can skip this.</string>
-    <string name="onboarding_camera_windshield_primary">Show me</string>
-    <string name="onboarding_camera_windshield_skip">No thanks</string>
+    <string name="onboarding_camera_step_label">Kamera · adım %1$d / %2$d</string>
+    <string name="onboarding_camera_intro_title">Kameralarınızı kurun</string>
+    <string name="onboarding_camera_intro_body">Overdrive\'a hangi kameranın 360 görünümünüz, hangisinin dashcam\'iniz olduğunu söyleyelim. Yaklaşık bir dakika sürer ve sonradan değiştirebilirsiniz.</string>
+    <string name="onboarding_camera_intro_primary">Başla</string>
+    <string name="onboarding_camera_opening_title">Kamera kurulumu açılıyor…</string>
+    <string name="onboarding_camera_opening_body">Kameralarınızdan canlı bir önizleme yükleniyor. Bu birkaç saniye sürebilir.</string>
+    <string name="onboarding_camera_pano_title">Bu sizin 360 görünümünüz</string>
+    <string name="onboarding_camera_pano_body">Birleştirilmiş 4\'lü görüntüyü bulmak için okları kullanın. ALTTAN okuyun: sol alt ARKA, sağ alt SOL taraftır.</string>
+    <string name="onboarding_camera_dashcam_title">Şimdi yol kamerasını bulun</string>
+    <string name="onboarding_camera_dashcam_body">Oklarla kameralar arasında geçiş yapın ve ön cam / ileri görünümü gösterende durun. Numarasını not edin — bir sonraki adımda onu seçeceksiniz.</string>
+    <string name="onboarding_camera_pick_title">360 kameranızı seçin</string>
+    <string name="onboarding_camera_pick_body">Üstteki kartta 360 / normal kameranızın numarasını seçin. Emin değil misiniz? OTOMATİK\'te bırakın, Overdrive halletsin.</string>
+    <string name="onboarding_camera_pick_primary">İleri</string>
+    <string name="onboarding_camera_pick_dash_title">Dashcam kameranızı seçin</string>
+    <string name="onboarding_camera_pick_dash_body">Bu kartta daha önce bulduğunuz dashcam numarasını seçin — ya da OTOMATİK\'te bırakın.</string>
+    <string name="onboarding_camera_save_primary">Kaydet ve yeniden başlat</string>
+    <string name="onboarding_camera_applying_title">Uygulanıyor — kameralar yeniden başlatılıyor</string>
+    <string name="onboarding_camera_applying_body">Görüntü yaklaşık 10 saniye kararacak ve titreyecek. Bu normaldir — biraz bekleyin.</string>
+    <string name="onboarding_camera_verify_title">Hızlı kontrol</string>
+    <string name="onboarding_camera_verify_body">360 görünüm birleştirilmiş görüntüyü, dashcam ise önündeki yolu gösteriyor mu? Bir görüntü yanlış görünüyorsa Yeniden Seç\'e dokunun — hiçbir şey bozulmadı.</string>
+    <string name="onboarding_camera_verify_ok">Doğru görünüyor</string>
+    <string name="onboarding_camera_verify_repick">Yeniden seç</string>
+    <string name="onboarding_camera_windshield_title">Kayıtlarda yol şeridi? (isteğe bağlı)</string>
+    <string name="onboarding_camera_windshield_body">OEM dashcam düzeni için — ön cam kamerası kaydınızın üstünde bir şerit olarak — rol menüsünden Ön Cam\'i seçin, ileri kamerayı belirleyin ve Kaydedin. Çoğu kullanıcı bunu atlayabilir.</string>
+    <string name="onboarding_camera_windshield_primary">Bana göster</string>
+    <string name="onboarding_camera_windshield_skip">Hayır, teşekkürler</string>
     <!-- Vehicle profile chapter -->
-    <string name="onboarding_vehicle_title">Tell Overdrive your battery</string>
-    <string name="onboarding_vehicle_body">Pick your model and we fill in the kWh, or type it yourself (15–120). This makes range and charging estimates accurate. You can skip and set it later.</string>
-    <string name="onboarding_vehicle_primary">Set battery</string>
+    <string name="onboarding_vehicle_title">Overdrive\'a bataryanızı tanıtın</string>
+    <string name="onboarding_vehicle_body">Modelinizi seçin, kWh\'yi biz dolduralım ya da kendiniz yazın (15–120). Bu, menzil ve şarj tahminlerini doğru hale getirir. Atlayıp sonra ayarlayabilirsiniz.</string>
+    <string name="onboarding_vehicle_primary">Bataryayı ayarla</string>
     <!-- Dashboard orientation chapter -->
-    <string name="onboarding_dash_tiles_title">Your cockpit at a glance</string>
-    <string name="onboarding_dash_tiles_body">These cards are buttons — tap to open Live cameras, Recordings, Services or your Vehicle.</string>
-    <string name="onboarding_dash_chips_title">These just show status</string>
-    <string name="onboarding_dash_chips_body">The chips up top show recording, services and your remote link. They update on their own — they\'re not buttons.</string>
-    <string name="onboarding_dash_chips_body_land">Your live status — recording, services and remote link — shows up here. It updates on its own.</string>
+    <string name="onboarding_dash_tiles_title">Bir bakışta kokpitiniz</string>
+    <string name="onboarding_dash_tiles_body">Bu kartlar birer düğmedir — Canlı kameralar, Kayıtlar, Hizmetler veya Aracınızı açmak için dokunun.</string>
+    <string name="onboarding_dash_chips_title">Bunlar yalnızca durum gösterir</string>
+    <string name="onboarding_dash_chips_body">Üstteki çipler kayıt, hizmetler ve uzaktan bağlantınızı gösterir. Kendi kendilerine güncellenir — düğme değildirler.</string>
+    <string name="onboarding_dash_chips_body_land">Canlı durumunuz — kayıt, hizmetler ve uzaktan bağlantı — burada görünür. Kendi kendine güncellenir.</string>
     <!-- Completion -->
-    <string name="onboarding_done_title">Cockpit ready</string>
-    <string name="onboarding_done_body">Cameras mapped and battery set. Tap Live to watch your feeds — or explore the deeper settings any time.</string>
-    <string name="onboarding_done_primary">Done</string>
-    <string name="onboarding_done_secondary">Explore Setup</string>
+    <string name="onboarding_done_title">Kokpit hazır</string>
+    <string name="onboarding_done_body">Kameralar eşlendi ve batarya ayarlandı. Yayınlarınızı izlemek için Canlı\'ya dokunun — ya da istediğiniz zaman daha derin ayarları keşfedin.</string>
+    <string name="onboarding_done_primary">Bitti</string>
+    <string name="onboarding_done_secondary">Kurulumu Keşfet</string>
     <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
-    <string name="onboarding_help_cd">Guided tour</string>
-    <string name="onboarding_reset_toast">Onboarding reset — replaying the guide</string>
-    <string name="onboarding_expert_chapter_label">Chapter %1$d of %2$d</string>
-    <string name="onboarding_expert_finish">Finish</string>
-    <string name="onboarding_expert_menu_title">Guided tour</string>
-    <string name="onboarding_expert_menu_body">A quick walk through the deeper setup — your vehicle profile, integrations, surveillance, diagnostics, services and security. You can stop any time.</string>
-    <string name="onboarding_expert_menu_start">Start tour</string>
-    <string name="onboarding_expert_vehicle_title">Vehicle profile</string>
-    <string name="onboarding_expert_vehicle_body">Tap the Vehicle tile to set your battery size and model — it powers accurate range and health estimates.</string>
-    <string name="onboarding_expert_recordings_title">Your recordings</string>
-    <string name="onboarding_expert_recordings_body">Switch between Dashcam (continuous + proximity clips) and Surveillance (parked sentry events) with this toggle — each keeps its own library. Tap a clip to play it.</string>
-    <string name="onboarding_expert_live_title">Live cameras</string>
-    <string name="onboarding_expert_live_body">Open Live from here to watch all cameras in real time. Handy for checking the view before a drive or while parked nearby.</string>
-    <string name="onboarding_expert_trips_title">Trip history</string>
-    <string name="onboarding_expert_trips_body">Trips logs every drive — route, distance, duration and energy use — so you can review where the car has been.</string>
+    <string name="onboarding_help_cd">Rehberli tur</string>
+    <string name="onboarding_reset_toast">Tanıtım sıfırlandı — rehber yeniden oynatılıyor</string>
+    <string name="onboarding_expert_chapter_label">Bölüm %1$d / %2$d</string>
+    <string name="onboarding_expert_finish">Bitir</string>
+    <string name="onboarding_expert_menu_title">Rehberli tur</string>
+    <string name="onboarding_expert_menu_body">Daha derin kurulumda hızlı bir gezinti — araç profiliniz, entegrasyonlar, gözetim, tanılama, hizmetler ve güvenlik. İstediğiniz zaman durabilirsiniz.</string>
+    <string name="onboarding_expert_menu_start">Tura başla</string>
+    <string name="onboarding_expert_vehicle_title">Araç profili</string>
+    <string name="onboarding_expert_vehicle_body">Batarya boyutunuzu ve modelinizi ayarlamak için Araç kutusuna dokunun — doğru menzil ve sağlık tahminlerini sağlar.</string>
+    <string name="onboarding_expert_recordings_title">Kayıtlarınız</string>
+    <string name="onboarding_expert_recordings_body">Bu anahtarla Dashcam (sürekli + yakınlık klipleri) ile Gözetim (park halindeki nöbet olayları) arasında geçiş yapın — her biri kendi kitaplığını tutar. Oynatmak için bir klibe dokunun.</string>
+    <string name="onboarding_expert_live_title">Canlı kameralar</string>
+    <string name="onboarding_expert_live_body">Tüm kameraları gerçek zamanlı izlemek için Canlı\'yı buradan açın. Sürüşten önce veya yakında park halindeyken görüntüyü kontrol etmek için kullanışlıdır.</string>
+    <string name="onboarding_expert_trips_title">Yolculuk geçmişi</string>
+    <string name="onboarding_expert_trips_body">Yolculuklar her sürüşü kaydeder — rota, mesafe, süre ve enerji kullanımı — böylece aracın nerelerde bulunduğunu inceleyebilirsiniz.</string>
     <string name="onboarding_expert_roadsense_title">RoadSense</string>
-    <string name="onboarding_expert_roadsense_body">RoadSense uses the car\'s motion sensors and GPS to detect road hazards — bumps, potholes, speed breakers — and warns you before known ones. Its tabs cover detection, the hazard map, warning chimes, and Blind Spot. Turn on the master switch to use any of it.</string>
-    <string name="onboarding_expert_blindspot_title">Blind Spot</string>
-    <string name="onboarding_expert_blindspot_body">Enable Blind Spot in the tab here and, when you signal a turn, a side-camera view appears on screen automatically — left for a left signal, right for a right one — then hides shortly after. It only runs while a turn signal is on.</string>
-    <string name="onboarding_expert_maps_title">Navigation</string>
-    <string name="onboarding_expert_maps_body">Open the Map for full turn-by-turn navigation — search a destination, get routing and live guidance, plus nearby points of interest and any road hazards RoadSense has logged along the way. You can also auto-project it onto the instrument cluster when you start driving — that toggle lives in RoadSense\'s Map tab.</string>
-    <string name="onboarding_expert_integrations_title">Integrations</string>
-    <string name="onboarding_expert_integrations_body">Connect Telegram alerts, A Better Routeplanner, MQTT or BYD Cloud. Each card opens its setup inside the app. The pill up top turns green when everything\'s linked.</string>
-    <string name="onboarding_expert_bydcloud_title">BYD Cloud unlocks remote control</string>
-    <string name="onboarding_expert_bydcloud_body">Linking your BYD account here enables remote lock, flash and horn from your phone. Treat the linked account and access code as sensitive.</string>
-    <string name="onboarding_expert_surveillance_title">Surveillance &amp; recording</string>
-    <string name="onboarding_expert_surveillance_body">Fine-tune detection, quality and storage here. These open as in-app config pages served from your car — a blank screen just means the helper is still starting.</string>
-    <string name="onboarding_expert_camprobe_title">Camera probe — careful</string>
-    <string name="onboarding_expert_camprobe_body">This re-maps which physical camera feeds each role and restarts the cameras. Only change it if a feed looks wrong — you set this up earlier in the guide.</string>
-    <string name="onboarding_expert_traffic_title">Traffic monitor — required for remote access</string>
-    <string name="onboarding_expert_traffic_body">BYD\'s built-in Traffic Monitor blocks other apps from using the car\'s built-in SIM. If you want to reach your car remotely over the BYD SIM, you must disable it here. The head unit reboots to apply the change.</string>
-    <string name="onboarding_expert_daemons_title">Services — handle with care</string>
-    <string name="onboarding_expert_daemons_body">These switches start and stop background services. Turning OFF Camera, Surveillance or ACC Sentry stops recording and keeps them off until you turn them back on — even after a restart.</string>
-    <string name="onboarding_expert_security_title">Lock with a PIN</string>
-    <string name="onboarding_expert_security_body">Set a PIN to gate the app for shared vehicles. Surveillance and recording keep running while the app is locked. A forgotten PIN can only be cleared from a computer over USB.</string>
-    <string name="onboarding_expert_reset_title">Reset data — permanent</string>
-    <string name="onboarding_expert_reset_body">This erases recordings, events and settings and can\'t be undone. It\'s here if you ever sell the car — not part of normal use.</string>
-    <string name="onboarding_expert_done_title">That\'s the tour</string>
-    <string name="onboarding_expert_done_body">You\'ve seen the deeper settings. Open this guide again any time from the help button.</string>
+    <string name="onboarding_expert_roadsense_body">RoadSense, yol tehlikelerini — tümsekler, çukurlar, kasisler — algılamak için aracın hareket sensörlerini ve GPS\'i kullanır ve bilinenlerden önce sizi uyarır. Sekmeleri algılama, tehlike haritası, uyarı zilleri ve Kör Nokta\'yı kapsar. Herhangi birini kullanmak için ana anahtarı açın.</string>
+    <string name="onboarding_expert_blindspot_title">Kör Nokta</string>
+    <string name="onboarding_expert_blindspot_body">Buradaki sekmede Kör Nokta\'yı etkinleştirin; dönüş sinyali verdiğinizde ekranda otomatik olarak bir yan kamera görünümü belirir — sol sinyal için sol, sağ sinyal için sağ — ardından kısa süre sonra gizlenir. Yalnızca bir dönüş sinyali açıkken çalışır.</string>
+    <string name="onboarding_expert_maps_title">Navigasyon</string>
+    <string name="onboarding_expert_maps_body">Tam adım adım navigasyon için Haritayı açın — bir hedef arayın, rota ve canlı yönlendirme alın, ayrıca yakındaki ilgi noktaları ve RoadSense\'in yol boyunca kaydettiği tüm yol tehlikeleri. Sürüşe başladığınızda bunu gösterge paneline otomatik olarak da yansıtabilirsiniz — bu anahtar RoadSense\'in Harita sekmesinde bulunur.</string>
+    <string name="onboarding_expert_integrations_title">Entegrasyonlar</string>
+    <string name="onboarding_expert_integrations_body">Telegram bildirimlerini, A Better Routeplanner\'ı, MQTT\'yi veya BYD Cloud\'u bağlayın. Her kart kurulumunu uygulama içinde açar. Her şey bağlandığında üstteki hap yeşile döner.</string>
+    <string name="onboarding_expert_bydcloud_title">BYD Cloud uzaktan kontrolü açar</string>
+    <string name="onboarding_expert_bydcloud_body">BYD hesabınızı buraya bağlamak, telefonunuzdan uzaktan kilitleme, sinyal çakma ve korna çalma özelliklerini etkinleştirir. Bağlı hesabı ve erişim kodunu hassas bilgi olarak ele alın.</string>
+    <string name="onboarding_expert_surveillance_title">Gözetim ve kayıt</string>
+    <string name="onboarding_expert_surveillance_body">Algılama, kalite ve depolamayı buradan ince ayarlayın. Bunlar aracınızdan sunulan uygulama içi yapılandırma sayfaları olarak açılır — boş bir ekran yalnızca yardımcının hâlâ başlamakta olduğu anlamına gelir.</string>
+    <string name="onboarding_expert_camprobe_title">Kamera sondası — dikkatli olun</string>
+    <string name="onboarding_expert_camprobe_body">Bu, her role hangi fiziksel kameranın yayın yapacağını yeniden eşler ve kameraları yeniden başlatır. Yalnızca bir yayın yanlış görünüyorsa değiştirin — bunu rehberde daha önce ayarlamıştınız.</string>
+    <string name="onboarding_expert_traffic_title">Trafik monitörü — uzaktan erişim için gerekli</string>
+    <string name="onboarding_expert_traffic_body">BYD\'nin yerleşik Trafik Monitörü, diğer uygulamaların aracın yerleşik SIM\'ini kullanmasını engeller. Aracınıza BYD SIM üzerinden uzaktan erişmek istiyorsanız, bunu buradan devre dışı bırakmanız gerekir. Değişikliğin uygulanması için kafa ünitesi yeniden başlatılır.</string>
+    <string name="onboarding_expert_daemons_title">Hizmetler — dikkatli kullanın</string>
+    <string name="onboarding_expert_daemons_body">Bu anahtarlar arka plan hizmetlerini başlatır ve durdurur. Kamera, Gözetim veya ACC Sentry\'yi KAPATMAK kaydı durdurur ve siz tekrar açana kadar — yeniden başlatmadan sonra bile — kapalı tutar.</string>
+    <string name="onboarding_expert_security_title">PIN ile kilitle</string>
+    <string name="onboarding_expert_security_body">Paylaşılan araçlar için uygulamayı korumak üzere bir PIN belirleyin. Uygulama kilitliyken Gözetim ve kayıt çalışmaya devam eder. Unutulan bir PIN yalnızca bir bilgisayardan USB üzerinden temizlenebilir.</string>
+    <string name="onboarding_expert_reset_title">Verileri sıfırla — kalıcı</string>
+    <string name="onboarding_expert_reset_body">Bu işlem kayıtları, olayları ve ayarları siler ve geri alınamaz. Aracı bir gün satarsanız diye burada bulunur — normal kullanımın parçası değildir.</string>
+    <string name="onboarding_expert_done_title">Tur bu kadar</string>
+    <string name="onboarding_expert_done_body">Daha derin ayarları gördünüz. Bu rehberi yardım düğmesinden istediğiniz zaman tekrar açın.</string>
     <!-- Language picker (drawer footer + bottom sheet) -->
     <string name="cd_close">Kapat</string>
     <string name="language_picker_title">Dil</string>
@@ -363,11 +363,11 @@
     <string name="recording_lib_filter_section_severity">Ağırlık</string>
     <string name="recording_lib_filter_section_type">Tür</string>
     <string name="recording_lib_filter_section_place">Yer</string>
-    <string name="recording_lib_filter_section_storage">Storage</string>
+    <string name="recording_lib_filter_section_storage">Depolama</string>
     <!-- Storage filter chip labels (full words; the tile badge uses the short
          SD/USB/INT forms above). -->
-    <string name="recording_lib_storage_filter_internal">Internal</string>
-    <string name="recording_lib_storage_filter_sd">SD card</string>
+    <string name="recording_lib_storage_filter_internal">Dahili</string>
+    <string name="recording_lib_storage_filter_sd">SD kart</string>
     <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">Normal</string>
@@ -413,7 +413,7 @@
          silent SD→internal fallback (SD bridged behind the USB power rail). -->
     <string name="recording_lib_storage_sd">SD</string>
     <string name="recording_lib_storage_usb">USB</string>
-    <string name="recording_lib_storage_internal">INT</string>
+    <string name="recording_lib_storage_internal">DAH</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Sharing %1$d recordings</string>
     <!-- fragment_sentry_config -->
@@ -733,7 +733,7 @@
     <string name="rail_recordings">Kayıtlar</string>
     <string name="rail_vehicle">Araç</string>
     <string name="rail_trips">Seyahatler</string>
-    <string name="rail_charging">Charging</string>
+    <string name="rail_charging">Şarj</string>
     <string name="rail_integrations">Entegreler</string>
     <string name="rail_diagnostics">Teşhisler</string>
     <string name="rail_settings">Ayarlar</string>
@@ -767,31 +767,31 @@
     <string name="settings_about_check_update_value">En son GitHub sürümünü kontrol edin ve daha yeniyse yükleyin.</string>
     <!-- Backup & Restore (same-device). The backup file contains credentials +
          the device key, so the copy warns the user to keep it private. -->
-    <string name="settings_backup_export_title">Export settings</string>
-    <string name="settings_backup_export_value">Save a backup file of your current settings. Keep it private — it holds your credentials.</string>
-    <string name="settings_backup_import_title">Restore settings</string>
-    <string name="settings_backup_import_value">Load a backup file made on this same head unit.</string>
+    <string name="settings_backup_export_title">Ayarları dışa aktar</string>
+    <string name="settings_backup_export_value">Mevcut ayarlarınızın bir yedek dosyasını kaydedin. Gizli tutun — kimlik bilgilerinizi içerir.</string>
+    <string name="settings_backup_import_title">Ayarları geri yükle</string>
+    <string name="settings_backup_import_value">Aynı bu kafa ünitesinde oluşturulmuş bir yedek dosyasını yükleyin.</string>
     <string name="settings_backup_default_filename">overdrive-backup.json</string>
-    <string name="settings_backup_exporting">Building backup…</string>
-    <string name="settings_backup_export_failed">Backup export failed</string>
-    <string name="settings_backup_saved">Backup saved</string>
-    <string name="settings_backup_saved_to">Backup saved to %1$s</string>
-    <string name="settings_backup_save_failed">Could not save the backup file</string>
-    <string name="settings_backup_pick_file">Pick a backup to restore</string>
-    <string name="settings_backup_no_files">No backup files found. Export one first, or copy a backup .json into %1$s, then try again.</string>
-    <string name="settings_backup_read_failed">Could not read the file</string>
-    <string name="settings_backup_invalid_file">That file is not a valid Overdrive backup</string>
-    <string name="settings_backup_restoring">Restoring…</string>
-    <string name="settings_backup_restored">Settings restored</string>
-    <string name="settings_backup_restore_failed">Restore failed</string>
-    <string name="settings_backup_daemon_down">The camera service must be running to back up or restore. Start it from Daemons, then try again.</string>
-    <string name="settings_backup_restore_confirm_title">Restore settings?</string>
-    <string name="settings_backup_restore_confirm_msg">This replaces your current Overdrive settings with the backup and reloads services. It only works on the same head unit the backup was made on.</string>
-    <string name="settings_backup_restore_confirm_btn">Restore</string>
-    <string name="settings_backup_restart_hint">Settings restored. Restart the camera daemon (Daemons → Camera → Restart) to make sure every restored setting is applied.</string>
-    <string name="settings_backup_trips_prompt">Include your trip history (distance, energy, cost, scores, start/end locations)? Detailed per-trip telemetry is not included. The file will contain your location history — keep it private.</string>
-    <string name="settings_backup_settings_only">Settings only</string>
-    <string name="settings_backup_with_trips">Include trips</string>
+    <string name="settings_backup_exporting">Yedek oluşturuluyor…</string>
+    <string name="settings_backup_export_failed">Yedek dışa aktarma başarısız oldu</string>
+    <string name="settings_backup_saved">Yedek kaydedildi</string>
+    <string name="settings_backup_saved_to">Yedek %1$s konumuna kaydedildi</string>
+    <string name="settings_backup_save_failed">Yedek dosyası kaydedilemedi</string>
+    <string name="settings_backup_pick_file">Geri yüklenecek bir yedek seçin</string>
+    <string name="settings_backup_no_files">Yedek dosyası bulunamadı. Önce bir tane dışa aktarın ya da bir yedek .json dosyasını %1$s konumuna kopyalayıp tekrar deneyin.</string>
+    <string name="settings_backup_read_failed">Dosya okunamadı</string>
+    <string name="settings_backup_invalid_file">Bu dosya geçerli bir Overdrive yedeği değil</string>
+    <string name="settings_backup_restoring">Geri yükleniyor…</string>
+    <string name="settings_backup_restored">Ayarlar geri yüklendi</string>
+    <string name="settings_backup_restore_failed">Geri yükleme başarısız oldu</string>
+    <string name="settings_backup_daemon_down">Yedekleme veya geri yükleme için kamera hizmetinin çalışıyor olması gerekir. Arka Plan Hizmetleri\'nden başlatın, ardından tekrar deneyin.</string>
+    <string name="settings_backup_restore_confirm_title">Ayarlar geri yüklensin mi?</string>
+    <string name="settings_backup_restore_confirm_msg">Bu işlem mevcut Overdrive ayarlarınızı yedekle değiştirir ve hizmetleri yeniden yükler. Yalnızca yedeğin oluşturulduğu aynı kafa ünitesinde çalışır.</string>
+    <string name="settings_backup_restore_confirm_btn">Geri yükle</string>
+    <string name="settings_backup_restart_hint">Ayarlar geri yüklendi. Geri yüklenen tüm ayarların uygulandığından emin olmak için kamera arka plan hizmetini yeniden başlatın (Arka Plan Hizmetleri → Kamera → Yeniden Başlat).</string>
+    <string name="settings_backup_trips_prompt">Yolculuk geçmişiniz (mesafe, enerji, maliyet, puanlar, başlangıç/bitiş konumları) dahil edilsin mi? Yolculuk başına ayrıntılı telemetri dahil edilmez. Dosya konum geçmişinizi içerecektir — gizli tutun.</string>
+    <string name="settings_backup_settings_only">Yalnızca ayarlar</string>
+    <string name="settings_backup_with_trips">Yolculukları dahil et</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
          personality without being corny — short, warm, specific. -->
@@ -1212,9 +1212,9 @@
     <string name="roadsense_map_routing">Finding route…</string>
     <string name="roadsense_map_route_failed">Rota bulunamadı. Tekrar deneyin.</string>
     <string name="roadsense_map_need_key">Navigasyon için RoadSense ayarlarından bir rota anahtarı ekleyin.</string>
-    <string name="roadsense_map_route_key_rejected">Routing key rejected. Check your key in RoadSense settings.</string>
-    <string name="roadsense_map_route_network">Network too slow to find a route. Check your connection and try again.</string>
-    <string name="roadsense_map_route_http">Routing service error (%1$d). Try again shortly.</string>
+    <string name="roadsense_map_route_key_rejected">Rota anahtarı reddedildi. RoadSense ayarlarından anahtarınızı kontrol edin.</string>
+    <string name="roadsense_map_route_network">Rota bulmak için ağ çok yavaş. Bağlantınızı kontrol edip tekrar deneyin.</string>
+    <string name="roadsense_map_route_http">Rota hizmeti hatası (%1$d). Birazdan tekrar deneyin.</string>
     <string name="roadsense_map_rerouting">Rotadan sapıldı — yeniden hesaplanıyor…</string>
     <string name="roadsense_map_arrived">Hedefe ulaştınız.</string>
     <string name="roadsense_map_nav_started">Navigating to %1$s</string>
@@ -1309,12 +1309,12 @@
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
     <string name="roadsense_map_trip_restored">Yolculuk geri yüklendi</string>
     <!-- Cloudflared paid-tunnel settings -->
-    <string name="cloudflared_token_storage_note">Token is stored encrypted and shared between the app and daemon processes.</string>
-    <string name="cloudflared_token_hint">Enter cloudflared token</string>
-    <string name="cloudflare_paid_version">Cloudflare Paid Version</string>
-    <string name="dialog_cloudflared_settings_title">Cloudflared Settings</string>
-    <string name="dialog_cloudflared_settings_message">Define whether you are using paid Cloudflare or trycloudflare. If you are using paid Cloudflare, enter your tunnel token.</string>
-    <string name="toast_cloudflared_token_cannot_be_empty">If you set the paid version the token cannot be empty</string>
-    <string name="toast_cloudflared_token_invalid">Invalid token: use only letters, numbers and . _ - = characters</string>
-    <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
+    <string name="cloudflared_token_storage_note">Token şifrelenmiş olarak saklanır ve uygulama ile daemon süreçleri arasında paylaşılır.</string>
+    <string name="cloudflared_token_hint">cloudflared token\'ını girin</string>
+    <string name="cloudflare_paid_version">Cloudflare Ücretli Sürüm</string>
+    <string name="dialog_cloudflared_settings_title">Cloudflared Ayarları</string>
+    <string name="dialog_cloudflared_settings_message">Ücretli Cloudflare mi yoksa trycloudflare mi kullandığınızı belirleyin. Ücretli Cloudflare kullanıyorsanız tünel token\'ınızı girin.</string>
+    <string name="toast_cloudflared_token_cannot_be_empty">Ücretli sürümü ayarlarsanız token boş olamaz</string>
+    <string name="toast_cloudflared_token_invalid">Geçersiz token: yalnızca harf, rakam ve . _ - = karakterlerini kullanın</string>
+    <string name="toast_cloudflared_saved_settings">Cloudflared ayarları kaydedildi</string>
 </resources>
