@@ -1228,6 +1228,7 @@
     <string name="roadsense_map_search_action">Пошук</string>
     <string name="roadsense_map_searching">Пошук…</string>
     <string name="roadsense_map_no_results">Місця не знайдено</string>
+    <string name="roadsense_map_search_network">Не вдалося знайти службу пошуку. Перевірте підключення або проксі-сервер і повторіть спробу.</string>
     <string name="roadsense_map_pick_destination">Виберіть місце призначення</string>
     <string name="roadsense_map_routing">Finding route…</string>
     <string name="roadsense_map_route_failed">Не вдалося знайти маршрут. Повторіть спробу.</string>
