@@ -1248,6 +1248,7 @@
     <string name="roadsense_map_search_action">البحث</string>
     <string name="roadsense_map_searching">البحث…</string>
     <string name="roadsense_map_no_results">لم يتم العثور على أماكن</string>
+    <string name="roadsense_map_search_network">تعذر الوصول إلى خدمة البحث. تحقق من الاتصال الخاص بك أو الوكيل وحاول مرة أخرى.</string>
     <string name="roadsense_map_pick_destination">اختر الوجهة</string>
     <string name="roadsense_map_routing">العثور على المسار…</string>
     <string name="roadsense_map_route_failed">تعذر العثور على مسار. حاول مرة أخرى.</string>
