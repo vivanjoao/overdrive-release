@@ -1228,6 +1228,7 @@
     <string name="roadsense_map_search_action">Szukaj</string>
     <string name="roadsense_map_searching">Wyszukiwanie…</string>
     <string name="roadsense_map_no_results">Nie znaleziono miejsc</string>
+    <string name="roadsense_map_search_network">Nie można połączyć się z usługą wyszukiwania. Sprawdź swoje połączenie lub proxy i spróbuj ponownie.</string>
     <string name="roadsense_map_pick_destination">Wybierz cel</string>
     <string name="roadsense_map_routing">Znajdowanie trasy…</string>
     <string name="roadsense_map_route_failed">Nie można znaleźć trasy. Spróbuj ponownie.</string>
