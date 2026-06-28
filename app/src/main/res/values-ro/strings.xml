@@ -1218,6 +1218,7 @@
     <string name="roadsense_map_search_action">Caută</string>
     <string name="roadsense_map_searching">Se caută…</string>
     <string name="roadsense_map_no_results">Nici un loc găsit</string>
+    <string name="roadsense_map_search_network">Serviciul de căutare nu a putut fi accesat. Verificați conexiunea sau proxy-ul și încercați din nou.</string>
     <string name="roadsense_map_pick_destination">Alegeți destinația</string>
     <string name="roadsense_map_routing">Se caută ruta…</string>
     <string name="roadsense_map_route_failed">Nu s-a putut găsi ruta. Încearcă din nou.</string>
