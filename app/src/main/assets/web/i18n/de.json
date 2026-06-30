@@ -23,7 +23,7 @@
     "byd_cloud_title": "BYD Wolke - OverDrive",
     "telegram_title": "Telegram - OverDrive",
     "dashboard_title": "Dashboard - OverDrive",
-    "road_sense_title": "RoadSense - OverDrive"
+    "road_sense_title": "FahrRadar - OverDrive"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -50,7 +50,7 @@
     "about_group": "Über",
     "brand_home": "OverDrive — Dashboard öffnen",
     "telegram": "Telegram",
-    "road_sense": "RoadSense"
+    "road_sense": "FahrRadar"
   },
   "road_sense": {
     "page_title": "RoadSense Einstellungen",
