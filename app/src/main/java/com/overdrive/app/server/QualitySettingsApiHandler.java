@@ -803,17 +803,40 @@ public class QualitySettingsApiHandler {
         response.put("streamingQuality", currentStreamQuality);
         response.put("recordingCodec", currentCodec);
         response.put("lastModified", lastModified);
-        
+
+        // ACC-off SURVEILLANCE quality tier — independent of the ACC-on
+        // recordingQuality above. Resolved from recording.surveillanceQuality,
+        // falling back to the ACC-on tier when unset (pre-split config) so the
+        // UI shows the same value both knobs would have shared before.
+        String survTierFromConfig;
+        try {
+            org.json.JSONObject recCfg = com.overdrive.app.config.UnifiedConfigManager
+                .loadConfig().optJSONObject("recording");
+            survTierFromConfig = recCfg != null
+                ? recCfg.optString("surveillanceQuality",
+                    recCfg.optString("recordingQuality", null))
+                : null;
+        } catch (Exception e) {
+            survTierFromConfig = null;
+        }
+        com.overdrive.app.surveillance.GpuPipelineConfig.RecordingQuality survTier =
+            com.overdrive.app.surveillance.GpuPipelineConfig.RecordingQuality.fromString(survTierFromConfig);
+        response.put("surveillanceQuality", survTier.name());
+
         // Camera FPS setting
         int currentFps = 15;
+        int currentSurveillanceFps = 15;
         try {
             org.json.JSONObject cameraConfig = com.overdrive.app.config.UnifiedConfigManager
                 .loadConfig().optJSONObject("camera");
             if (cameraConfig != null) {
                 currentFps = cameraConfig.optInt("targetFps", 15);
+                // Surveillance fps falls back to the ACC-on fps when unset.
+                currentSurveillanceFps = cameraConfig.optInt("surveillanceTargetFps", currentFps);
             }
         } catch (Exception e) { /* use default */ }
         response.put("cameraFps", currentFps);
+        response.put("surveillanceCameraFps", currentSurveillanceFps);
 
         // Shared clip segment length (minutes) — same key both axes read.
         try {
@@ -1190,6 +1213,80 @@ public class QualitySettingsApiHandler {
                         CameraDaemon.getOemDashcamPipeline();
                     if (oem != null) {
                         try { oem.updateSegmentDuration(duration); } catch (Exception ignored) {}
+                    }
+                }
+            }
+
+            // ── ACC-off SURVEILLANCE quality + fps ───────────────────────────
+            // Independent of the ACC-on recording knobs above. These deliberately
+            // do NOT go through applyBatchedChange — that path reinits the ACC-on
+            // encoder and persists to camera.targetFps. Instead we persist the
+            // surveillance keys and, if surveillance is CURRENTLY active (parked),
+            // live-apply via reapplySurveillanceProfileIfActive — fps to the camera
+            // HAL, bitrate to the adaptive controller/encoder, with NO reinit. When
+            // ACC is on (not surveillance mode), the persisted values simply take
+            // effect on the next ACC-off transition. Byte-identical to the pre-split
+            // world until the user sends one of these keys.
+            boolean surveillanceDirty = false;
+            if (settings.has("surveillanceQuality")) {
+                String tier = settings.getString("surveillanceQuality").toUpperCase();
+                if (tier.equals("ECONOMY") || tier.equals("STANDARD")
+                        || tier.equals("HIGH") || tier.equals("PREMIUM")
+                        || tier.equals("MAX")) {
+                    try {
+                        org.json.JSONObject recCfg = com.overdrive.app.config.UnifiedConfigManager
+                            .loadConfig().optJSONObject("recording");
+                        if (recCfg == null) recCfg = new org.json.JSONObject();
+                        recCfg.put("surveillanceQuality", tier);
+                        com.overdrive.app.config.UnifiedConfigManager.updateSection("recording", recCfg);
+                        surveillanceDirty = true;
+                        CameraDaemon.log("Surveillance quality set to: " + tier);
+                    } catch (Exception e) {
+                        CameraDaemon.log("Failed to persist surveillanceQuality: " + e.getMessage());
+                    }
+                } else {
+                    CameraDaemon.log("Rejecting surveillanceQuality=" + tier
+                        + " — must be one of ECONOMY/STANDARD/HIGH/PREMIUM/MAX");
+                    rejected.put(new JSONObject()
+                        .put("field", "surveillanceQuality").put("value", tier)
+                        .put("reason", "invalid tier"));
+                }
+            }
+            if (settings.has("surveillanceCameraFps")) {
+                int fps = settings.getInt("surveillanceCameraFps");
+                if (fps < 10 || fps > 30) {
+                    CameraDaemon.log("Rejecting surveillanceCameraFps=" + fps + " — out of range [10..30]");
+                    rejected.put(new JSONObject()
+                        .put("field", "surveillanceCameraFps").put("value", fps)
+                        .put("reason", "out of range [10..30]"));
+                } else {
+                    try {
+                        org.json.JSONObject camCfg = com.overdrive.app.config.UnifiedConfigManager
+                            .loadConfig().optJSONObject("camera");
+                        if (camCfg == null) camCfg = new org.json.JSONObject();
+                        camCfg.put("surveillanceTargetFps", fps);
+                        com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
+                        surveillanceDirty = true;
+                        CameraDaemon.log("Surveillance camera FPS set to: " + fps);
+                    } catch (Exception e) {
+                        CameraDaemon.log("Failed to persist surveillanceTargetFps: " + e.getMessage());
+                    }
+                }
+            }
+            if (surveillanceDirty) {
+                // forceReload so the pipeline's static loadSurveillance* readers
+                // (mtime-cached loadConfig) see the new values on whatever thread
+                // the live re-assert / next ACC-off runs on. Same guard the OEM
+                // mirror above uses against the mtime-invalidation race.
+                com.overdrive.app.config.UnifiedConfigManager.forceReload();
+                com.overdrive.app.surveillance.GpuSurveillancePipeline sp = CameraDaemon.getGpuPipeline();
+                if (sp != null) {
+                    try {
+                        boolean applied = sp.reapplySurveillanceProfileIfActive();
+                        CameraDaemon.log("Surveillance profile live re-assert: "
+                            + (applied ? "applied (parked)" : "deferred (ACC-on or idle)"));
+                    } catch (Exception e) {
+                        CameraDaemon.log("Surveillance profile re-assert failed: " + e.getMessage());
                     }
                 }
             }

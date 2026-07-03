@@ -18,6 +18,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.doOnLayout
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -248,6 +249,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * immersive camera, and keep the view glanceable. Set once in onCreate.
      */
     private var clusterMode = false
+
 
     // ── Motion smoothing (dead-reckoning) ───────────────────────────────────────
     // The 1s guidance tick is the TRUTH feeder (pulls a fix → estimator + engine);
@@ -565,7 +567,16 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 it.bottomMargin = bars.bottom + dp(24); fabLocate.layoutParams = it
             }
             (fabEnd?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
-                it.bottomMargin = bars.bottom + dp(24); fabEnd.layoutParams = it
+                // fabEndNav is the ONLY bottom|START control (every other bottom FAB is
+                // bottom|end). On head units whose system bar / gesture inset / display
+                // cutout sits on the LEFT edge (varies by OEM panel + orientation), a
+                // fixed marginStart would leave the button UNDER that bar — occluded, so
+                // it reads as "the cancel button isn't shown" on those models only. Add
+                // the left inset so it always clears the bar. bars.bottom keeps it above
+                // the nav bar as before.
+                it.bottomMargin = bars.bottom + dp(24)
+                it.marginStart = bars.left + dp(24)
+                fabEnd.layoutParams = it
             }
             (zoomControls?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
                 it.bottomMargin = bars.bottom + dp(96); zoomControls.layoutParams = it
@@ -999,24 +1010,38 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     ?.marginEnd = px(CLUSTER_BANNER_ICON_MARGIN_DP)
             }
         }
-        // Place the maneuver card on the LEFT, VERTICALLY CENTRED — done purely via
-        // CoordinatorLayout gravity (CENTER_VERTICAL | START), NOT pixel math. The prior
-        // approach computed a topMargin from resources.displayMetrics.heightPixels to
-        // "centre within a band above the speed badge" — but on the fission VirtualDisplay
-        // the Activity's displayMetrics does NOT reliably reflect the cluster panel
-        // (it can report the head-unit metrics), so the band collapsed and the card
-        // clamped to the overscan-top inset → the "stuck at top-left" report. Letting the
-        // layout engine centre it removes every fragile dependency: no panelH guess, no
-        // measure-timing, no height-change listener, no clamp-to-top. The card grows
-        // symmetrically about the vertical centre, so a 1- or 2-line maneuver stays
-        // centred and can never run off the top edge. marginStart clears the left
-        // overscan crop; vertical margins are zero so the centre is true.
+        // Stack the maneuver card DIRECTLY BELOW the speed badge, LEFT-ALIGNED with it: the
+        // badge and the card share the same left edge (CLUSTER_SPEED_BADGE_LEFT_PX) and the
+        // card's TOP sits at panelH/2 — the shared "seam". The daemon-drawn speed badge
+        // (ClusterSpeedOverlay, z=MAX SurfaceControl) places its BOTTOM just above that same
+        // seam (panelH/2 − gap), so the two form a clean vertical stack: short speed strip
+        // on top, TBT card immediately below, both flush-left. The two processes never talk;
+        // they agree because both anchor to panelH/2 read from the same physical panel.
+        //
+        // panelH is just the height of OUR OWN window: the cluster Activity paints into the
+        // fission panel 1:1 (FLAG_LAYOUT_IN_OVERSCAN, set above — no border, no upscale), so
+        // the root view [R.id.mapRoot] measures exactly the panel. Read that directly — no
+        // DisplayManager, no dumpsys, no resources.displayMetrics (which on the fission
+        // VirtualDisplay can report the HEAD-UNIT metrics — the bug the old band-math hit).
+        // If the root isn't measured yet during cluster setup (height 0), defer this whole
+        // pass to the next layout with doOnLayout; the card stays at its XML default
+        // (gone/top) until then, so nothing flashes mis-placed.
+        val root = findViewById<View>(R.id.mapRoot)
+        val panelH = root?.height ?: 0
+        if (panelH <= 0) {
+            root?.doOnLayout { if (!isFinishing && !isDestroyed && clusterMode) applyClusterChrome() }
+            return
+        }
         findViewById<com.google.android.material.card.MaterialCardView>(R.id.navBanner)?.let { card ->
+            // Top-left corner = (badge left edge, panelH/2). Same left X as the badge →
+            // flush-left stack; top at the seam the badge ends just above.
+            val stackLeftX = CLUSTER_SPEED_BADGE_LEFT_PX
+            val stackSeamY = panelH / 2
             (card.layoutParams as? androidx.coordinatorlayout.widget.CoordinatorLayout.LayoutParams)?.let { lp ->
                 lp.width = px(CLUSTER_BANNER_WIDTH_DP)
-                lp.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
-                lp.marginStart = px(CLUSTER_OVERSCAN_X_DP)
-                lp.topMargin = 0
+                lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                lp.marginStart = stackLeftX
+                lp.topMargin = stackSeamY
                 lp.bottomMargin = 0
                 card.layoutParams = lp
             }
@@ -3675,7 +3700,30 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 lockedDestLat = destLat
                 lockedDestLng = destLng
                 drawRoutePreview(routes, 0)
-                if (autoStart) {
+                // A MID-NAV itinerary edit (add/remove/reorder a stop, or a
+                // full-destination replace, while already navigating) must re-arm the
+                // head-unit engine AND publish the new route to the cluster so the two
+                // surfaces commit to the SAME route together — publishing without
+                // re-arming let the cluster guide the new route while the head-unit kept
+                // ticking the old one. But this MUST mirror switchToRouteDuringNav: it
+                // silently re-arms on the new route and stays immersive (no sheet). It
+                // must NOT also raise the route-options chooser, which would commit
+                // engine+voice+cluster to routes[0] while inviting the driver to pick a
+                // DIFFERENT route — leaving the surfaces hard-committed to an unchosen
+                // route (and strandable via the sheet's Close). So the re-arm path and
+                // the chooser are mutually exclusive: a navigating edit re-arms+publishes
+                // (no sheet); the autoStart restore arms through startGuidance; only a
+                // fresh (not-yet-navigating) preview shows the chooser.
+                if (!clusterMode && navigating) {
+                    // Route line already redrawn by drawRoutePreview above; staying in
+                    // this branch (no showRouteOptionsSheet/frameRoutes) keeps the
+                    // immersive follow view intact — matching switchToRouteDuringNav.
+                    guidance.start(routes[0])
+                    resetRouteTrim()
+                    lastSpokenInstruction = null
+                    NavSession.publishRoute(routes[0], destLabel)
+                    loadHazardCountsForRoutes(routes)
+                } else if (autoStart) {
                     // Restoring an active nav trip → resume turn-by-turn straight
                     // into the immersive view (no route-options sheet).
                     loadHazardCountsForRoutes(routes)
@@ -4563,6 +4611,20 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     nearStopTicks = 0
                 }
                 val nearStopArrived = nearStopTicks >= NEAR_STOP_ARRIVAL_TICKS
+                // PUCK-PROXIMITY arrival (the "nav never ends near the destination"
+                // fix). The guidance engine above is advanced ONLY by the 1 Hz daemon
+                // /api/gps poll, whose position can lag or sit 20-30 m off the true pin
+                // — so engine.arrived + the near-stop net can both miss even though the
+                // PUCK the driver sees (driven by the low-latency DIRECT platform fix
+                // through the motion estimator) has visibly reached the destination.
+                // Cross-check the estimator pose against the LOCKED destination: when
+                // the puck is within the arrival radius and the car has stopped, the
+                // driver HAS arrived. Same speed gate + 2-tick debounce as the near-stop
+                // net so a brief halt short of the pin can't end nav early. Head-unit
+                // only (the locked dest + estimator live here; the cluster has neither).
+                val puckArrived = puckReachedDestination() && fix.bestSpeedMps <= NEAR_STOP_SPEED_MPS
+                if (puckArrived) puckArrivedTicks++ else puckArrivedTicks = 0
+                val puckArrivedConfirmed = puckArrivedTicks >= NEAR_STOP_ARRIVAL_TICKS
                 // ARRIVAL + REROUTE are LIFECYCLE actions owned by the head-unit (the
                 // control surface). The cluster is a VIEW-ONLY mirror: it must not end
                 // nav or recompute a route itself — it has no routeStops/locked dest, so
@@ -4574,7 +4636,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 // lifecycle blocks to the head-unit; the cluster falls through to the
                 // banner-display update below.
                 if (!clusterMode) {
-                    if (state.arrived || nearStopArrived) {
+                    if (state.arrived || nearStopArrived || puckArrivedConfirmed) {
                         speakOnce(getString(R.string.roadsense_map_arrived))
                         showSnackbar(getString(R.string.roadsense_map_arrived))
                         stopGuidance()
@@ -4614,6 +4676,28 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Is the PUCK (the on-screen vehicle position) within the arrival radius of the
+     * locked destination? Drives the puck-proximity arrival path so nav ends when the
+     * driver visibly reaches the pin even if the daemon-poll engine position lags.
+     *
+     * Uses the motion estimator's current pose — the same source the puck is painted
+     * from (low-latency DIRECT fix, dead-reckoned to the present) — NOT the laggy
+     * daemon poll the guidance engine consumes. Measures straight-line distance to the
+     * LOCKED destination (lockedDestLat/Lng, set on every route start/recompute) with
+     * the engine's haversine. False when no locked dest, no estimator fix, or the puck
+     * isn't yet inside the radius. Bias-free: estimate() returns null before the first
+     * truth fix, so a fresh trip can't false-arrive at the origin.
+     */
+    private fun puckReachedDestination(): Boolean {
+        if (lockedDestLat.isNaN() || lockedDestLng.isNaN()) return false
+        if (!motionEstimator.hasFix()) return false
+        val nowMono = android.os.SystemClock.elapsedRealtime()
+        val m = motionEstimator.estimate(nowMono, nowMono) ?: return false
+        val d = guidance.haversineMeters(m.lat, m.lng, lockedDestLat, lockedDestLng)
+        return d <= com.overdrive.app.navmap.nav.NavGuidanceEngine.ARRIVAL_RADIUS_M
     }
 
     /** Roundabout exit ordinal suffix (" • exit 2") when Valhalla gave one and the
@@ -5090,6 +5174,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     /** Consecutive guidance ticks the car has been near-stopped within the final-approach
      *  band — debounces the speed-gated arrival against a brief halt just short of the pin. */
     private var nearStopTicks: Int = 0
+    /** Consecutive guidance ticks the PUCK (estimator pose, fed by the low-latency direct
+     *  fix) has been within the arrival radius of the locked destination AND stopped — the
+     *  puck-proximity arrival debounce, independent of the laggy daemon-poll engine state. */
+    private var puckArrivedTicks: Int = 0
 
     // Dead-band for the guidance/cluster camera follow: skip the animateCamera when
     // the new target is within ~3m of the last animated target AND |Δbearing| < ~2°,
@@ -5207,6 +5295,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         puckOnRoute = false             // reset the on-route snap latch
         lastFedFixTsMs = 0L             // reset the duplicate-fix dedup for the next trip
         nearStopTicks = 0               // reset the near-stop arrival debounce
+        puckArrivedTicks = 0            // reset the puck-proximity arrival debounce
         lastRouteProgress = 0f          // reset traveled-route trim (source emptied below)
         lastAppliedProgress = -1f
         routeSource?.setGeoJson(EMPTY_FEATURE_COLLECTION)
@@ -5957,28 +6046,22 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         const val CLUSTER_BANNER_PAD_V_DP = 8
         const val CLUSTER_BANNER_RADIUS_DP = 16
         const val CLUSTER_BANNER_ICON_MARGIN_DP = 10
-        // Overscan-safe top-start inset for the cluster banner (dp). FLAG_LAYOUT_IN_
-        // OVERSCAN puts view (0,0) at the physical corner, inside the measured (80,50)px
-        // overscan band (at the cluster's density 2.0 → 40dp × 25dp). Use a margin a bit
-        // LARGER than the band so the card's rounded corner + background clear the OEM
-        // crop: 44dp (~88px > 80px) horizontally, 28dp (~56px > 50px) vertically.
-        const val CLUSTER_OVERSCAN_X_DP = 44
-        const val CLUSTER_OVERSCAN_Y_DP = 28
+        // (The old CLUSTER_OVERSCAN_X/Y_DP top-start insets are gone: the banner now anchors
+        // to the speed-badge CENTRE, which sits well inside the panel — far clear of the
+        // (80,50)px overscan band — so no separate overscan margin is needed.)
         // Traveled-route trim (line-gradient). TRIM_FEATHER = the line-progress width of
         // the antialiased fade at the trim boundary (~1.2% of the route). TRIM_PROGRESS_EPS
         // = the paint dead-band: skip a gradient repaint until progress advances this much
         // (~0.2% of the route ≈ a few metres), so a parked/creeping car emits zero writes.
         const val TRIM_FEATHER = 0.012f
         const val TRIM_PROGRESS_EPS = 0.002f
-        // The centre-left speed badge (ClusterSpeedOverlay, a daemon SurfaceControl layer
-        // at z=MAX so it always composites OVER this map) is vertically centred with this
-        // fraction of the panel height — MUST mirror ClusterSpeedOverlay.BADGE_H_FRAC. Its
-        // top edge ((1−frac)/2·panelH) is the BOTTOM of the clear band the top-anchored
-        // banner is vertically centred within (see applyClusterChrome).
-        const val CLUSTER_SPEED_BADGE_H_FRAC = 0.26
-        // Gap (dp) reserved between the bottom of the banner's band and the speed badge's
-        // top edge, so a tall (downward-growing) banner still can't touch the badge.
-        const val CLUSTER_BANNER_ABOVE_SPEED_GAP_DP = 12
+        // The speed badge (ClusterSpeedOverlay, a daemon SurfaceControl layer at z=MAX so it
+        // always composites OVER this map) is a short strip on the LEFT whose BOTTOM sits just
+        // above the panel vertical centre. The TBT banner stacks directly below it, sharing
+        // this left edge and pinning its TOP at panelH/2 (see applyClusterChrome). Only the
+        // left edge needs to match the daemon; the seam is panelH/2 on both sides, and the
+        // badge's own height/aspect are private to ClusterSpeedOverlay now.
+        const val CLUSTER_SPEED_BADGE_LEFT_PX = 56    // mirrors ClusterSpeedOverlay.LEFT_MARGIN_PX
 
         // Immersive driving view: 3D tilt, close zoom, heading-up follow.
         const val IMMERSIVE_TILT = 55.0

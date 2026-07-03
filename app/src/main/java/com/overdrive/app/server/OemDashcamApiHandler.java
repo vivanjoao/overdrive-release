@@ -222,6 +222,18 @@ public class OemDashcamApiHandler {
                     if (existing == null || !existing.isRunning()) {
                         existing = startPipeline();
                         if (existing == null) return;
+                    } else {
+                        // Pipeline is ALREADY warm — start() (and its
+                        // applyRecordingConfigFromUcm axis resolve) will NOT
+                        // re-run. This is the ACC on↔off warm-handover case
+                        // (e.g. recordingMode=continuous AND
+                        // surveillanceMode=continuous, so recordingDesired never
+                        // drops across the edge). Live-re-apply the fps/bitrate
+                        // for the NOW-current axis so a drive→park transition
+                        // switches OEM from the recording tier to the
+                        // surveillance tier (and back) without a reinit. No-op
+                        // when the resolved axis profile is unchanged.
+                        try { existing.reapplyAxisProfileFromUcm(); } catch (Throwable ignored) {}
                     }
                     // Wedge if format isn't ready AND we need recording —
                     // we'll wait OUTSIDE the lock then re-enter to start

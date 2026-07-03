@@ -212,6 +212,11 @@ public class RecordingsApiHandler {
         // Serve thumbnail
         if (path.startsWith("/thumb/")) {
             String filename = path.substring(7);
+            // Strip any cache-busting/auth query (e.g. /thumb/foo.jpg?t=<token>);
+            // the notification-log snapshot URLs carry one, and serveThumbnail's
+            // ".jpg" fast-path check + File lookup would otherwise fail → 404.
+            int qIdx = filename.indexOf('?');
+            if (qIdx >= 0) filename = filename.substring(0, qIdx);
             serveThumbnail(out, filename);
             return true;
         }

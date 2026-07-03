@@ -393,9 +393,34 @@ public class LocationSidecarService extends Service implements LocationListener 
         // elapsedRealtime() is since-boot, identical across processes on the device,
         // and immune to RTC correction — so app-side fix time and daemon-side now
         // are on the SAME monotonic clock and their delta is the true fix age.
-        fixElapsedMs = location.getElapsedRealtimeNanos() > 0
-                ? location.getElapsedRealtimeNanos() / 1_000_000L
-                : android.os.SystemClock.elapsedRealtime();
+        //
+        // BUG FIX (parked-clip "tags as Home"): the previous fallback stamped a
+        // stamp-LESS fix with elapsedRealtime()=NOW, which made it read as
+        // eternally fresh. A last-known / cached seed Location (the fix the OS
+        // hands back once the data iface dies ~17s after ACC-OFF — the parked
+        // sentry case) has getElapsedRealtimeNanos()==0, so it got NOW-stamped
+        // and the daemon's geo gate then tagged the sentry clip with the last
+        // real fix before the blackout — the driveway, inside the Home
+        // SafeLocation zone. ACC-ON was unaffected because live GPS fixes always
+        // carry a real elapsedRealtimeNanos. The fix: when the fix carries no
+        // monotonic stamp, DERIVE one from its true UTC age (getTime()) by
+        // back-dating our own elapsedRealtime() — so a 10-min-old seed reads as
+        // 10-min-old and the 5-min gate rejects it — instead of fabricating NOW.
+        // Both operands of the back-date (now/currentTimeMillis and getTime) are
+        // the device RTC, so their DELTA (the fix age) is skew-immune even if the
+        // absolute RTC is wrong; only the delta is used. If getTime() is also
+        // unusable (0 / future-dated), leave fixElapsedMs=0 → the daemon gate's
+        // send-time fallback governs (never worse than before this feature).
+        long ern = location.getElapsedRealtimeNanos();
+        if (ern > 0) {
+            fixElapsedMs = ern / 1_000_000L;
+        } else {
+            long fixUtc = location.getTime();
+            long ageByUtc = (fixUtc > 0) ? (now - fixUtc) : -1L;
+            fixElapsedMs = (ageByUtc >= 0)
+                    ? android.os.SystemClock.elapsedRealtime() - ageByUtc
+                    : 0L;
+        }
 
         // Throttle Log, IPC and Disk I/O — but keep the distinct-fix rate as
         // high as the provider delivers (GPS is requested at 1s/0m) so

@@ -6,6 +6,7 @@ import com.overdrive.app.byd.SentryEventHandler
 import com.overdrive.app.client.CameraDaemonClient
 import com.overdrive.app.daemon.management.DaemonManager
 import com.overdrive.app.logging.LogManager
+// import com.overdrive.app.shell.PrivilegedShellSetup
 
 /**
  * Manages BYD event system initialization and lifecycle.
@@ -27,8 +28,50 @@ class BydSystemManager(
         logManager.info(TAG, "Initializing BYD system...")
         
         Thread {
-            // Privileged shell disabled — all daemons run via ADB shell (UID 2000).
-            // Skip straight to event system startup.
+            // PrivilegedShellSetup disabled — all daemons now run via ADB shell (UID 2000)
+            // if (PrivilegedShellSetup.isShellAvailable()) {
+            //     callback.onProgress("Privileged shell already available")
+            //     grantBydPermissions(object : PermissionCallback {
+            //         override fun onGranted(count: Int) {
+            //             callback.onProgress("Granted $count permissions")
+            //             startEventSystem(callback)
+            //         }
+            //         override fun onFailed(count: Int) {
+            //             callback.onProgress("Failed to grant $count permissions")
+            //             startEventSystem(callback)
+            //         }
+            //     })
+            //     return@Thread
+            // }
+            // 
+            // // Setup privileged shell
+            // callback.onProgress("Setting up privileged shell...")
+            // PrivilegedShellSetup.init(context)
+            // PrivilegedShellSetup.setup(object : PrivilegedShellSetup.SetupCallback {
+            //     override fun onSuccess() {
+            //         callback.onProgress("Privileged shell ready")
+            //         grantBydPermissions(object : PermissionCallback {
+            //             override fun onGranted(count: Int) {
+            //                 callback.onProgress("Granted $count permissions")
+            //                 startEventSystem(callback)
+            //             }
+            //             override fun onFailed(count: Int) {
+            //                 callback.onProgress("Failed to grant $count permissions")
+            //                 startEventSystem(callback)
+            //             }
+            //         })
+            //     }
+            //     
+            //     override fun onFailure(reason: String) {
+            //         callback.onFailure("Shell setup failed: $reason")
+            //     }
+            //     
+            //     override fun onProgress(message: String) {
+            //         callback.onProgress(message)
+            //     }
+            // })
+            
+            // Skip straight to event system startup
             startEventSystem(callback)
         }.start()
     }
@@ -55,8 +98,12 @@ class BydSystemManager(
             var failed = 0
             
             for (perm in permissions) {
-                // Privileged shell disabled — permissions are granted out-of-band
-                // (ADB) on the public build, so count every entry as not-granted here.
+                // PrivilegedShellSetup disabled
+                // if (PrivilegedShellSetup.grantPermission(perm)) {
+                //     granted++
+                // } else {
+                //     failed++
+                // }
                 failed++
             }
             
@@ -72,9 +119,13 @@ class BydSystemManager(
      * Start the BYD event system.
      */
     private fun startEventSystem(callback: InitCallback) {
-        // Start BydEventDaemon — disabled on the public build (daemons run via
-        // ADB shell, UID 2000), so this is skipped.
-        logManager.info(TAG, "BydEventDaemon start skipped (privileged shell disabled)")
+        // Start BydEventDaemon
+        // PrivilegedShellSetup disabled
+        // val daemonStarted = PrivilegedShellSetup.startBydEventDaemon()
+        // if (daemonStarted) {
+        //     logManager.info(TAG, "BydEventDaemon started")
+        // }
+        logManager.info(TAG, "BydEventDaemon start skipped (PrivilegedShellSetup disabled)")
         
         // Setup DaemonClient for camera control
         val camDaemonClient = CameraDaemonClient()

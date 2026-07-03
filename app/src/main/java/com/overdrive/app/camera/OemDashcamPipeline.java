@@ -867,6 +867,18 @@ public class OemDashcamPipeline {
             JSONObject cam = root.optJSONObject("camera");
             if (oem == null) oem = new JSONObject();
             if (rec == null) rec = new JSONObject();
+
+            // Axis selection — mirrors OemDashcamApiHandler's resolver: ACC OFF
+            // means we're serving the PARKED SURVEILLANCE axis, ACC ON the
+            // DRIVE-time recording axis. The surveillance axis honors the
+            // surveillance page's independent quality/fps knobs
+            // (recording.surveillanceQuality / camera.surveillanceTargetFps),
+            // falling back to the recording-axis chain when those are unset so
+            // a config predating the split is byte-identical. The recording
+            // axis is UNCHANGED. Codec is SHARED across both axes (device-compat
+            // choice, not a per-mode quality knob) so it does not branch here.
+            boolean surveillanceAxis = !com.overdrive.app.monitor.AccMonitor.isAccOn();
+
             // Codec — OEM-specific, fallback to legacy recording.codec.
             String codec = oem.has("codec")
                 ? oem.optString("codec", "H264")
@@ -874,21 +886,88 @@ public class OemDashcamPipeline {
             codecMimeType = "H265".equalsIgnoreCase(codec)
                 ? MediaFormat.MIMETYPE_VIDEO_HEVC
                 : MediaFormat.MIMETYPE_VIDEO_AVC;
-            int requestedFps = oem.has("fps")
+
+            // Recording-axis fps chain (also the surveillance-axis fallback).
+            int recAxisFps = oem.has("fps")
                 ? oem.optInt("fps", DEFAULT_FPS)
                 : rec.optInt("fps", DEFAULT_FPS);
+            int requestedFps;
+            if (surveillanceAxis) {
+                requestedFps = (cam != null)
+                    ? cam.optInt("surveillanceTargetFps", recAxisFps)
+                    : recAxisFps;
+            } else {
+                requestedFps = recAxisFps;
+            }
             fps = Math.max(15, Math.min(60, requestedFps));
 
-            // OEM tier — defaults STANDARD if neither key present.
-            String quality = (oem.has("recordingQuality")
-                    ? oem.optString("recordingQuality", "STANDARD")
-                    : rec.optString("recordingQuality", "STANDARD"))
+            // Recording-axis tier chain (also the surveillance-axis fallback).
+            String recAxisQuality = oem.has("recordingQuality")
+                ? oem.optString("recordingQuality", "STANDARD")
+                : rec.optString("recordingQuality", "STANDARD");
+            String quality = (surveillanceAxis
+                    ? rec.optString("surveillanceQuality", recAxisQuality)
+                    : recAxisQuality)
                 .toUpperCase(Locale.US);
             bitrate = bitrateForQuality(quality);
 
-            bitrate = applyBitrateBudgetCap(bitrate, oem, rec, cam);
+            bitrate = applyBitrateBudgetCap(bitrate, oem, rec, cam, surveillanceAxis);
         } catch (Throwable t) {
             logger.warn("applyRecordingConfigFromUcm failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Live-re-apply the fps + bitrate for the CURRENT axis (ACC on↔off) to an
+     * already-running pipeline WITHOUT a reinit — used at the ACC transition
+     * when the pipeline is kept warm across the boundary (e.g. the user has
+     * BOTH oemDashcam.recordingMode=continuous AND surveillanceMode=continuous,
+     * so recordingDesired never drops and {@code start()} is not re-called).
+     *
+     * <p>Re-resolves via {@link #applyRecordingConfigFromUcm()} (which reads the
+     * live ACC state) and pushes only the deltas: bitrate to the encoder
+     * ({@code setBitrate}, a MediaCodec setParameters — no gap) and fps to the
+     * camera HAL ({@code AvmCameraHelper.setCameraFps} — no reopen). Codec is
+     * axis-independent and never changes across an ACC edge, so no encoder
+     * reinit is ever needed here; a genuine codec change is a separate event
+     * that goes through the quality-mirror restart path.
+     *
+     * <p>No-op if the pipeline isn't running.
+     */
+    public void reapplyAxisProfileFromUcm() {
+        if (!running.get()) return;
+        int oldFps = fps;
+        int oldBitrate = bitrate;
+        applyRecordingConfigFromUcm();  // re-resolves fps/bitrate for the live axis
+        try {
+            if (bitrate != oldBitrate) {
+                HardwareEventRecorderGpu enc = encoder;
+                if (enc != null) {
+                    enc.setBitrate(bitrate);
+                }
+            }
+            if (fps != oldFps) {
+                Object cam = cameraObj;
+                if (cam != null) {
+                    AvmCameraHelper.setCameraFps(cam, fps);
+                }
+                // Also update the encoder's cached fps so its PTS re-anchor
+                // fallback interval and duration-fallback math track the new
+                // rate (MediaCodec KEY_FRAME_RATE can't change live, so this is
+                // just the bookkeeping int — mirrors the pano pipeline pairing
+                // camera.setTargetFps with encoder.setTargetFps).
+                HardwareEventRecorderGpu enc = encoder;
+                if (enc != null) {
+                    enc.setTargetFps(fps);
+                }
+            }
+            if (fps != oldFps || bitrate != oldBitrate) {
+                logger.info("OEM axis profile re-applied live: fps " + oldFps + "→" + fps
+                    + ", bitrate " + (oldBitrate / 1_000_000) + "→" + (bitrate / 1_000_000)
+                    + " Mbps (accOn=" + com.overdrive.app.monitor.AccMonitor.isAccOn() + ")");
+            }
+        } catch (Throwable t) {
+            logger.warn("reapplyAxisProfileFromUcm live-apply failed: " + t.getMessage());
         }
     }
 
@@ -924,7 +1003,8 @@ public class OemDashcamPipeline {
      * </ol>
      */
     private int applyBitrateBudgetCap(int requested, JSONObject oem,
-                                      JSONObject rec, JSONObject cam) {
+                                      JSONObject rec, JSONObject cam,
+                                      boolean surveillanceAxis) {
         try {
             int budget = oem == null ? 10_000_000
                 : oem.optInt("bitrateBudget", 10_000_000);
@@ -956,8 +1036,18 @@ public class OemDashcamPipeline {
             // the already-loaded recording section (passed in to avoid
             // a redundant disk read). Use the canonical codec-aware
             // table so OEM agrees with what pano actually uses.
+            //
+            // Axis-match the pano tier: when THIS pipeline serves the parked
+            // surveillance axis, the pano pipeline is likewise in SENTRY at its
+            // surveillanceQuality tier, so subtract THAT from the shared budget
+            // (not the drive-time recordingQuality). Falls back to the
+            // recording tier when the surveillance key is unset — byte-identical
+            // to the pre-split cap math. Codec is shared across axes.
             JSONObject panoRec = rec != null ? rec : new JSONObject();
-            String panoQuality = panoRec.optString("recordingQuality", "STANDARD")
+            String panoRecQuality = panoRec.optString("recordingQuality", "STANDARD");
+            String panoQuality = (surveillanceAxis
+                    ? panoRec.optString("surveillanceQuality", panoRecQuality)
+                    : panoRecQuality)
                 .toUpperCase(Locale.US);
             String panoCodec = panoRec.optString("codec", "H264").toUpperCase(Locale.US);
             int panoBps;

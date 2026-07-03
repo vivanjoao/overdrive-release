@@ -4,9 +4,9 @@ import com.overdrive.app.logging.LogManager
 
 /**
  * Manages permission granting via the privileged shell.
- *
- * NOTE: the privileged shell is currently disabled on this build — these methods
- * are no-ops that return false/null. Permissions are granted out-of-band (ADB).
+ * 
+ * Extracts permission-related logic from PrivilegedShellSetup for cleaner separation.
+ * NOTE: PrivilegedShellSetup is currently disabled — these methods will return false/null.
  */
 object ShellPermissionManager {
     
@@ -19,8 +19,18 @@ object ShellPermissionManager {
      * Grant a single permission to our app via the privileged shell.
      */
     fun grantPermission(permission: String): Boolean {
-        // Privileged shell disabled on this build — no-op.
-        logManager.warn(TAG, "grantPermission skipped (privileged shell disabled): $permission")
+        // PrivilegedShellSetup disabled
+        // val result = PrivilegedShellSetup.executeCommandSync("pm grant $PACKAGE_NAME $permission 2>&1")
+        // val success = result?.isEmpty() == true || result?.contains("Success") == true
+        // 
+        // if (success) {
+        //     logManager.info(TAG, "Granted permission: $permission")
+        // } else {
+        //     logManager.warn(TAG, "Failed to grant permission: $permission - $result")
+        // }
+        // 
+        // return success
+        logManager.warn(TAG, "grantPermission skipped (PrivilegedShellSetup disabled): $permission")
         return false
     }
     
@@ -150,8 +160,12 @@ object ShellPermissionManager {
      * Check if a permission is granted.
      */
     fun isPermissionGranted(permission: String): Boolean {
-        // Privileged shell disabled on this build — no-op.
-        logManager.warn(TAG, "isPermissionGranted skipped (privileged shell disabled): $permission")
+        // PrivilegedShellSetup disabled
+        // val result = PrivilegedShellSetup.executeCommandSync(
+        //     "dumpsys package $PACKAGE_NAME | grep $permission"
+        // )
+        // return result?.contains("granted=true") == true
+        logManager.warn(TAG, "isPermissionGranted skipped (PrivilegedShellSetup disabled): $permission")
         return false
     }
     

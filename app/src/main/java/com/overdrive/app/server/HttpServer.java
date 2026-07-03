@@ -987,21 +987,21 @@ public class HttpServer {
                     }
                 } catch (Exception ignored) {}
                 // Session energy added so far (the dashboard "Session"/"Added"
-                // metric). (soc - startSoc) × nominal pack kWh for the currently
-                // open session. Mirrors ChargingApiHandler.buildLiveBlock(); the
-                // dashboard polls /status, not /api/charging/live, so this block
-                // has to emit sessionKwh itself or the card stays blank.
+                // metric). MUST use the SAME accessor as ChargingApiHandler
+                // .buildLiveBlock() — getOpenChargingSessionEnergyKwh() — or the
+                // dashboard and the charging page show different numbers for the
+                // same open session. That accessor integrates ∫P·dt over the
+                // recorded power samples and falls back to (soc - startSoc) ×
+                // nominal when the integral isn't available yet, so it is never
+                // blanker than the old inline SOC-delta this replaced. The
+                // dashboard polls /status (not /api/charging), so it still has to
+                // emit sessionKwh itself — but now from the shared source of truth.
                 try {
                     com.overdrive.app.monitor.SocHistoryDatabase db =
                         com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
-                    if (db != null && db.getOpenChargingSessionStart() > 0 && socForCardPct >= 0) {
-                        double startSoc = db.getOpenChargingSessionStartSoc();
-                        com.overdrive.app.abrp.SohEstimator soh = db.getSohEstimator();
-                        double nominal = soh != null ? soh.getNominalCapacityKwh() : 0;
-                        if (startSoc >= 0 && socForCardPct > startSoc && nominal > 0) {
-                            double sessionKwh = (socForCardPct - startSoc) / 100.0 * nominal;
-                            if (sessionKwh > 0) charging.put("sessionKwh", sessionKwh);
-                        }
+                    if (db != null && db.getOpenChargingSessionStart() > 0) {
+                        double sessionKwh = db.getOpenChargingSessionEnergyKwh();
+                        if (sessionKwh > 0) charging.put("sessionKwh", sessionKwh);
                     }
                 } catch (Exception ignored) {}
                 // Time-to-full from the BYD rest-time fields, if available.

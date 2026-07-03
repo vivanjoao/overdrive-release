@@ -1790,6 +1790,7 @@ public class CameraDaemon {
         // Stop the charging fast-sampler BEFORE closing the H2 DB it writes to.
         try { if (chargingSessionManager != null) chargingSessionManager.shutdown(); } catch (Exception ignored) {}
         try { com.overdrive.app.monitor.SocHistoryDatabase.getInstance().stop(); } catch (Exception ignored) {}
+        try { com.overdrive.app.notifications.NotificationStore.getInstance().stop(); } catch (Exception ignored) {}
         
         // Stop services. Both the trip analytics + recordings index inits
         // run on parallel threads (see main()); join with a short timeout
@@ -2159,6 +2160,9 @@ public class CameraDaemon {
                 } catch (Exception e) { /* may not be initialized */ }
                 try {
                     com.overdrive.app.monitor.SocHistoryDatabase.getInstance().stop();
+                } catch (Exception e) { /* may not be initialized */ }
+                try {
+                    com.overdrive.app.notifications.NotificationStore.getInstance().stop();
                 } catch (Exception e) { /* may not be initialized */ }
                 
                 // 5. Stop services (MQTT, ABRP, Trip Analytics).
@@ -3689,6 +3693,14 @@ public class CameraDaemon {
                         log("Starting pipeline for sentry mode...");
                         try { gpuPipeline.start(); } catch (Exception e) {
                             log("Pipeline start failed: " + e.getMessage());
+                            // FIX (cold-boot arming race): arming did NOT complete,
+                            // but lastDispatchedAccIsOff was already set true at :3533.
+                            // Without clearing it, every subsequent ACC-OFF heartbeat
+                            // short-circuits at the dedup guard (:3451) and arming is
+                            // never retried — aiProcessed stays 0 forever. Clear the
+                            // flag so the next heartbeat re-runs the full dispatch.
+                            log("WARN: clearing lastDispatchedAccIsOff so next ACC heartbeat re-runs sentry arming");
+                            lastDispatchedAccIsOff = null;
                             return;
                         }
                     }
@@ -3735,6 +3747,17 @@ public class CameraDaemon {
                 }
                 log("ERROR: Failed to start pipeline for sentry: " + errorMsg);
                 e.printStackTrace();
+                // FIX (cold-boot arming race, observed 2026-06-28): a transient
+                // encoder-init failure (MediaCodec.createInputSurface IllegalStateException
+                // at cold boot) can null gpuPipeline between the :3516 guard and the
+                // setRecordingMode() lambda at :3695, throwing an NPE here. We caught it,
+                // but lastDispatchedAccIsOff was already set true at :3533 — so every
+                // 60s ACC-OFF heartbeat afterward hits the dedup no-op (:3451) and arming
+                // is never retried (aiProcessed=0 forever). Mirror the ACC-ON self-heal
+                // (:3867/:3916/:3956): clear the dedup flag so the next heartbeat re-runs
+                // the full sentry-arming dispatch once initSurveillance recovers the pipeline.
+                log("WARN: clearing lastDispatchedAccIsOff so next ACC heartbeat re-runs sentry arming");
+                lastDispatchedAccIsOff = null;
             }
         } else {
             // ACC ON. We intentionally leave the SD-card watchdog running here:
@@ -4897,6 +4920,24 @@ public class CameraDaemon {
         com.overdrive.app.notifications.push.VapidSigner signer =
                 new com.overdrive.app.notifications.push.VapidSigner(keyStore, "");
 
+        // Persistent notification log (Notifications ▸ Log tab). Dedicated H2
+        // store; the HistorySink writes EVERY bus event so history captures all
+        // categories with no per-publisher change. Init before subscribing so
+        // the sink never sees an uninitialized store.
+        com.overdrive.app.notifications.NotificationStore notifStore =
+                com.overdrive.app.notifications.NotificationStore.getInstance();
+        try {
+            notifStore.init();
+        } catch (Exception e) {
+            log("NotificationStore init failed (log tab will be empty): " + e.getMessage());
+        }
+
+        // Subscribe HistorySink FIRST so it receives the NotificationBus
+        // pre-subscribe buffer flush (the bus replays boot-window events only to
+        // the first sink) — a door-open / charging-fault during startup then
+        // still lands in the persisted log.
+        com.overdrive.app.notifications.NotificationBus.get()
+                .subscribe(new com.overdrive.app.notifications.sinks.HistorySink(notifStore, registry));
         com.overdrive.app.notifications.NotificationBus.get()
                 .subscribe(new com.overdrive.app.notifications.sinks.LogSink());
         com.overdrive.app.notifications.NotificationBus.get()

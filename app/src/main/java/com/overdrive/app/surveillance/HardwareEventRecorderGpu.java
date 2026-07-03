@@ -485,6 +485,59 @@ public class HardwareEventRecorderGpu {
         // written packet arrives — the cursor flush enqueues in PTS order
         // so it shouldn't, but the defense costs nothing.
         if (rebasedPts < 0) rebasedPts = 0;
+        // PER-TRACK MONOTONICITY GUARD (video). Mirrors the audio guard below
+        // (writeAudioRebased). MediaMuxer requires each track's samples to be
+        // strictly PTS-increasing; MediaCodec's HEVC bitstream likewise needs
+        // monotonic DTS or the decoder's reference-picture-set breaks
+        // ("Could not find ref with POC N / First slice in a frame missing" →
+        // visible corruption from the offending frame onward). Two ways this
+        // bites the VIDEO track specifically at the pre-record splice:
+        //   1. The <0 clamp above collapses several early pre-record packets
+        //      onto rebasedPts==0 — duplicates.
+        //   2. The pre-record cursor flush interleaves with live capture in the
+        //      disk-writer queue (enqueue order, NOT PTS order), so an out-of-
+        //      order older pre-record frame can arrive after a newer one AND
+        //      re-trigger the clock-domain re-anchor above (sourceGap<0), which
+        //      shifts ptsOriginUs and produces colliding/backward rebased PTS.
+        //      (Field-observed: event_20260701_172035 — ffprobe showed
+        //      "non monotonically increasing dts 7>=7, 15>=15…" then HEVC RPS
+        //      errors; corruption began right after the ~7s pre-record region.
+        //      The very next clip, which did NOT re-anchor, was clean.)
+        // NUDGE the offending packet (never drop it). This encoder emits a
+        // no-B, reference-P (IPPP) stream — HEVCProfileMain with KEY_MAX_B_FRAMES
+        // unset / KEY_LATENCY=0, or AVCProfileBaseline which forbids B-frames.
+        // In such a stream every kept P references the most-recent coded picture
+        // in decode order, so DROPPING a colliding P-frame does NOT fix the
+        // corruption — it MOVES it from the muxer-DTS layer to the decoder-RPS
+        // layer: the next kept P (the resumed live frame, still a P since
+        // triggerEventRecording forces no IDR) references a reconstructed
+        // picture now absent from the decoder DPB ("Could not find ref with
+        // POC N / First slice in a frame missing"), corrupting every frame
+        // until the next IDR (~2s). Container PTS is independent of the HEVC
+        // slice POC, so a 1µs nudge keeps the frame AND its reference chain,
+        // giving strictly-increasing DTS with NO RPS break — strictly safer
+        // than DROP for this stream. The keyframe path always nudged for the
+        // same monotonicity reason; the P-frame path now matches it.
+        // Consecutive collisions stay strictly increasing because each nudge
+        // advances lastFramePtsUs by 1 (a burst of N collisions rebases to
+        // last+1, last+2, … last+N). firstFramePtsUs<0 (first frame of a
+        // segment) skips the guard, so the leading frame is never mangled.
+        if (firstFramePtsUs >= 0 && rebasedPts <= lastFramePtsUs) {
+            boolean isKeyframe =
+                (info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
+            // NUDGE PTS one microsecond past the last written frame so it stays
+            // strictly monotonic and playable. A 1µs shift on a ~66ms frame
+            // interval is imperceptible and keeps the moov duration honest.
+            // Applies to keyframes (never drop an IDR) AND P-frames (dropping a
+            // reference-P strands the next P's RPS to the next IDR).
+            rebasedPts = lastFramePtsUs + 1;
+            long n = videoNonMonotonicNudgeCount.incrementAndGet();
+            if (n % 50 == 1) {
+                logger.warn("Video PTS not monotonic (rebased " + rebasedPts
+                    + "us <= last " + lastFramePtsUs + "us) — nudged +1µs, #" + n
+                    + " (isKey=" + isKeyframe + "); pre-record splice / re-anchor collision");
+            }
+        }
         // Mutate the BufferInfo for the muxer call. After write, restore
         // the absolute PTS so any caller that read info.presentationTimeUs
         // for stats/PTS-tracking sees the original encoder timestamp.
@@ -616,6 +669,14 @@ public class HardwareEventRecorderGpu {
     }
 
     private final java.util.concurrent.atomic.AtomicLong audioWriteFailureCount =
+        new java.util.concurrent.atomic.AtomicLong(0);
+    // Count of video packets NUDGED (+1µs) by the per-track monotonicity guard
+    // in writeRebased (pre-record splice / clock-domain re-anchor collisions).
+    // These frames are kept, not dropped — dropping a reference-P in this no-B
+    // IPPP stream would strand the next P's RPS until the next IDR. A handful
+    // per event at the splice is expected and harmless; a flood would indicate
+    // a deeper PTS problem worth investigating.
+    private final java.util.concurrent.atomic.AtomicLong videoNonMonotonicNudgeCount =
         new java.util.concurrent.atomic.AtomicLong(0);
     // Last successfully-written audio PTS (rebased, microseconds). Used
     // to enforce per-track monotonicity in writeRebasedAudio. Reset on
@@ -2505,6 +2566,24 @@ public class HardwareEventRecorderGpu {
 
             isWritingToFile = true;
             recording = true;  // Keep for compatibility
+
+            // SPLICE IDR: force the encoder to emit a keyframe on the next LIVE
+            // frame, so the first packet after the pre-record flush is a
+            // self-contained IDR. The pre-record ring holds already-encoded
+            // H.265 packets whose bitstream POC references pictures from the
+            // PRE-TRIGGER clock domain; when live capture resumes at the splice,
+            // those references are gone and the decoder throws "Could not find
+            // ref with POC N / Error constructing frame RPS / First slice
+            // missing", FREEZING the last pre-record frame until the encoder's
+            // natural ~2s I-frame interval (observed: a ~0.68s stall at the
+            // pre-record→live boundary). writeRebased's PTS re-anchor + nudge
+            // fix the CONTAINER timeline but cannot repair the bitstream RPS —
+            // only a fresh IDR at the resume point restarts the reference chain
+            // cleanly. Same rationale as the segment-rotation requestSyncFrame()
+            // (which the "triggerEventRecording forces no IDR" comment in
+            // writeRebased flagged as the gap). Cost: one extra keyframe
+            // (~tens of KB) per event — negligible vs. a visible freeze.
+            requestSyncFrame();
 
             logger.info(String.format("Event recording started: %s (codec=%s, bitrate=%d Mbps, post-record=%dms)",
                 tempFile.getName(),

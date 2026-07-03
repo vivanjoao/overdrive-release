@@ -1368,6 +1368,25 @@ public final class RecordingsIndex {
                         if (timelineStatic && !"person".equals(c)) {
                             continue;
                         }
+                        // Also drop the chip for the low-conf-FAR-NOTICE
+                        // misclassification profile (a far low-conf parked car/bike
+                        // at NOTICE) that the engine already excluded from the live
+                        // count/pill/caption. The verdict is persisted by
+                        // EventTimelineCollector (it depends on everMoved/everMovedTested
+                        // which aren't otherwise in the sidecar, so it can't be
+                        // recomputed here). The persisted flag is written ONLY for
+                        // NON-person actors — EventTimelineCollector uses
+                        // suppressFromSummary, which exempts PERSON — so a PERSON-FP
+                        // chip is intentionally KEPT here, matching the headline
+                        // count + SRT + caption (a real far still person is
+                        // byte-identical to a bike-as-person FP, and the hard
+                        // invariant forbids dropping a person from the summary).
+                        // Absent on older sidecars / real non-person actors → fail
+                        // open (chip kept) = prior behavior, so no real actor's chip
+                        // is ever dropped.
+                        if (a.optBoolean("lowConfFarNotice", false)) {
+                            continue;
+                        }
                         if (!c.isEmpty() && seen.add(c)) {
                             if (cls.length() > 0) cls.append(',');
                             cls.append(c);

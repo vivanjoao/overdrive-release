@@ -79,6 +79,35 @@ public class SurveillanceEngineGpu {
     // bar for lighting artifacts / flags / shadows (they never yield a YOLO object).
     private long approachTriggerMs = 2000;
 
+    // CLOSE-RANGE CONFIRMED FAST-PATH: the shortest sustained-motion bar, used
+    // ONLY when BOTH hold during a sequence: (a) YOLO confirmed a real in-zone
+    // object (sequenceConfirmed) AND (b) proximity reached NEAR (tier==NEAR).
+    // Rationale: a person walking briskly PAST the car at close range is only
+    // in-frame per-quadrant for ~1.5-2s — shorter than approachTriggerMs (2s),
+    // so the normal approach fast-path times out and nothing records (observed
+    // on-device: 1.9s walk-past missed the 2.0s bar by 100ms). This bar catches
+    // that case. FP-safe by construction: flags/shadows/lighting NEVER yield a
+    // YOLO object (fails gate a), and a distant passer-by never reaches NEAR
+    // (fails gate b) — so this can only fire for a real object physically close
+    // to the car. Set <= approachTriggerMs; the code takes min() so a config
+    // that lowers approachTriggerMs below this still wins. 0 disables it.
+    private static final long CLOSE_CONFIRMED_TRIGGER_MS = 1000;
+
+    // Sequence latch: did proximity reach NEAR at any point during the current
+    // motion sequence? Reset at sequence start (with peakThreatDuringSequence /
+    // cachedHighIsTrusted), set each frame the best quadrant reads NEAR. Gates
+    // the CLOSE_CONFIRMED_TRIGGER_MS fast-path above.
+    private boolean peakNearDuringSequence = false;
+
+    // Sequence latch: did proximity reach the CLOSE ZONE (NEAR or MID tier, i.e.
+    // not FAR) at any point during the current motion sequence? Wider than
+    // peakNearDuringSequence (which is NEAR-only). Gates the UNCONFIRMED
+    // close-zone fast-path + AI-gate override — the safety-critical FN fix for a
+    // real subject that YOLO couldn't classify in a short close-range window
+    // (person parked a bike + walked up at ~2.5m = MID). Reset with the other
+    // sequence latches at sequence start and enable().
+    private boolean peakCloseZoneDuringSequence = false;
+
     // MOTION THROTTLING: Process motion at 10 FPS max (saves 66% CPU vs 30 FPS)
     private static final long MOTION_PROCESS_INTERVAL_MS = 100;  // 10 FPS
     private long lastMotionProcessTime = 0;
@@ -212,7 +241,18 @@ public class SurveillanceEngineGpu {
     // AI throttling - only run YOLO every 500ms to save CPU
     private long lastAiTimeMs = 0;
     private static final long AI_COOLDOWN_MS = 500;
-    
+    // FAST cadence for the close zone: when a HIGH/MEDIUM threat is in the
+    // configured close zone, a real subject (person walking up) can be present
+    // for barely 1s — at the 500ms base cadence + ~500ms CPU inference that is
+    // only ~1-2 YOLO runs, so a person arriving after a first frame that caught
+    // only (say) their parked bike is never classified before the sequence
+    // decays → no person confirmation → no trigger (observed on-car: a person
+    // parked a bike and walked up at 2.5m; YOLO ran twice, saw only the bike,
+    // event ended in 1.1s WITHOUT trigger). Halving the cooldown while an object
+    // is genuinely close doubles the classification chances in that short
+    // window. Scoped to close-zone motion so steady-state CPU is unchanged.
+    private static final long AI_COOLDOWN_CLOSE_MS = 250;
+
     // --- SOTA FIX: Persistent Resources (Eliminates GC Stutter) ---
     // 1. Reusable Buffer: Prevents ~900KB allocation per frame
     // Per-thread scratch buffer for cropFromMosaic. Previously a single
@@ -437,11 +477,30 @@ public class SurveillanceEngineGpu {
         final long publishedNanos;
         final int width;
         final int height;
-        FoveatedSlot(byte[] rgb, long publishedNanos, int w, int h) {
+        // Foveated-pixel → 320×240 block-grid affine that came WITH these
+        // exact pixels through the async ring (see FoveatedCropper.Result).
+        // blockGridX = mapAx*fx + mapBx ; blockGridY = mapAy*fy + mapBy.
+        final float mapAx;
+        final float mapBx;
+        final float mapAy;
+        final float mapBy;
+        // False when the producing Result carried no real affine (legacy/first
+        // publish/race) — the AI worker then FAILS SAFE (keeps the detection)
+        // rather than dropping it, because a missed person is worse than an
+        // over-inclusive recording.
+        final boolean hasAffine;
+        FoveatedSlot(byte[] rgb, long publishedNanos, int w, int h,
+                     float mapAx, float mapBx, float mapAy, float mapBy,
+                     boolean hasAffine) {
             this.rgb = rgb;
             this.publishedNanos = publishedNanos;
             this.width = w;
             this.height = h;
+            this.mapAx = mapAx;
+            this.mapBx = mapBx;
+            this.mapAy = mapAy;
+            this.mapBy = mapBy;
+            this.hasAffine = hasAffine;
         }
     }
     /** Stale threshold for slot results. ~500ms = ~15 frames at 30fps. */
@@ -1030,12 +1089,25 @@ public class SurveillanceEngineGpu {
      * Non-blocking. Safe from any thread.
      */
     public byte[] pollFoveatedSlot(int quadrant) {
+        FoveatedSlot slot = pollFoveatedSlotFresh(quadrant);
+        return slot == null ? null : slot.rgb;
+    }
+
+    /**
+     * Single-atomic-read variant returning the whole fresh slot (or null when
+     * absent/stale), so the caller gets the rgb AND the foveated→block-grid
+     * affine from the SAME publication. Reading rgb and the affine via two
+     * separate polls could pair rgb from publication A with the affine from a
+     * publication B that landed in between — this method reads the
+     * AtomicReference exactly once to keep them coherent.
+     */
+    private FoveatedSlot pollFoveatedSlotFresh(int quadrant) {
         if (quadrant < 0 || quadrant >= FOVEATED_NUM_QUADRANTS) return null;
         FoveatedSlot slot = foveatedSlots[quadrant].get();
         if (slot == null) return null;
         long age = System.nanoTime() - slot.publishedNanos;
         if (age > FOVEATED_SLOT_STALE_NANOS) return null;
-        return slot.rgb;
+        return slot;
     }
 
     /**
@@ -1107,9 +1179,16 @@ public class SurveillanceEngineGpu {
         // negligible vs. the 200 ms YOLO inference downstream.
         byte[] copy = new byte[result.rgb.length];
         System.arraycopy(result.rgb, 0, copy, 0, result.rgb.length);
+        // Publish the crop rect's affine ATOMICALLY with the rgb — the same
+        // AtomicReference swap. The affine describes the window THESE bytes
+        // came from (which, on the async ring, is an earlier crop() call than
+        // the centroid we just requested), so the bbox is mapped with the
+        // matching window downstream.
         foveatedSlots[result.quadrant].set(new FoveatedSlot(
                 copy, System.nanoTime(),
-                result.width, result.height));
+                result.width, result.height,
+                result.mapAx, result.mapBx, result.mapAy, result.mapBy,
+                result.hasAffine()));
     }
 
     private int foveatedRoundRobin = 0;
@@ -1869,7 +1948,40 @@ public class SurveillanceEngineGpu {
             if (maxThreat > peakThreatDuringSequence) {
                 peakThreatDuringSequence = maxThreat;
             }
-            
+
+            // Latch NEAR proximity across the sequence (gates the close-range
+            // confirmed fast-path). Read the best-threat quadrant's proximity;
+            // once NEAR is seen it stays latched until the sequence resets.
+            // Cheap: proximityForQuadrant is the same read already done for the
+            // per-frame diag logs. Only bother while not yet latched.
+            if (!peakNearDuringSequence || !peakCloseZoneDuringSequence) {
+                int nearQ = pipelineV2.getHighestThreatQuadrant();
+                if (nearQ >= 0) {
+                    DistanceEstimator.ProximityEstimate proxNear =
+                            proximityForQuadrant(nearQ, results[nearQ]);
+                    if (proxNear != null) {
+                        // NEAR-only latch — feeds the confirmed close-range
+                        // walk-past fast-path (unchanged, deliberately strict).
+                        if (proxNear.tier == DistanceEstimator.Tier.NEAR) {
+                            peakNearDuringSequence = true;
+                        }
+                        // Close-zone latch (NEAR *or* MID, i.e. not FAR) — feeds
+                        // the UNCONFIRMED close-zone fast-path + AI-gate override.
+                        // A real walk-up sits at MID (~2-6m: tierFromMeters), so a
+                        // NEAR-only gate misses it (the on-car 2.5m FN); FAR is
+                        // excluded so a distant passer-by never qualifies. Being
+                        // in the user's configured zone is already implied by
+                        // reaching a MEDIUM+ threat (native maxDistanceRow gate),
+                        // so this proximity tier is the additional "genuinely
+                        // close, not far" evidence.
+                        if (proxNear.tier == DistanceEstimator.Tier.NEAR
+                                || proxNear.tier == DistanceEstimator.Tier.MID) {
+                            peakCloseZoneDuringSequence = true;
+                        }
+                    }
+                }
+            }
+
             // Log motion to timeline — ALWAYS, even before recording starts.
             // The timeline collector's pre-trigger ring buffer captures events during
             // the approach phase. When recording triggers, these are flushed into the
@@ -1887,6 +1999,11 @@ public class SurveillanceEngineGpu {
                 // than at the 5 scattered sequence-end sites.
                 cachedHighIsTrusted = false;
                 cachedIncoherentLoiter = false;
+                // New sequence: clear the close-range latches (re-set below each
+                // frame from the best quadrant's proximity tier). Same single-point
+                // reset discipline as cachedHighIsTrusted above.
+                peakNearDuringSequence = false;
+                peakCloseZoneDuringSequence = false;
                 int bestQ = pipelineV2.getHighestThreatQuadrant();
                 MotionPipelineV2.QuadrantResult bestR = bestQ >= 0 ? results[bestQ] : null;
                 // SOTA proximity: bbox-height (post-YOLO) or tier+trend (pre-YOLO).
@@ -1998,6 +2115,19 @@ public class SurveillanceEngineGpu {
             boolean sequenceConfirmed =
                     (lastAiConfirmationTimeMs >= firstMotionTime) || inZonePersonTrackerHeld;
 
+            // Brightness-event flag (hoisted): true if any quadrant had a
+            // brightness suppression during THIS sequence — the lighting-artifact
+            // signature. Computed here so the close-zone NEAR fast-path below can
+            // exclude it (a genuine person, not a headlight sweep). Re-used by the
+            // AI-confirm timeout logic further down (single source of truth).
+            boolean brightnessEventDuringSequence = false;
+            for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
+                if (suppressionWasActive[q] || results[q].brightnessSuppressed) {
+                    brightnessEventDuringSequence = true;
+                    break;
+                }
+            }
+
             // Determine required sustained motion based on threat level:
             // - THREAT_HIGH, TRUSTED (coherent/tracked loiter): base delay 500ms.
             // - THREAT_HIGH, UNTRUSTED (flag/shadow): treated like MEDIUM —
@@ -2023,6 +2153,54 @@ public class SurveillanceEngineGpu {
                         && sequenceConfirmed
                         && approachTriggerMs < requiredDuration) {
                     requiredDuration = approachTriggerMs;
+                }
+                // CLOSE-RANGE fast-path: a confirmed object that reached NEAR
+                // during the sequence records after just CLOSE_CONFIRMED_TRIGGER_MS
+                // — catches a brisk close walk-past that clears neither the loiter
+                // nor the 2s approach bar. Same sequenceConfirmed gate (never a
+                // flag/shadow) plus the NEAR latch (never a distant passer-by).
+                // Takes the min so it never RAISES an already-shorter bar.
+                if (CLOSE_CONFIRMED_TRIGGER_MS > 0
+                        && firstMotionTime > 0
+                        && sequenceConfirmed
+                        && peakNearDuringSequence
+                        && CLOSE_CONFIRMED_TRIGGER_MS < requiredDuration) {
+                    requiredDuration = CLOSE_CONFIRMED_TRIGGER_MS;
+                }
+                // CLOSE-ZONE NEAR fast-path — the near-sibling of the confirmed
+                // bar above, for the safety-critical FN where YOLO never returns
+                // a *person* class in its short window even though a real subject
+                // reached the close zone (on-car: person parked a bike + walked up
+                // to 2.5m; YOLO caught only the bike, event ended at 1.1s,
+                // requiredDuration stayed at the 3s loiter bar → the whole trigger
+                // evaluation was never even reached). This FN is DEFINED by the
+                // absence of any confirmation (no YOLO person, no coherent-drift
+                // trust yet), so gating on (cachedHighIsTrusted||sequenceConfirmed)
+                // would make the fast-path inert for its own scenario. Instead lower
+                // the bar to CLOSE_CONFIRMED_TRIGGER_MS on close-zone motion evidence
+                // ALONE, discriminated from a flag/shadow by POSITIVE incoherence:
+                //   - peakCloseZoneDuringSequence (NEAR|MID, never FAR/UNKNOWN — the
+                //     tier is reachable motion-only via tierFromMotion, no YOLO),
+                //   - !brightnessEventDuringSequence (lighting-artifact signature),
+                //   - !cachedIncoherentLoiter — the fail-CLOSED discriminator. It
+                //     latches ONLY once the native coherence signal fires AND reports
+                //     incoherent flow (flowCoherence>=0 && <ratioMin && netDrift<netMin;
+                //     see ~:2017). It is deliberately INERT for the first ~0.8s
+                //     (netRingCount<coherenceMinFrames → flowCoherence pinned <0), so
+                //     the window opens on motion alone up front, then a confirmed
+                //     flag/shadow closes it once coherence publishes incoherent, while
+                //     a coherent close approach (never arms cachedIncoherentLoiter,
+                //     guarded by !cachedHighIsTrusted at :2017) keeps the lowered bar.
+                // This only makes the trigger *evaluation* reachable; the AI-confirm
+                // gate (shouldSuppress) still runs and its own close-zone override
+                // decides the final fire.
+                if (CLOSE_CONFIRMED_TRIGGER_MS > 0
+                        && firstMotionTime > 0
+                        && peakCloseZoneDuringSequence
+                        && !brightnessEventDuringSequence
+                        && !cachedIncoherentLoiter
+                        && CLOSE_CONFIRMED_TRIGGER_MS < requiredDuration) {
+                    requiredDuration = CLOSE_CONFIRMED_TRIGGER_MS;
                 }
             }
 
@@ -2057,8 +2235,21 @@ public class SurveillanceEngineGpu {
                         aiQuadrantQueueAdd(q);
                     }
                 }
+                // Pick the cooldown by proximity: a NEAR (close-zone) subject
+                // gets the fast 250ms cadence so a short walk-up window yields
+                // more classification attempts; everything else keeps the 500ms
+                // base to preserve steady-state CPU. Read the best quadrant's
+                // proximity tier (the same estimate the diag logs use).
+                long cooldown = AI_COOLDOWN_MS;
+                if (bestQ >= 0) {
+                    DistanceEstimator.ProximityEstimate bestProx =
+                            proximityForQuadrant(bestQ, results[bestQ]);
+                    if (bestProx != null && bestProx.tier == DistanceEstimator.Tier.NEAR) {
+                        cooldown = AI_COOLDOWN_CLOSE_MS;
+                    }
+                }
                 // Kick off AI immediately if cooldown allows
-                if (!aiQuadrantQueueIsEmpty() && (System.currentTimeMillis() - lastAiTimeMs) >= AI_COOLDOWN_MS) {
+                if (!aiQuadrantQueueIsEmpty() && (System.currentTimeMillis() - lastAiTimeMs) >= cooldown) {
                     runAiOnQuadrant(smallRgbFrame, aiQuadrantQueuePoll());
                 }
             }
@@ -2133,13 +2324,9 @@ public class SurveillanceEngineGpu {
                     // create motion that lasts indefinitely, so a short timeout would let
                     // them through. If it's a real person in changing light, YOLO WILL see
                     // them within 5 seconds (multiple inference opportunities).
-                    boolean brightnessEventDuringSequence = false;
-                    for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
-                        if (suppressionWasActive[q] || results[q].brightnessSuppressed) {
-                            brightnessEventDuringSequence = true;
-                            break;
-                        }
-                    }
+                    // brightnessEventDuringSequence computed once, hoisted above
+                    // the requiredDuration block (the close-zone NEAR fast-path
+                    // reuses it). Same value here — do not recompute.
                     // Extend the YOLO-confirm timeout when EITHER a brightness
                     // event occurred (lighting artifact) OR the native signal
                     // positively confirmed an incoherent in-place loiter (a
@@ -2172,6 +2359,96 @@ public class SurveillanceEngineGpu {
                             // records via the 2s timeout fallback / no-YOLO paths, so
                             // a genuinely YOLO-invisible loiterer is delayed, not lost.
                             shouldSuppress = true;
+                        }
+                    }
+                    // CLOSE-ZONE PROXIMITY OVERRIDE (safety-critical FN fix).
+                    // A genuine subject physically CLOSE to the car (NEAR/MID tier,
+                    // in the configured close zone) is a real threat regardless of
+                    // whether YOLO returned a *person* class in the short window it
+                    // was present. On-car FN: a person parked a bike and walked up to
+                    // ~2.5m on the right cam; YOLO ran only twice (cooldown +
+                    // inference in a 1.1s window), caught only the bike, and the
+                    // AI-confirm gate above suppressed the untrusted HIGH — the
+                    // person clip was lost. When motion reaches the close zone
+                    // (NEAR or MID, not FAR) with a sustained (>=1s) HIGH/MEDIUM
+                    // threat, clear the AI-confirm hold.
+                    //
+                    // FP-safety (must STILL suppress a waving flag / sweeping shadow):
+                    //   (1) !brightnessEventDuringSequence — lighting-artifact signature.
+                    //   (2) !deterrentActive — our own light flash.
+                    //   (3) NEAR/MID (not FAR/UNKNOWN) via probeProx below.
+                    //   (4) !cachedIncoherentLoiter — the fail-CLOSED discriminator.
+                    //       This is the SAME motion-only gating as the requiredDuration
+                    //       bar above: the target FN is DEFINED by the absence of any
+                    //       YOLO-person / coherent-trust confirmation, so requiring
+                    //       (cachedHighIsTrusted || sequenceConfirmed) here would make
+                    //       the override unreachable for its own scenario (and, since
+                    //       the bar above would then never drop below 3s, the whole
+                    //       !recording block — this override included — would never even
+                    //       run at 1.1s). cachedIncoherentLoiter latches ONLY on POSITIVE
+                    //       incoherence once the native coherence signal fires (flowCoherence
+                    //       >=0 && <ratioMin && netDrift<netMin; ~:2017); it is inert for
+                    //       the first ~0.8s (netRingCount<coherenceMinFrames), so the
+                    //       override opens on close-zone motion evidence up front and only
+                    //       a confirmed flag/shadow closes it, while a coherent close
+                    //       approach (never arms it) clears the AI-confirm hold.
+                    // Being in the user's zone is already implied by the MEDIUM+ threat
+                    // (native maxDistanceRow centroid gate); the NEAR/MID tier is the
+                    // extra "genuinely close, not far" evidence. Uses the same
+                    // peakCloseZone latch and same !cachedIncoherentLoiter guard as the
+                    // requiredDuration bar above so the two stages AGREE (bar reachable
+                    // ⇔ override can clear): identical open/close conditions on both.
+                    if (shouldSuppress
+                            && effectiveThreat >= MotionPipelineV2.THREAT_MEDIUM
+                            && motionDuration >= 1000L
+                            && peakCloseZoneDuringSequence
+                            && !brightnessEventDuringSequence
+                            && !cachedIncoherentLoiter
+                            && !deterrentActive) {
+                        int probeQ = pipelineV2.getHighestThreatQuadrant();
+                        // Zone gate that does NOT require a live tracker lock. The
+                        // target FN is DEFINED by the absence of a YOLO person class
+                        // (hence no person track) — the only tracker seed is a YOLO
+                        // 'best' (see ~:3702) — so demanding trackerInZone() here would
+                        // make the override dead for its own scenario (no track →
+                        // trackerInZone returns false on the null box). Proceed when
+                        // there is NO active track (in-zone is established by the
+                        // MEDIUM+ maxDistanceRow gate + peakCloseZone + tier below), and
+                        // only apply the bbox-bottom zone filter when a track actually
+                        // exists AND is a PERSON (classId==0) — a stale bike/car track
+                        // must not act as the zone witness (mirrors every other
+                        // trackerInZone call site, which pairs it with a person check).
+                        boolean trackActive = false;
+                        boolean trackIsInZonePerson = false;
+                        if (probeQ >= 0) {
+                            try {
+                                if (NativeMotion.trackerHasActiveTrack(probeQ)) {
+                                    float[] tb = NativeMotion.trackerGetTrackBox(probeQ);
+                                    if (tb != null && tb.length >= 7 && tb[6] > 0f) {
+                                        trackActive = true;
+                                        trackIsInZonePerson = (int) tb[5] == 0
+                                                && trackerInZone(probeQ);
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        boolean zoneOk = !trackActive || trackIsInZonePerson;
+                        if (probeQ >= 0 && zoneOk) {
+                            DistanceEstimator.ProximityEstimate probeProx =
+                                    proximityForQuadrant(probeQ, results[probeQ]);
+                            if (probeProx != null
+                                    && probeProx.tier != DistanceEstimator.Tier.FAR
+                                    && probeProx.tier != DistanceEstimator.Tier.UNKNOWN) {
+                                shouldSuppress = false;
+                                logger.info(String.format(
+                                    "Close-zone override: %s in-zone %s motion %.1fs "
+                                    + "(track=%s) — recording on motion evidence",
+                                    probeProx.tier.name(),
+                                    (effectiveThreat >= MotionPipelineV2.THREAT_HIGH
+                                        ? "HIGH" : "MEDIUM"),
+                                    motionDuration / 1000.0,
+                                    trackActive ? "person-in-zone" : "none"));
+                            }
                         }
                     }
                     // NO-YOLO DETERRENT FALLBACK: When object detection is not available
@@ -2504,6 +2781,14 @@ public class SurveillanceEngineGpu {
                         if (approachTriggerMs > 0 && approachTriggerMs < requiredMs) {
                             requiredMs = approachTriggerMs;
                         }
+                        // Close-range fast-path (mirror of the inline gate): AI is
+                        // already confirmed here (aiConfirmedDuringSequence guards
+                        // this block), so only the NEAR latch is additionally needed.
+                        if (CLOSE_CONFIRMED_TRIGGER_MS > 0
+                                && peakNearDuringSequence
+                                && CLOSE_CONFIRMED_TRIGGER_MS < requiredMs) {
+                            requiredMs = CLOSE_CONFIRMED_TRIGGER_MS;
+                        }
                     }
                     if (motionDuration >= requiredMs && peakThreatDuringSequence >= MotionPipelineV2.THREAT_MEDIUM) {
                         // All conditions met: duration exceeded, threat was MEDIUM+, YOLO confirmed person
@@ -2816,6 +3101,11 @@ public class SurveillanceEngineGpu {
                                         java.util.List<com.overdrive.app.ai.Detection> dets =
                                                 detectorSnap.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSize);
                                         detectionBaseline.refreshQuadrant(qr, dets, qW, qH);
+                                        // A person YOLO sees here is one the motion
+                                        // pipeline missed (static / zone-rejected) —
+                                        // route it to the trigger. PERSON-only +
+                                        // conf gate, so a parked car stays baseline.
+                                        maybeTriggerFromBaselinePerson(qr, dets);
                                     }
                                 } catch (Exception e) {
                                     logger.warn("Baseline refresh failed for Q" + qr + ": " + e.getMessage());
@@ -2890,6 +3180,11 @@ public class SurveillanceEngineGpu {
                                             java.util.List<com.overdrive.app.ai.Detection> dets =
                                                     detectorSnap.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSize);
                                             detectionBaseline.refreshQuadrant(qToRefresh, dets, qW, qH);
+                                            // Person YOLO sees here = one the motion
+                                            // pipeline missed; route to trigger
+                                            // (PERSON-only + conf gate, parked car
+                                            // stays baseline-only).
+                                            maybeTriggerFromBaselinePerson(qToRefresh, dets);
                                             logger.debug("Post-suppression baseline refresh Q" + qToRefresh +
                                                     " [" + MotionPipelineV2.QUADRANT_NAMES[qToRefresh] + "]: " +
                                                     (dets != null ? dets.size() : 0) + " detections");
@@ -2917,9 +3212,19 @@ public class SurveillanceEngineGpu {
         if (!aiEnabled || (classFilter != null && classFilter.length == 0)) return;
         if (yoloDetector == null) return;
         if (isAiRunning.get()) return;
-        
+
         long now = System.currentTimeMillis();
-        if ((now - lastAiTimeMs) < AI_COOLDOWN_MS) return;
+        // Internal backstop = the FASTEST legitimate cadence (AI_COOLDOWN_CLOSE_MS),
+        // NOT AI_COOLDOWN_MS. The close-zone NEAR path (see the cooldown=
+        // AI_COOLDOWN_CLOSE_MS call site) admits a run at 250-499ms since the last
+        // inference; a 500ms floor here would reject it AFTER aiQuadrantQueuePoll()
+        // already consumed + cleared the quadrant's request bit, silently
+        // vaporizing that quadrant's AI pass (and, in the multi-quadrant case,
+        // mis-ordering the first classification onto a secondary quadrant). The
+        // other 5 callers self-gate at >= AI_COOLDOWN_MS (500) BEFORE calling, so
+        // this lower floor is invisible to them; isAiRunning (checked above) still
+        // prevents overlapping inference regardless of cadence.
+        if ((now - lastAiTimeMs) < AI_COOLDOWN_CLOSE_MS) return;
         lastAiTimeMs = now;
         
         // Determine crop dimensions and data source.
@@ -2929,7 +3234,14 @@ public class SurveillanceEngineGpu {
         final int qW;
         final int qH;
         final byte[] cropData;
-        
+        // Foveated-pixel → 320×240 block-grid affine, paired with cropData when
+        // (and only when) cropData is a foveated 640×640 crop. Carried out of
+        // the SAME atomic slot read as the rgb so bbox↔pixels stay coherent.
+        // fovMapValid=false ⇒ mosaic path OR foveated-without-rect ⇒ consumer
+        // keeps identity/fail-safe behavior (see line ~3413).
+        final float fovMapAx, fovMapBx, fovMapAy, fovMapBy;
+        final boolean fovMapValid;
+
         MotionPipelineV2.QuadrantResult motionResult = pipelineV2 != null ? pipelineV2.getResults()[quadrant] : null;
         
         // For heartbeat runs, the person may be stationary (zero motion blocks).
@@ -2964,7 +3276,34 @@ public class SurveillanceEngineGpu {
                     && NativeMotion.trackerHasActiveTrack(quadrant);
         } catch (Exception ignored) {}
 
+        // CLOSE-SUBJECT WIDE-CROP GATE (detection FN fix). The foveated crop
+        // zooms a 640×640 window onto the motion centroid — great for a distant
+        // subject that would otherwise be a handful of pixels, but WRONG for a
+        // subject already physically close: the zoom clips the body to a
+        // partial, heavily-fisheye-warped blob (torso/leg only) and YOLO, which
+        // is trained on whole-body aspect ratios, scores it ~0 (max_conf=0.000).
+        // Field evidence: side/rear close walk-ups produced zero YOLO hits for a
+        // whole session while the wider mosaic quadrant would have kept the full
+        // body in frame. When this quadrant's PRE-YOLO motion tier is NEAR, skip
+        // foveated and feed YOLO the wider 320×240 mosaic quadrant instead so the
+        // whole subject stays visible. This does NOT weaken static-object
+        // rejection: the DetectionBaseline suppression + ActorTracker static
+        // gates run identically downstream regardless of crop source, so a parked
+        // car / non-threat that never moved is still filtered out. Heartbeat runs
+        // already prefer mosaic (handled below), so only the live-motion path
+        // needs this. proximityForQuadrant Technique B is a cheap O(70) block
+        // scan and needs no YOLO result, so it is valid even when YOLO has been
+        // failing on this quadrant.
+        boolean preferWideForClose = false;
+        if (motionResult != null && motionResult.componentSize > 0) {
+            DistanceEstimator.ProximityEstimate preYoloProx =
+                    proximityForQuadrant(quadrant, motionResult);
+            preferWideForClose = (preYoloProx != null
+                    && preYoloProx.tier == DistanceEstimator.Tier.NEAR);
+        }
+
         if (!heartbeatRunEarly
+                && !preferWideForClose
                 && foveatedCropper != null && foveatedCropper.isInitialized() && cameraTextureId >= 0
                 && ((motionResult != null && motionResult.componentSize > 0) || heartbeatHasTrackerPos)) {
             // Foveated path (Option B mailbox).
@@ -2989,13 +3328,25 @@ public class SurveillanceEngineGpu {
                     ? motionResult.centroidY : trackerCentroidY;
             requestFoveatedCrop(quadrant, centroidX, centroidY);
 
-            byte[] foveatedRgb = pollFoveatedSlot(quadrant);
+            // Single atomic slot read: rgb + the affine that maps THIS crop's
+            // 640-pixel bboxes back into the 320×240 block grid must come from
+            // the SAME publication.
+            FoveatedSlot fovSlot = pollFoveatedSlotFresh(quadrant);
+            byte[] foveatedRgb = (fovSlot != null) ? fovSlot.rgb : null;
             if (foveatedRgb != null) {
                 qW = FoveatedCropper.CROP_SIZE;
                 qH = FoveatedCropper.CROP_SIZE;
                 // Slot deep-copies on publish; the bytes we got here are
                 // ours alone (no further copy needed for thread safety).
                 cropData = foveatedRgb;
+                // Carry the window's affine. If the slot lacks a valid rect
+                // (older publish / race), fovMapValid stays false and the
+                // motion-overlap filter FAILS SAFE (keeps the detection).
+                fovMapAx = fovSlot.mapAx;
+                fovMapBx = fovSlot.mapBx;
+                fovMapAy = fovSlot.mapAy;
+                fovMapBy = fovSlot.mapBy;
+                fovMapValid = fovSlot.hasAffine;
             } else {
                 // Slot empty or stale — fall back to mosaic for this tick.
                 qW = THUMBNAIL_WIDTH / 2;
@@ -3003,14 +3354,25 @@ public class SurveillanceEngineGpu {
                 byte[] mosaicShared = cropFromMosaic(mosaicRgb, quadrant, qW, qH);
                 cropData = new byte[mosaicShared.length];
                 System.arraycopy(mosaicShared, 0, cropData, 0, mosaicShared.length);
+                // Mosaic crop: identity mapping, handled by the scaleX=1.0
+                // branch downstream. No foveated affine.
+                fovMapAx = 0f; fovMapBx = 0f; fovMapAy = 0f; fovMapBy = 0f;
+                fovMapValid = false;
             }
         } else {
-            // Legacy path: 320×240 from mosaic. See note above — must copy.
+            // Mosaic 320×240 path. Reached when: no foveated cropper (legacy),
+            // a heartbeat run (stationary subject — mosaic detail suffices), OR
+            // preferWideForClose (a NEAR subject whose full body must stay in
+            // frame — see the wide-crop gate above). Must copy: cropFromMosaic
+            // returns a thread-local shared buffer.
             qW = THUMBNAIL_WIDTH / 2;
             qH = THUMBNAIL_HEIGHT / 2;
             byte[] mosaicShared = cropFromMosaic(mosaicRgb, quadrant, qW, qH);
             cropData = new byte[mosaicShared.length];
             System.arraycopy(mosaicShared, 0, cropData, 0, mosaicShared.length);
+            // Mosaic crop: identity mapping downstream. No foveated affine.
+            fovMapAx = 0f; fovMapBx = 0f; fovMapAy = 0f; fovMapBy = 0f;
+            fovMapValid = false;
         }
         
         if (cropData == null) return;
@@ -3162,23 +3524,58 @@ public class SurveillanceEngineGpu {
                         if (isHeartbeatRun && classId == 0) {
                             // Heartbeat + person: bypass spatial filter
                             passesFilter = true;
+                        } else if (usedFoveated && !fovMapValid) {
+                            // FAIL SAFE: foveated crop but no valid window affine
+                            // travelled with the pixels (older publish / ring
+                            // race). The OLD code applied a scale-only map that
+                            // ignored the crop window ORIGIN, throwing the bbox
+                            // ~100px sideways and DROPPING the person (actors:[]).
+                            // A false-keep is a recording; a false-drop is a
+                            // MISSED PERSON. Keep the detection.
+                            passesFilter = true;
                         } else if (snapshotConfirmedBlocks > 0) {
-                            // Normal path: require overlap with active motion blocks
-                            float scaleX = usedFoveated ? (320.0f / FoveatedCropper.CROP_SIZE) : 1.0f;
-                            float scaleY = usedFoveated ? (240.0f / FoveatedCropper.CROP_SIZE) : 1.0f;
-                            int detLeft = (int)(det.getX() * scaleX);
-                            int detTop = (int)(det.getY() * scaleY);
-                            int detRight = (int)((det.getX() + det.getW()) * scaleX);
-                            int detBottom = (int)((det.getY() + det.getH()) * scaleY);
-                            
+                            // Normal path: require overlap with active motion blocks.
+                            //
+                            // Map the detection bbox from its NATIVE crop space
+                            // into the 320×240 block grid.
+                            //  - Foveated (usedFoveated && fovMapValid): use the
+                            //    affine that came WITH these exact pixels. It
+                            //    folds in scale + crop-window ORIGIN + per-role
+                            //    flip + APA inset, so a person at the window edge
+                            //    lands on the right blocks (the bug this fixes).
+                            //    A mirrored role gives a negative X/Y scale, so
+                            //    normalise corners with min/max after mapping.
+                            //  - Mosaic (identity): byte-identical to the old
+                            //    scaleX = scaleY = 1.0 behavior.
+                            float ax, bxc, ay, byc;
+                            if (usedFoveated) {
+                                ax = fovMapAx; bxc = fovMapBx;
+                                ay = fovMapAy; byc = fovMapBy;
+                            } else {
+                                ax = 1.0f; bxc = 0.0f;
+                                ay = 1.0f; byc = 0.0f;
+                            }
+                            float fx0 = det.getX();
+                            float fy0 = det.getY();
+                            float fx1 = det.getX() + det.getW();
+                            float fy1 = det.getY() + det.getH();
+                            float gx0 = ax * fx0 + bxc;
+                            float gx1 = ax * fx1 + bxc;
+                            float gy0 = ay * fy0 + byc;
+                            float gy1 = ay * fy1 + byc;
+                            int detLeft   = (int) Math.min(gx0, gx1);
+                            int detRight  = (int) Math.max(gx0, gx1);
+                            int detTop    = (int) Math.min(gy0, gy1);
+                            int detBottom = (int) Math.max(gy0, gy1);
+
                             for (int bi = 0; bi < MotionPipelineV2.TOTAL_BLOCKS; bi++) {
                                 if (blockConfSnapshot[bi] < 0.5f) continue;
-                                
+
                                 int bx = (bi % MotionPipelineV2.GRID_COLS) * 32;
                                 int by = (bi / MotionPipelineV2.GRID_COLS) * 32;
                                 int bRight = bx + 32;
                                 int bBottom = by + 32;
-                                
+
                                 if (detLeft < bRight && detRight > bx && detTop < bBottom && detBottom > by) {
                                     passesFilter = true;
                                     break;
@@ -4035,11 +4432,21 @@ public class SurveillanceEngineGpu {
      * Returns true when zone gating is disabled ({@code maxRow == 0},
      * "extended"), or when {@code maxRow} is unset.
      *
+     * <p>NOTE: the JNI ({@code trackerGetTrackBox}) returns {@code null}
+     * when there is no active track, and never returns an inactive box
+     * (index 6 is hard-coded to 1.0f on the native side), so the
+     * {@code trackBox[6] <= 0} "vacuously in-zone" branch below is
+     * effectively dead. With no lock this method returns <b>false</b>
+     * (via the null check) UNLESS the zone gate is off. Every legitimate
+     * caller therefore pairs this with a {@code trackerHasActiveTrack}
+     * guard so the null→false path is not reached for a genuine no-track
+     * subject; the close-zone override handles the no-track case itself
+     * rather than calling this method.
+     *
      * @return true if the tracker bbox bottom is at or below {@code maxRow},
-     *         OR the zone gate is off, OR the tracker has no lock
-     *         (in-zone is moot — caller will skip via the existing
-     *         {@code trackerHasActiveTrack} check). Returns false only
-     *         when an active tracker lock is OUTSIDE the configured zone.
+     *         OR the zone gate is off. Returns false when an active lock is
+     *         OUTSIDE the configured zone, and also when there is no lock at
+     *         all (null box) — callers must guard the no-track case.
      */
     /**
      * Whether a THREAT_HIGH (loiter) in the given quadrant is "trusted" enough
@@ -4537,6 +4944,9 @@ public class SurveillanceEngineGpu {
             // Keep a static PERSON (loiterer = the threat, gated CRITICAL); skip
             // only non-person statics (parked cars, forced to NOTICE anyway).
             if (a.isStaticForTimeline && a.classGroup != Actor.ClassGroup.PERSON) continue;
+            // Drop the low-conf FAR NOTICE FP so the caption agrees with the card
+            // + hero (both suppress it). See isLowConfFarNotice.
+            if (isLowConfFarNotice(a)) continue;
             switch (a.classGroup) {
                 case PERSON:  persons++;  break;
                 case VEHICLE: vehicles++; break;
@@ -4701,6 +5111,9 @@ public class SurveillanceEngineGpu {
             // (which only retains confirmed persons). Without this, a flicker
             // person could caption "1 person" on a clip whose card shows 0.
             if (a.classGroup == Actor.ClassGroup.PERSON && !a.confirmed) continue;
+            // Drop the low-conf FAR NOTICE FP so the caption count agrees with the
+            // card + hero (both suppress it). See isLowConfFarNotice.
+            if (isLowConfFarNotice(a)) continue;
             switch (a.classGroup) {
                 case PERSON:  persons++;  break;
                 case VEHICLE: vehicles++; break;
@@ -4848,6 +5261,18 @@ public class SurveillanceEngineGpu {
     private boolean isActorFresh(Actor a, long now) {
         return a != null && a.lastSeenWallMs > 0
                 && (now - a.lastSeenWallMs) <= ACTOR_CAPTION_FRESHNESS_MS;
+    }
+
+    /** A low-confidence FAR NOTICE actor — the misclassification profile (e.g. a
+     *  parked motorcycle read as "person · far" @0.44) dropped from the three
+     *  notification caption count loops (rich-start, final-telegram, final-push)
+     *  so the caption can't say "1 person · far" while the linked card shows none.
+     *  SUMMARY scope (delegates to Actor.suppressFromSummary), so PERSON is exempt
+     *  — a real far still person keeps its caption mention per the hard invariant;
+     *  only non-person FPs drop. Cosmetic only: never affects startRecording or
+     *  the discard-keep (eventEverSawPerson). */
+    private static boolean isLowConfFarNotice(Actor a) {
+        return Actor.suppressFromSummary(a);
     }
 
     /** Camera name for a caption — the actor's CURRENT (last-seen) quadrant, NOT
@@ -5259,6 +5684,9 @@ public class SurveillanceEngineGpu {
                 // matches the event-card headline and the Telegram caption (both
                 // exclude !confirmed persons).
                 if (a.classGroup == Actor.ClassGroup.PERSON && !a.confirmed) continue;
+                // Drop the low-conf FAR NOTICE FP so the push count agrees with the
+                // card + hero (both suppress it). See isLowConfFarNotice.
+                if (isLowConfFarNotice(a)) continue;
                 switch (a.classGroup) {
                     case PERSON:  persons++;  break;
                     case VEHICLE: vehicles++; break;
@@ -5686,12 +6114,64 @@ public class SurveillanceEngineGpu {
      * The encoder is always running and buffering frames. This method
      * triggers the flush of the pre-record buffer and starts writing to file.
      */
+    /** Confidence floor for the baseline-refresh person-trigger. Matches
+     *  Actor.FAR_NOTICE_MIN_CONF so a low-confidence FAR misclassification (the
+     *  "parked bike read as person @0.44" profile) can NOT trigger a recording;
+     *  only a solidly-detected person does. */
+    private static final float BASELINE_PERSON_TRIGGER_MIN_CONF = 0.50f;
+
+    /**
+     * Baseline seed/refresh runs YOLO on the full quadrant regardless of motion.
+     * When it positively detects a PERSON, that is a real subject the motion
+     * pipeline MISSED — e.g. a person standing still, or one whose motion
+     * centroid fell in the zone-rejected upper rows of a wide rear/side camera,
+     * so no motion component ever formed and the normal motion→YOLO→trigger
+     * chain never ran (field case: a person in the rear cam produced 0 motion
+     * events for a whole session while the baseline refresh kept seeing them).
+     * Route that person-positive signal to the recording trigger instead of
+     * discarding it into the baseline-update only.
+     *
+     * Regression-safety (honours "never record a static non-threat"):
+     *  - PERSON class only (classId 0). Vehicles/bikes/animals never trigger
+     *    here — a parked car seen by a baseline refresh stays baseline-only, so
+     *    this cannot resurrect the parked-car FP.
+     *  - Confidence >= BASELINE_PERSON_TRIGGER_MIN_CONF, so a low-conf FAR
+     *    misclassification can't fire it.
+     *  - Only from the baseline-refresh lambdas, which already gate on
+     *    `active && !AccMonitor.isAccOn()` (armed sentry) upstream.
+     *  - startRecording() itself no-ops if already recording, and the
+     *    refresh paths are gated `!recording`, so no storm.
+     *
+     * @return true if a person cleared the bar (a recording was requested).
+     */
+    private boolean maybeTriggerFromBaselinePerson(int quadrant,
+            java.util.List<com.overdrive.app.ai.Detection> dets) {
+        if (dets == null || dets.isEmpty() || recording) return false;
+        if (pipelineV2Config != null && pipelineV2Config.quadrantEnabled != null
+                && quadrant >= 0 && quadrant < pipelineV2Config.quadrantEnabled.length
+                && !pipelineV2Config.quadrantEnabled[quadrant]) {
+            return false;  // quadrant disabled by user — respect the toggle
+        }
+        for (com.overdrive.app.ai.Detection d : dets) {
+            if (d.getClassId() == 0
+                    && d.getConfidence() >= BASELINE_PERSON_TRIGGER_MIN_CONF) {
+                logger.info(String.format(
+                    "Baseline-refresh person trigger: Q%d [%s] person @%.2f — motion "
+                    + "pipeline missed it (static / zone-rejected); recording on YOLO evidence",
+                    quadrant, MotionPipelineV2.QUADRANT_NAMES[quadrant], d.getConfidence()));
+                startRecording();
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void startRecording() {
         if (recorder == null) {
             logger.error("Cannot start recording - recorder is null");
             return;
         }
-        
+
         if (recording) {
             logger.debug("Already recording");
             return;
@@ -6491,6 +6971,36 @@ public class SurveillanceEngineGpu {
             actorsAtRotation = coalesceReenteredPersons(new java.util.ArrayList<>(merged.values()));
         }
 
+        // STALE-SLOT GUARD (mirror of the hero window-gate in pickHero): the
+        // ThumbnailBuffer is cleared only at recording STOP, but observe() runs
+        // continuously during monitoring, so a slot captured minutes earlier in
+        // a quiet gap (e.g. an animal that crossed the lot) survives into this,
+        // unrelated event's snapshot. Drop any slot whose peak frame predates
+        // this segment's recorded window so we don't emit a per-actor thumb
+        // (thumb_<base>_a<id>.jpg) for an actor that is NOT in the clip — the
+        // same phantom the hero gate rejects. segmentStartMs<=0 (gate disabled)
+        // keeps every slot. The pre-record ring is inside the window, so a
+        // legitimate pre-roll capture is retained. Final + new list so the
+        // downstream executor lambdas can capture it (effectively-final).
+        final java.util.List<ThumbnailBuffer.Slot> windowedSnap;
+        if (snap != null && !snap.isEmpty() && segmentStartMs > 0) {
+            java.util.List<ThumbnailBuffer.Slot> inWindow =
+                    new java.util.ArrayList<>(snap.size());
+            for (ThumbnailBuffer.Slot s : snap) {
+                if (s.peakWallMs <= 0 || s.peakWallMs >= segmentStartMs) {
+                    inWindow.add(s);
+                }
+            }
+            if (inWindow.size() != snap.size()) {
+                logger.info("Dropped " + (snap.size() - inWindow.size())
+                        + " stale pre-window thumbnail slot(s) for "
+                        + segmentMp4.getName() + " (kept " + inWindow.size() + ")");
+            }
+            windowedSnap = inWindow;
+        } else {
+            windowedSnap = snap;
+        }
+
         // Renormalize peak times against this segment's window — same logic
         // as the inline path used to do.
         final java.util.List<Actor> segmentActors;
@@ -6526,7 +7036,8 @@ public class SurveillanceEngineGpu {
                             a.firstSeenRelMs, a.lastSeenRelMs,
                             a.cameraMask,
                             a.peakProximity, a.lastProximity,
-                            a.trend, a.isStatic, a.isStaticForTimeline, a.confirmed,
+                            a.trend, a.isStatic, a.isStaticForTimeline,
+                            a.everMoved, a.everMovedTested, a.confirmed,
                             a.peakSeverity, a.peakSeverityWallMs, renormalizedRelMs,
                             a.peakConfidence,
                             a.peakBboxX, a.peakBboxY, a.peakBboxW, a.peakBboxH,
@@ -6573,7 +7084,7 @@ public class SurveillanceEngineGpu {
         //      so the finalizer thread returns immediately.
         //   2. Per-actor JPEGs always go to the executor.
         ThumbnailBuffer bufferAtDispatch = thumbnailBuffer;
-        if (bufferAtDispatch != null && snap != null) {
+        if (bufferAtDispatch != null && windowedSnap != null) {
             // Step 2: hero. Whether sync or async depends on the explicit
             // syncHero parameter. The publish path passes true; the
             // rotation listener passes false. Per-call argument means
@@ -6585,7 +7096,7 @@ public class SurveillanceEngineGpu {
                     // Window-gate the hero so it can't depict a peak frame evicted
                     // from the bounded pre-record ring (segmentStartMs is this
                     // segment's window start; open upper bound = still finalizing).
-                    heroFile = bufferAtDispatch.writeHeroFromSnapshot(snap, segmentMp4, segmentStartMs, 0L);
+                    heroFile = bufferAtDispatch.writeHeroFromSnapshot(windowedSnap, segmentMp4, segmentStartMs, 0L);
                 } catch (Throwable t) {
                     logger.warn("Hero thumbnail sync write failed for "
                             + segmentMp4.getName() + ": " + t.getMessage());
@@ -6595,17 +7106,53 @@ public class SurveillanceEngineGpu {
                     logger.info("Hero thumbnail (" + segmentMp4.getName() + "): "
                             + heroFile.getName());
                 }
-            } else if (!snap.isEmpty()) {
+            } else {
                 // Async hero path (rotation listener — no publish blocking
                 // on this segment). Schedule on the executor so we return
-                // off the GpuSegmentFinalizer-N thread fast.
+                // off the GpuSegmentFinalizer-N thread fast. ALWAYS scheduled
+                // (even when windowedSnap is empty) so the MP4-keyframe fallback
+                // below can run: the sidecar records expectedHeroName for THIS
+                // segment unconditionally, so if no YOLO-derived hero is written
+                // the rotated segment's card would point at a non-existent
+                // <base>.jpg → /thumb 404 "no preview". The final-segment path
+                // gets this fallback via writeFallbackHeroWithTimeout; the
+                // rotation path had no equivalent until now, so a non-final
+                // segment whose only slots were out-of-window (stale) produced a
+                // dangling hero reference. (Self-heals on restart via
+                // sweepOrphanHeroThumbnails, but the live card was broken.)
                 inFlightSegmentMetadata.incrementAndGet();
                 final ThumbnailBuffer bufFinal = bufferAtDispatch;
                 final long heroWindowStartMs = segmentStartMs;
+                final java.util.List<ThumbnailBuffer.Slot> heroSnap = windowedSnap;
+                final String heroBase = base;
                 segmentMetadataExecutor.execute(() -> {
                     try {
-                        File heroFile = bufFinal.writeHeroFromSnapshot(snap, segmentMp4, heroWindowStartMs, 0L);
-                        if (heroFile != null) {
+                        File heroFile = heroSnap.isEmpty() ? null
+                                : bufFinal.writeHeroFromSnapshot(heroSnap, segmentMp4, heroWindowStartMs, 0L);
+                        if (heroFile == null) {
+                            // No YOLO hero (empty/all-stale snapshot or in-window
+                            // pick failed) — extract a real keyframe from this
+                            // segment's MP4 so expectedHeroName resolves to a file.
+                            File fallback = new File(segmentMp4.getParentFile(), heroBase + ".jpg");
+                            if (!fallback.exists()) {
+                                // Timeout-isolated: writeFallbackHeroFromMp4 drives
+                                // MediaMetadataRetriever, which can hang forever on a
+                                // truncated-moov / corrupt-sample MP4 (SD unmount or
+                                // power transition mid-write). This lambda runs on the
+                                // SINGLE-THREADED segmentMetadataExecutor, so a bare
+                                // blocking call would wedge that one worker for the
+                                // process lifetime — every later segment's hero +
+                                // per-actor JPEG never runs, and inFlightSegmentMetadata
+                                // stays elevated so every drain burns its 2s timeout.
+                                // Run on a sacrificial daemon thread with a 5s budget,
+                                // exactly as the final-segment path does (:6368).
+                                writeFallbackHeroWithTimeout(segmentMp4, fallback, 5_000L);
+                            }
+                            if (fallback.exists()) {
+                                logger.info("Hero thumbnail (fallback keyframe) ("
+                                        + segmentMp4.getName() + "): " + fallback.getName());
+                            }
+                        } else {
                             logger.info("Hero thumbnail (" + segmentMp4.getName() + "): "
                                     + heroFile.getName());
                         }
@@ -6622,7 +7169,7 @@ public class SurveillanceEngineGpu {
             }
 
             // Step 3: per-actor JPEGs always async.
-            if (!snap.isEmpty()) {
+            if (!windowedSnap.isEmpty()) {
                 inFlightSegmentMetadata.incrementAndGet();
                 final ThumbnailBuffer bufFinal = bufferAtDispatch;
                 segmentMetadataExecutor.execute(() -> {
@@ -6633,7 +7180,7 @@ public class SurveillanceEngineGpu {
                             if (tmpBase.endsWith(".mp4")) {
                                 tmpBase = tmpBase.substring(0, tmpBase.length() - 4);
                             }
-                            for (ThumbnailBuffer.Slot s : snap) {
+                            for (ThumbnailBuffer.Slot s : windowedSnap) {
                                 try {
                                     Long relBoxed = relMap.get(s.actorId);
                                     long rel = relBoxed != null ? relBoxed : -1L;
@@ -6830,6 +7377,8 @@ public class SurveillanceEngineGpu {
         lastAiConfirmationTimeMs = 0;  // Reset AI confirmation gate
         lastPersonConfirmationTimeMs = 0;  // Reset person-specific confirmation gate
         peakThreatDuringSequence = 0;
+        peakNearDuringSequence = false;  // Reset close-range fast-path latch
+        peakCloseZoneDuringSequence = false;  // Reset close-zone (NEAR|MID) latch
         cachedHighIsTrusted = false;  // Reset flag/shadow HIGH-trust latch
         cachedIncoherentLoiter = false;  // Reset confirmed-incoherent-loiter latch
         

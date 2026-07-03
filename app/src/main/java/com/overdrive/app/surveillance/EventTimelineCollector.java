@@ -472,12 +472,17 @@ public class EventTimelineCollector {
         // Actor-driven entries (preferred — they carry class + proximity)
         if (actors != null) {
             for (Actor a : actors) {
-                // isStaticForTimeline is the superset verdict: it equals isStatic
-                // for PERSON (a loiterer keeps its entry) but additionally covers a
-                // genuinely-parked NON-PERSON that never latched the severity-path
-                // isStatic under sparse YOLO cadence. Gating here keeps parked cars
-                // out of the SRT timeline.
-                if (a.isStaticForTimeline) continue;
+                // Suppressed actors emit no SRT line: timeline-static (parked car;
+                // isStaticForTimeline == isStatic for PERSON so a loiterer keeps its
+                // entry) OR the low-confidence FAR NOTICE misclassification profile
+                // (a parked motorcycle read as "person · far" @0.44). The latter
+                // mirrors the headline + hero gates so all three views agree — a
+                // genuine far actor escalates above NOTICE or is seen with solid
+                // confidence, so real events still get their SRT line. Single
+                // source of truth so overlapsAnyActor stays in lockstep (else a
+                // dropped actor would also suppress the generic-motion fallback,
+                // leaving the window with no subtitle at all).
+                if (isSuppressedFromSrt(a)) continue;
                 long offset = a.firstSeenRelMs >= 0 ? a.firstSeenRelMs : 0L;
                 String key = null;
                 switch (a.classGroup) {
@@ -525,17 +530,35 @@ public class EventTimelineCollector {
         srt.write(mp4File);
     }
 
+    /**
+     * True if this actor is suppressed from the SRT actor loop (no own subtitle
+     * entry). Such an actor must ALSO be skipped by {@link #overlapsAnyActor} so
+     * it doesn't suppress the generic-motion fallback and leave a window with no
+     * subtitle at all. Single source of truth for "did this actor emit an SRT
+     * line": timeline-static (parked car / loiterer-exempt) OR the low-confidence
+     * FAR NOTICE misclassification profile (mirrors the headline + hero gates).
+     */
+    private static boolean isSuppressedFromSrt(Actor a) {
+        if (a.isStaticForTimeline) return true;
+        // The low-conf FAR NOTICE misclassification profile. SUMMARY scope, so
+        // PERSON is exempt (a real far still person keeps its SRT line per the
+        // hard invariant); only non-person FPs (car/bike/animal) drop. Canonical
+        // predicate on Actor so SRT, headline counts, and the events-page chip
+        // never diverge.
+        return Actor.suppressFromSummary(a);
+    }
+
     private static boolean overlapsAnyActor(long spanStart, long spanEnd,
                                             java.util.List<Actor> actors) {
         if (actors == null || actors.isEmpty()) return false;
         for (Actor a : actors) {
             // Only actors that ACTUALLY EMITTED an SRT entry count as "covering"
-            // this motion span. A timeline-static actor is skipped at the actor
-            // loop (its own entry is dropped), so it must NOT also suppress the
-            // generic-motion fallback — otherwise a window with a dropped static
-            // actor gets NO subtitle at all. Skipping it here lets the
-            // K_MOTION_STARTED fallback fire for that window.
-            if (a.isStaticForTimeline) continue;
+            // this motion span. A suppressed actor (timeline-static, or the
+            // low-conf FAR NOTICE FP) is skipped at the actor loop (its own entry
+            // is dropped), so it must NOT also suppress the generic-motion
+            // fallback — otherwise a window with a dropped actor gets NO subtitle
+            // at all. Skipping it here lets the K_MOTION_STARTED fallback fire.
+            if (isSuppressedFromSrt(a)) continue;
             if (a.firstSeenRelMs < 0 || a.lastSeenRelMs < 0) continue;
             if (spanStart <= a.lastSeenRelMs && spanEnd >= a.firstSeenRelMs) {
                 return true;
@@ -961,6 +984,17 @@ public class EventTimelineCollector {
                         if ((a.cameraMask & (1 << bit)) != 0) camArr.put(CAMERA_NAMES[bit]);
                     }
                     ao.put("cameras", camArr);
+                    // Persist the SUMMARY suppression verdict so the downstream
+                    // events-page class chip/filter (RecordingsIndex actor_classes)
+                    // honours the SAME decision the live count/SRT/caption made —
+                    // the verdict depends on everMoved/everMovedTested which aren't
+                    // otherwise serialized, so it can't be recomputed from the
+                    // sidecar. Summary scope (PERSON exempt), matching the chip's
+                    // role as a summary surface. Only emit when true (older sidecars
+                    // + real actors default-absent → readers fail open = prior behavior).
+                    if (Actor.suppressFromSummary(a)) {
+                        ao.put("lowConfFarNotice", true);
+                    }
 
                     actorsArr.put(ao);
 
@@ -985,8 +1019,24 @@ public class EventTimelineCollector {
                     // unaffected (and now carries a proximity-consistent severity
                     // via ActorTracker.toActor()). Non-person classes keep their
                     // existing isStaticForTimeline-only gate.
+                    // ALSO exclude a low-confidence FAR NOTICE actor via
+                    // suppressFromSummary — but note that predicate EXEMPTS PERSON
+                    // (it only drops NON-person FPs: a far low-conf parked car/bike
+                    // at NOTICE). For a PERSON-classified FP (e.g. the parked
+                    // motorcycle YOLO labelled "person · far" @0.44) this clause is
+                    // a NO-OP: the person is still counted here, keeps its SRT line
+                    // and events-page chip, and is named in the caption — because a
+                    // genuinely-motionless distant person is byte-identical to that
+                    // FP and the hard invariant forbids dropping a real person from
+                    // the summary. The hero pool separately drops the PERSON-FP box
+                    // (Actor.suppressFromHero, all classes) so the thumbnail shows a
+                    // clean keyframe instead of a phantom box; that is an
+                    // intentional card-keeps-person / hero-shows-no-box asymmetry,
+                    // NOT a bug. Real moving/approaching/closer far actors are never
+                    // dropped on any surface (trend + everMoved exemptions in core).
                     boolean contributesToHeadline = !a.isStaticForTimeline
-                            && !(a.classGroup == Actor.ClassGroup.PERSON && !a.confirmed);
+                            && !(a.classGroup == Actor.ClassGroup.PERSON && !a.confirmed)
+                            && !Actor.suppressFromSummary(a);
                     if (contributesToHeadline) {
                         switch (a.classGroup) {
                             case PERSON:  personCount++;  break;

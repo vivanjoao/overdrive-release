@@ -1888,19 +1888,33 @@ var CHARGING = {
     },
 
     // Classify a session into a SOTA charge tier: 'dc' (DC fast), 'fast'
-    // (AC wallbox), 'slow' (AC trickle), or 'unk'. DC is authoritative from the
-    // gun state; AC is split by peak power. The AC fast/slow cut is 7.2 kW (NOT
-    // 7.0): a 7.4 kW single-phase wallbox under load reads ~7 kW and should be
+    // (AC wallbox), 'slow' (AC trickle), or 'unk'. DC is normally authoritative
+    // from the gun state; AC is split by peak power. The AC fast/slow cut is 7.2 kW
+    // (NOT 7.0): a 7.4 kW single-phase wallbox under load reads ~7 kW and should be
     // "fast", but a 6-7 kW charge should stay "slow" — a hard 7.0 boundary made
     // a 6.x kW charge flicker to "fast" on a transient peak.
     AC_FAST_KW: 7.2,
     DC_KW: 25,
+    // Minimum peak a real DC-fast session must reach. DC fast-charging is
+    // fundamentally a high-power process (BYD DC ramps well past 25 kW); a session
+    // whose measured peak never got near this is physically NOT DC fast, whatever
+    // the gun-state flag says. Guards against a HAL gun-state misread (observed:
+    // a PHEV AC charge at ~1.7 kW / ~7 kW peak recorded gun=3 → is_dc=1 → labelled
+    // "DC fast"). We require peak ≥ 15 kW to honour a DC flag — comfortably above
+    // any AC wallbox (≤22 kW 3-phase, but a PHEV/single-phase tops out ~7-11) yet
+    // well below a genuine DC session's sustained rate, so a real DC charge that
+    // momentarily reads low at the very start isn't misdemoted once it ramps.
+    DC_MIN_PEAK_KW: 15,
     _typeKind: function (s) {
         if (!s) return 'unk';
         var peak = (s.peakPower != null && s.peakPower > 0) ? s.peakPower : 0;
-        if (s.isDc === true || peak >= this.DC_KW) return 'dc';
+        // Honour a DC gun flag ONLY if the peak is physically consistent with DC.
+        // A DC flag with a sub-DC peak is a gun-state misread — fall through to the
+        // power-based AC split instead of blindly showing "DC fast".
+        if ((s.isDc === true && peak >= this.DC_MIN_PEAK_KW) || peak >= this.DC_KW) return 'dc';
         if (s.isDc === false) return peak >= this.AC_FAST_KW ? 'fast' : 'slow';
-        // Unknown gun state — infer from power so old/partial rows still bucket.
+        // DC flag but implausibly-low peak, or unknown gun state — bucket by power
+        // so old/partial rows and misread-gun rows still classify sensibly.
         if (peak >= this.DC_KW) return 'dc';
         if (peak >= this.AC_FAST_KW) return 'fast';
         if (peak > 0) return 'slow';

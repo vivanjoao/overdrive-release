@@ -431,6 +431,11 @@ object UnifiedConfigManager {
         val blindspot = config.optJSONObject("blindspot") ?: JSONObject().also {
             config.put("blindspot", it)
         }
+        // Power / battery-safety section. Holds the HV-SoC surveillance cutoff
+        // read by SocCutoffMonitor.cutoffPercent() (key power.lowSocCutoffPercent).
+        val power = config.optJSONObject("power") ?: JSONObject().also {
+            config.put("power", it)
+        }
         // Ensure the telegram section exists (createDefaultConfig seeds it, but
         // applyDefaults must also work on a partial config built elsewhere — e.g.
         // a restored backup whose telegram section was skipped on a key
@@ -473,7 +478,15 @@ object UnifiedConfigManager {
         if (!surveillance.has("screenDeterrentDurationSeconds")) surveillance.put("screenDeterrentDurationSeconds", 8)
         if (!surveillance.has("screenDeterrentImagePath")) surveillance.put("screenDeterrentImagePath", "")
         if (!surveillance.has("screenDeterrentMessage")) surveillance.put("screenDeterrentMessage", "")
-        
+
+        // HV traction-battery SoC cutoff for parked surveillance. At or below
+        // this %, SocCutoffMonitor arms a 60 s grace then self-shuts-down to
+        // protect the pack. User-tunable from Surveillance → General (slider
+        // 0..30). 0 = Off: SocCutoffMonitor.onElecPercentageChanged() early-
+        // returns on pct<=0 BEFORE the cutoff compare, so a 0 cutoff can never
+        // arm. Default 10 matches SocCutoffMonitor.DEFAULT_CUTOFF_PERCENT.
+        if (!power.has("lowSocCutoffPercent")) power.put("lowSocCutoffPercent", 10)
+
         // Recording defaults. The canonical key is `recordingQuality` (ECONOMY..MAX).
         // `quality` is the legacy mirror; `bitrate` (LOW/MEDIUM/HIGH) is no longer
         // seeded — it would drift from the active tier and confuse cross-channel
@@ -482,6 +495,20 @@ object UnifiedConfigManager {
         if (!recording.has("recordingQuality")) recording.put("recordingQuality", "STANDARD")
         if (!recording.has("quality")) recording.put("quality", recording.optString("recordingQuality", "STANDARD"))
         if (!recording.has("codec")) recording.put("codec", "H264")
+        // Surveillance (ACC-off / parked sentry) quality tier. Independent of the
+        // ACC-on recordingQuality above so parked footage can use a different
+        // bitrate (e.g. thriftier while parked all day, or higher for evidence).
+        //
+        // DELIBERATELY NOT SEEDED. It resolves via read-time fallback in each
+        // consumer instead: when this key is absent, the pano pipeline falls
+        // back to recording.recordingQuality and the OEM dashcam falls back to
+        // its own oemDashcam.recordingQuality → recording.recordingQuality
+        // chain. Physically seeding it (e.g. from recording.recordingQuality)
+        // would REGRESS the OEM axis whenever oemDashcam.recordingQuality
+        // diverges from the pano tier — the seeded pano value would override
+        // the OEM's own slot. Absence = byte-identical to the pre-split world
+        // for BOTH pipelines; presence = user explicitly chose a surveillance
+        // tier. Both flows resolve bitrate against the SHARED `codec` key.
         // Recording-side dewarp strength (Fitzgibbon division model). 0..100,
         // 0 = off (default). Single source of truth for both ACC-on dashcam
         // and ACC-off surveillance flows — both pipelines read the same key
@@ -510,6 +537,16 @@ object UnifiedConfigManager {
                 com.overdrive.app.camera.CameraProfiles.PROFILE_AUTO)
         }
         if (!camera.has("targetFps"))         camera.put("targetFps", 15)
+        // Surveillance (ACC-off / parked sentry) camera fps. Independent of the
+        // ACC-on targetFps so parked recording can run at a lower rate to save
+        // power/storage while the car sits all day.
+        //
+        // DELIBERATELY NOT SEEDED (see surveillanceQuality above for the full
+        // rationale). Read-time fallback only: absent ⇒ the pano pipeline uses
+        // camera.targetFps (15) and the OEM dashcam uses its own
+        // oemDashcam.fps (30) → recording.fps chain. Seeding a single value
+        // here would drop OEM parked fps from its 30 default to 15. Absence =
+        // byte-identical per pipeline; presence = an explicit user choice.
         if (!camera.has("probedCameraId"))    camera.put("probedCameraId", -1)
         if (!camera.has("probedSurfaceMode")) camera.put("probedSurfaceMode", -1)
         if (!camera.has("roleMappings"))      camera.put("roleMappings", JSONObject())

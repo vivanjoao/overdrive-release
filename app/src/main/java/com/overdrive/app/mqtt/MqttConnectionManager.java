@@ -526,26 +526,48 @@ public class MqttConnectionManager {
             boolean v2l = false;
             if (vd != null && vd.chargingGunState != BydVehicleData.UNAVAILABLE) {
                 payload.put("is_dcfc", vd.chargingGunState == 3 ? 1 : 0);
-                if (vd.chargingGunState == 4) { payload.put("is_charging", 0); v2l = true; } // V2L
+                // V2L is gun state 5 (VTOL), NOT 4. Per BYDAutoChargingDevice:
+                // 2=AC, 3=DC, 4=AC_DC (a real combined charging gun), 5=VTOL. The
+                // old `== 4` mislabelled genuine AC_DC charging as V2L — forcing
+                // is_charging=0 (and, once charge_power gated on v2l, 0 kW) during a
+                // real charge. Every other site (BydDataCollector isVtol, ChargingDetector
+                // gunPlausible) correctly treats 5 as V2L and 4 as charging.
+                if (vd.chargingGunState == 5) { payload.put("is_charging", 0); v2l = true; } // V2L (VTOL)
             }
 
-            // charge_power — DC charge power into the pack (kW), from InstrumentDevice.getChargePower().
-            // Only meaningful while charging: getChargePower() returns garbage (~359) when idle, so
-            // gate on the charging state and a sane upper bound; 0 otherwise. This is the real charge
-            // rate (matches the BYD app / cloud battery_power, e.g. 2.9 kW on a 15 A AC charge).
+            // charge_power — DC charge power into the pack (kW). Prefer the direct
+            // getChargePower() reading; when it's absent (dead on PHEV) fall back to
+            // the resolved getChargingState().chargingPowerKW — the SAME value the app
+            // UI and ABRP use (SOC-derived ring estimator on PHEV) — so all surfaces
+            // agree. getChargePower() returns ~359 garbage when idle, so gate on the
+            // charging state and a sane upper bound; 0 otherwise.
             double chargeKw = 0;
-            if (isCharging && !v2l && vd != null && !Double.isNaN(vd.chargePowerKw)
-                    && vd.chargePowerKw > 0.1 && vd.chargePowerKw <= 300) {
-                chargeKw = vd.chargePowerKw;
+            if (isCharging && !v2l) {
+                if (vd != null && !Double.isNaN(vd.chargePowerKw)
+                        && vd.chargePowerKw > 0.1 && vd.chargePowerKw <= 300) {
+                    chargeKw = vd.chargePowerKw;
+                } else if (chargingState != null
+                        && !Double.isNaN(chargingState.chargingPowerKW)
+                        && chargingState.chargingPowerKW > 0.1
+                        && chargingState.chargingPowerKW <= 300) {
+                    chargeKw = chargingState.chargingPowerKW;
+                }
             }
             payload.put("charge_power", chargeKw);
 
-            // is_parked
+            // is_parked — gear==P, OR the car is powered off. When ACC is off the gear signal
+            // isn't actively polled and carries forward its last value (e.g. R after backing into
+            // a spot), so gear alone would wrongly report not-parked while the car sits switched
+            // off. A powered-off car is always parked.
             boolean isParked = false;
             if (vd != null && vd.gearMode != BydVehicleData.UNAVAILABLE) {
                 isParked = vd.gearMode == GearMonitor.GEAR_P;
             } else {
                 isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
+            }
+            if (!isParked) {
+                try { if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) isParked = true; }
+                catch (Throwable ignored) {}
             }
             payload.put("is_parked", isParked ? 1 : 0);
 

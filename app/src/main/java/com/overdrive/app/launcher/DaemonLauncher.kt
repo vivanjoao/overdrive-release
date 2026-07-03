@@ -11,7 +11,9 @@ import com.overdrive.app.logging.LogManager
  * of the app's lifecycle as shell user (UID 2000).
  * 
  * Note: This uses ADB shell (via AdbShellExecutor/Dadb) for launching daemons.
- * For system shell operations, see the shell/ package (ShellPermissionManager, etc.)
+ * For system shell operations, see the shell/ package (PrivilegedShellSetup, etc.)
+ * 
+ * ProxyDaemon is launched via privileged shell (UID 1000) for elevated privileges.
  */
 class DaemonLauncher(
     private val context: Context,

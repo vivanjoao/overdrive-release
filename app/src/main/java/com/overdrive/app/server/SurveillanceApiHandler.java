@@ -438,8 +438,11 @@ public class SurveillanceApiHandler {
         // process (byd_cam_daemon) writes screenDeterrentImagePath via the
         // upload endpoint; without forceReload the in-memory UCM cache here
         // can be stale until the next file mtime tick is observed.
-        JSONObject survConfig = com.overdrive.app.config.UnifiedConfigManager
-                .forceReload().optJSONObject("surveillance");
+        // Single forceReload — read every section we need off the SAME fresh
+        // snapshot. (Calling forceReload again below for "power" would re-parse
+        // the file and leave survConfig pointing at the earlier snapshot.)
+        JSONObject ucmRoot = com.overdrive.app.config.UnifiedConfigManager.forceReload();
+        JSONObject survConfig = ucmRoot.optJSONObject("surveillance");
         if (survConfig == null) survConfig = new JSONObject();
         config.put("deterrentAction", survConfig.optString("deterrentAction", "silent"));
         config.put("deterrentCooldownSeconds", survConfig.optInt("deterrentCooldownSeconds", 60));
@@ -452,6 +455,13 @@ public class SurveillanceApiHandler {
         // Keep ONLY the USB/data rail powered after ACC OFF (cameras unaffected).
         // Default true; read by AccSentryDaemon on the next ACC-OFF cycle.
         config.put("keepUsbPowerOnAccOff", survConfig.optBoolean("keepUsbPowerOnAccOff", true));
+        // HV-battery SoC surveillance cutoff (%). Lives in the "power" section
+        // (the key SocCutoffMonitor reads), NOT "surveillance" — surface it on
+        // the surveillance config so the General-tab slider can hydrate. 0=Off.
+        // Default 10 matches SocCutoffMonitor.DEFAULT_CUTOFF_PERCENT.
+        org.json.JSONObject powerConfig = ucmRoot.optJSONObject("power");
+        config.put("lowSocCutoffPercent",
+                powerConfig != null ? powerConfig.optInt("lowSocCutoffPercent", 10) : 10);
         // Verify the file actually exists before claiming hasImage=true.
         // Without this check, a stale UCM pointer (file deleted out-of-band)
         // makes the UI show a broken preview spinner forever.
@@ -1032,6 +1042,28 @@ public class SurveillanceApiHandler {
                 }
                 CameraDaemon.log("Keep USB powered while parked set to: " + keepUsb
                         + " (takes effect next ACC-OFF cycle)");
+            }
+
+            // HV-battery SoC surveillance cutoff (%). Routed to the "power"
+            // section — power.lowSocCutoffPercent is the EXACT key
+            // SocCutoffMonitor.cutoffPercent() reads, so the slider must land
+            // there (not in "surveillance"). Range 0..30; 0 = Off (the monitor
+            // early-returns on pct<=0 before the cutoff compare, so it never
+            // arms). Out-of-range is clamped, not rejected.
+            if (configJson.has("lowSocCutoffPercent")) {
+                int pct = configJson.optInt("lowSocCutoffPercent", 10);
+                if (pct < 0) pct = 0;
+                if (pct > 30) pct = 30;
+                boolean persisted = com.overdrive.app.config.UnifiedConfigManager.updateValues(
+                        "power", java.util.Collections.singletonMap("lowSocCutoffPercent", pct));
+                if (!persisted) {
+                    CameraDaemon.log("Failed to persist lowSocCutoffPercent=" + pct);
+                    HttpResponse.sendJsonError(out, "Failed to save low-battery cutoff");
+                    return;
+                }
+                CameraDaemon.log("Low-battery surveillance cutoff set to: "
+                        + (pct == 0 ? "Off" : pct + "%")
+                        + " (SocCutoffMonitor reads live on next SoC tick)");
             }
 
             if (configJson.has("clearScreenDeterrentImage") && configJson.optBoolean("clearScreenDeterrentImage", false)) {

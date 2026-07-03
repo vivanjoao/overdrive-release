@@ -837,8 +837,9 @@ public class SocHistoryDatabase {
                             long lastSampleT = getLastChargingSampleTime(chargingStartTime);
                             long closeTime = (lastSampleT > 0) ? lastSampleT : chargingStartTime;
 
-                            // Compute additional values needed for daily rollup and session record
-                            int isDc = (chargingGunState == 3) ? 1 : (chargingGunState == 2 ? 0 : -1);
+                            // Compute additional values needed for daily rollup and session record.
+                            // Peak-guarded so a misread DC gun on a low-power charge isn't stored as DC.
+                            int isDc = deriveIsDc(chargingGunState, chargingPeakPower);
                             int rangeGained = rangeGainedFromEnergy(energyAdded);
                             double rate = getElectricityRate();
                             String curr = getCurrencySymbol();
@@ -1030,9 +1031,10 @@ public class SocHistoryDatabase {
                     }
                 } catch (Exception e) { /* use defaults */ }
 
-                // AC/DC from gun state (authoritative), NOT the old power>20 heuristic.
+                // AC/DC from gun state, peak-guarded against a HAL gun misread
+                // (a DC flag on a sub-DC-power charge is downgraded to unknown).
                 // gun: 2=AC 3=DC 4=AC_DC 5=V2L; AC_DC/V2L/unknown -> -1.
-                int isDc = (chargingGunState == 3) ? 1 : (chargingGunState == 2 ? 0 : -1);
+                int isDc = deriveIsDc(chargingGunState, chargingPeakPower);
                 boolean isAcCharge = (isDc == 0);
 
                 // Range gained derived from energy × the car's efficiency — the
@@ -1113,6 +1115,37 @@ public class SocHistoryDatabase {
     }
 
     /**
+     * Latest {@code soc_history} charging-heartbeat timestamp within
+     * {@code (startExclusiveFloor, upperInclusive]} — i.e. the most recent
+     * is_charging=1 row that belongs to a session starting at
+     * {@code startExclusiveFloor}. Returns 0 when none.
+     *
+     * <p>This is the activity signal that survives on models with no
+     * charging_power_samples: the SOC scheduler writes an is_charging=1 row every
+     * &lt;=2 min while charging, independent of any power signal or ACC state. The
+     * query is bounded above by the next-newer session's start so one charge's
+     * heartbeat can never be attributed to an older session.
+     */
+    private long maxChargingHeartbeat(long startInclusive, long upperInclusive) {
+        if (!isInitialized || connection == null) return 0L;
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT MAX(timestamp) FROM " + TABLE_SOC +
+                " WHERE is_charging = 1 AND timestamp >= ? AND timestamp <= ?;")) {
+            ps.setLong(1, startInclusive);
+            ps.setLong(2, upperInclusive);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    long v = rs.getLong(1);
+                    return rs.wasNull() ? 0L : v;
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("maxChargingHeartbeat failed: " + e.getMessage());
+        }
+        return 0L;
+    }
+
+    /**
      * Attempt to RESUME (and consolidate) a recent charging session chain instead
      * of opening a new row. Returns true if a session was adopted (caller skips
      * the INSERT); false if nothing is resumable and a fresh row is needed.
@@ -1131,13 +1164,26 @@ public class SocHistoryDatabase {
     private boolean tryResumeChargingSession(long now, double soc) {
         if (!isInitialized || connection == null) return false;
         try {
-            // Pull recent sessions (bounded to a day) newest-first, each with its
-            // last sample time so we measure real activity, not start_time.
+            // Pull recent sessions (bounded to a day) newest-first. We then
+            // measure each session's "last activity" from the MAX of:
+            //   (a) its last charging_power_samples row,
+            //   (b) its charging heartbeat in soc_history (is_charging=1 rows,
+            //       written every <=2 min by the independent SOC scheduler even
+            //       when NO power samples exist — the exact case that broke resume
+            //       on models reporting no charging-power signal, fragmenting one
+            //       physical charge into a new row every daemon restart / detector
+            //       flip and resetting energy/range/cost to ~0),
+            //   (c) close time, (d) start.
+            // The heartbeat (b) is scoped to [start, nextNewerSessionStart] (or
+            // [start, now] for the newest) so a LATER charge's heartbeat can never
+            // bleed onto an older session and wrongly merge two distinct charges.
             java.util.List<long[]> rows = new java.util.ArrayList<>(); // [start, end, lastActivity]
             java.util.List<Double> startSocs = new java.util.ArrayList<>();
+            java.util.List<Double> endSocs = new java.util.ArrayList<>(); // NaN = open / unknown
+            java.util.List<long[]> raw = new java.util.ArrayList<>();   // [start, end, cpsLastT(0=none)]
             long sinceTs = now - 24L * 60 * 60 * 1000L;
             try (PreparedStatement sel = connection.prepareStatement(
-                    "SELECT c.start_time, c.end_time, c.start_soc, " +
+                    "SELECT c.start_time, c.end_time, c.start_soc, c.end_soc, " +
                     "  (SELECT MAX(t) FROM " + TABLE_CPS + " s WHERE s.session_start_time = c.start_time) AS last_t " +
                     "FROM " + TABLE_CHARGING + " c WHERE c.start_time >= ? ORDER BY c.start_time DESC;")) {
                 sel.setLong(1, sinceTs);
@@ -1147,18 +1193,53 @@ public class SocHistoryDatabase {
                         long en = rs.getLong("end_time");
                         long lt = rs.getLong("last_t");
                         boolean ltNull = rs.wasNull();
-                        // Activity = last sample, else close time, else start.
-                        long act = !ltNull && lt > 0 ? lt : (en > 0 ? en : st);
-                        rows.add(new long[]{ st, en, act });
+                        double endSoc = rs.getDouble("end_soc");
+                        if (rs.wasNull()) endSoc = Double.NaN;
+                        raw.add(new long[]{ st, en, (!ltNull && lt > 0) ? lt : 0L });
                         startSocs.add(rs.getDouble("start_soc"));
+                        endSocs.add(endSoc);
                     }
                 }
+            }
+            if (raw.isEmpty()) return false;
+
+            // Second pass: fold in the per-session-scoped charging heartbeat.
+            for (int i = 0; i < raw.size(); i++) {
+                long st = raw.get(i)[0];
+                long en = raw.get(i)[1];
+                long cpsLast = raw.get(i)[2];
+                // Upper bound = just BEFORE the next-NEWER session's start (rows
+                // are DESC), or `now` for the newest. The session-start tick writes
+                // an is_charging=1 row at exactly the newer session's start_time;
+                // excluding it (upper-1) keeps that boundary row attributed to the
+                // newer session only, not double-counted onto this older one.
+                long upper = (i == 0) ? now : raw.get(i - 1)[0] - 1;
+                long hb = maxChargingHeartbeat(st, upper);
+                // start (st) is the floor; cpsLast/hb/en are 0 when absent.
+                long act = Math.max(Math.max(cpsLast, hb), Math.max(en, st));
+                rows.add(new long[]{ st, en, act });
             }
             if (rows.isEmpty()) return false;
 
             // The newest session must itself be recent enough to belong to this
             // charge (its last activity within the window of now).
             if (now - rows.get(0)[2] > CHARGING_MERGE_GAP_MS || now - rows.get(0)[2] < 0) return false;
+
+            // Unplug→short-drive→replug separator. The heartbeat keeps `act` fresh
+            // across a brief unplug+drive, so the within-window check above (and
+            // the canonical-start SOC guard below) is no longer sufficient to tell
+            // "one charge interrupted by a daemon restart" from "two distinct
+            // charges 10 min apart". Distinguishing signal: a genuine
+            // restart-mid-charge leaves the NEWEST session still OPEN (SESSION END
+            // never ran → end_soc NULL). An unplug→drive→replug leaves the newest
+            // session CLOSED (end_soc set) AND current SOC has DROPPED since that
+            // close (the drive consumed energy). So: if the newest candidate is
+            // closed and SOC fell below its end_soc, this is a new charge — decline
+            // resume and let the caller INSERT a fresh row. (Open newest → genuine
+            // resume, untouched. Charging never lowers SOC, so for a true continued
+            // charge soc >= end_soc always holds.)
+            double newestEndSoc = endSocs.get(0);
+            if (!Double.isNaN(newestEndSoc) && soc + 1.0 < newestEndSoc) return false;
 
             // Walk newest→oldest, extending the chain while consecutive gaps
             // (older.lastActivity → newer.start) stay within the window.
@@ -1406,12 +1487,19 @@ public class SocHistoryDatabase {
                     }
                 }
             }
-            // No samples → nothing to reconstruct; close with start values so it
-            // stops showing as a dangling open row.
-            long endTime = (lastT > 0) ? lastT : start;
-            // Guard: if the last sample is very recent, a charge may still be
-            // live (resume will adopt it) — leave it for now.
-            if (lastT > 0 && (now - lastT) < 120_000L) return;
+            // Activity = last power sample, else last charging heartbeat in
+            // soc_history (the only activity signal on models with no power
+            // samples), else start.
+            long heartbeat = maxChargingHeartbeat(start, now);
+            long lastActivity = Math.max(lastT, heartbeat);
+            // No samples/heartbeat → nothing to reconstruct; close with start
+            // values so it stops showing as a dangling open row.
+            long endTime = (lastActivity > 0) ? lastActivity : start;
+            // Guard: if the last activity is very recent, a charge may still be
+            // live (resume will adopt it) — leave it for now. Honor the heartbeat
+            // too, else a no-power-sample live charge gets prematurely closed at
+            // init and then churns through a fold/reverse-fold on resume.
+            if (lastActivity > 0 && (now - lastActivity) < 120_000L) return;
 
             double energyAdded = integrateSessionEnergyKwh(start);
             double endSoc = !Double.isNaN(lastSoc) ? lastSoc : startSoc;
@@ -1431,7 +1519,7 @@ public class SocHistoryDatabase {
                 r.setLong(1, start);
                 try (ResultSet rs = r.executeQuery()) { if (rs.next()) gun = rs.getInt(1); }
             }
-            int isDc = (gun == 3) ? 1 : (gun == 2 ? 0 : -1);
+            int isDc = deriveIsDc(gun, peak);  // peak-guarded against a misread DC gun
             double tAvg = lastTemp > -999 ? lastTemp : -999;
 
             try (PreparedStatement upd = connection.prepareStatement(
@@ -1584,6 +1672,25 @@ public class SocHistoryDatabase {
     }
 
     /** Charging gun state (2=AC 3=DC 4=AC_DC 5=V2L), or -1 if unavailable. */
+    /**
+     * Derive the is_dc column (1=DC, 0=AC, -1=unknown) from the gun state, with a
+     * PHYSICAL sanity guard against a HAL gun-state misread. DC fast-charging is
+     * fundamentally high-power; a session whose measured peak never approached a DC
+     * rate is not DC, whatever the gun byte said. Observed: a PHEV AC charge at
+     * ~1.7 kW (≈7 kW peak) reported gun=3 → was labelled "DC fast". So a gun==3
+     * (DC) verdict is only honoured when the session peak is DC-plausible; otherwise
+     * we downgrade to unknown (-1) and let the power-based classifier bucket it as
+     * AC. gun==2 (AC) is trusted as-is. The 15 kW floor mirrors charging.js
+     * DC_MIN_PEAK_KW — comfortably above any AC wallbox, well below a real DC ramp.
+     */
+    private static final double DC_MIN_PEAK_KW = 15.0;
+    private int deriveIsDc(int gunState, double peakKw) {
+        if (gunState == 3) {
+            return (peakKw >= DC_MIN_PEAK_KW) ? 1 : -1;  // DC flag needs DC-plausible power
+        }
+        return (gunState == 2) ? 0 : -1;
+    }
+
     private int snapshotGunState() {
         try {
             com.overdrive.app.byd.BydDataCollector col = com.overdrive.app.byd.BydDataCollector.getInstance();
@@ -1597,7 +1704,13 @@ public class SocHistoryDatabase {
         return -1;
     }
 
-    /** Estimated time-to-full in minutes from the BYD rest-time fields, or -1. */
+    /**
+     * Estimated time-to-full in minutes. Prefers the BYD HAL rest-time countdown
+     * (the vehicle's own estimate, most accurate); when the HAL doesn't report it
+     * (dead getter on some trims — the field stays UNAVAILABLE), falls back to a
+     * COMPUTED estimate: remaining energy to full ÷ current charging power.
+     * Returns -1 when neither is available.
+     */
     private int snapshotTimeToFullMin() {
         try {
             com.overdrive.app.byd.BydDataCollector col = com.overdrive.app.byd.BydDataCollector.getInstance();
@@ -1608,6 +1721,36 @@ public class SocHistoryDatabase {
                     int UNAVAIL = com.overdrive.app.byd.BydVehicleData.UNAVAILABLE;
                     if (h != UNAVAIL || m != UNAVAIL) {
                         return (h != UNAVAIL ? h * 60 : 0) + (m != UNAVAIL ? m : 0);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        // FALLBACK: HAL rest-time is absent on this trim — compute it ourselves from
+        // remaining-energy-to-full ÷ charging power. remaining = (100−SOC)/100 ×
+        // nominal × SOH; power = the resolved getChargingState().chargingPowerKW (on
+        // PHEV this is the SOC-derived estimator, i.e. the true ~kW). Coarse (bounded
+        // by the same SOC quantisation as the power estimate) and only as good as the
+        // power reading — but far better than a blank "--". Requires a live SOC, a
+        // known pack, and a positive power; else -1 (UI shows "--").
+        try {
+            com.overdrive.app.abrp.SohEstimator soh = getSohEstimator();
+            double nominal = (soh != null) ? soh.getNominalCapacityKwh() : 0;
+            if (nominal > 0) {
+                VehicleDataMonitor vm = VehicleDataMonitor.getInstance();
+                BatterySocData sd = (vm != null) ? vm.getBatterySoc() : null;
+                double soc = (sd != null) ? sd.socPercent : Double.NaN;
+                ChargingStateData cs = (vm != null) ? vm.getChargingState() : null;
+                double powerKw = (cs != null) ? cs.chargingPowerKW : Double.NaN;
+                double sohFrac = (soh != null && soh.hasDisplaySoh()) ? soh.getDisplaySoh() / 100.0 : 1.0;
+                if (sohFrac <= 0) sohFrac = 1.0;
+                if (!Double.isNaN(soc) && soc >= 0 && soc < 100
+                        && !Double.isNaN(powerKw) && powerKw > 0.1) {
+                    double remainingToFullKwh = ((100.0 - soc) / 100.0) * nominal * sohFrac;
+                    if (remainingToFullKwh > 0) {
+                        int mins = (int) Math.round(remainingToFullKwh / powerKw * 60.0);
+                        // Clamp to a sane band (0 < ttf ≤ 48h) so a tiny power or a
+                        // near-full pack can't emit an absurd or zero value.
+                        if (mins > 0 && mins <= 48 * 60) return mins;
                     }
                 }
             }

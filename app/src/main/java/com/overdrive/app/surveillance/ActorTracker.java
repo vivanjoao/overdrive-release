@@ -80,6 +80,28 @@ public final class ActorTracker {
      */
     private static final int STATIC_FRAMES_NEEDED_VEHICLE = 2;
 
+    /**
+     * Dwell bbox-refresh confidence floor, as a FRACTION of the latched peak
+     * confidence. While an actor dwells at its peak proximity tier, the hero
+     * bbox/time re-points to the freshest frame whose confidence is at least
+     * this fraction of the peak — so a moving actor's box tracks them instead of
+     * freezing at first-touch. 0.6 admits the natural YOLO confidence decay of a
+     * real, still-clearly-visible actor (a 0.90 first sight stays eligible down
+     * to 0.54) while rejecting a collapse toward the detection threshold (a bbox
+     * clipped at the frame edge as the actor exits). Paired with an absolute
+     * floor so a low-peak actor can't ratchet the bar below a meaningful value.
+     */
+    private static final float DWELL_REFRESH_CONF_FRAC = 0.60f;
+
+    /**
+     * Absolute lower bound for the dwell bbox-refresh floor. Guards the
+     * fractional floor for a low-confidence peak: at peak 0.40 the fractional
+     * floor is 0.24 (~the YOLO 0.25 threshold), which would re-point onto a
+     * near-noise box. 0.40 keeps the refreshed frame a genuine detection
+     * regardless of how low the peak was.
+     */
+    private static final float DWELL_REFRESH_CONF_ABS_MIN = 0.40f;
+
     /** Bbox-area drift below this counts as "stable" for static detection. */
     private static final float STATIC_AREA_DRIFT_FRAC = 0.10f;
 
@@ -525,6 +547,19 @@ public final class ActorTracker {
                 peakBboxX = x; peakBboxY = y; peakBboxW = w; peakBboxH = h;
                 peakBboxQuadW = quadW;
                 peakBboxQuadH = quadH;
+                // Stamp the bbox-latch time to THIS frame. peakSeverityWallMs is
+                // the "peak moment" timestamp ThumbnailBuffer uses to verify the
+                // hero's rgb and bbox come from the SAME frame (its coherence
+                // gate). This branch re-points peakBbox on a proximity upgrade
+                // WITHOUT a severity change, so without this stamp the timestamp
+                // would lag the bbox: the hero score later improves (toActor
+                // re-derives severity from the lifetime peakProximity) on a frame
+                // whose rgb no longer matches this now-stale bbox, and the box is
+                // drawn where the actor USED to be — the "box misses the actor"
+                // bug. The dwell-refresh + severity-upgrade branches already stamp
+                // it for the same reason; keep all three latch sites consistent.
+                peakSeverityWallMs = wallNowMs;
+                peakSeverityRelMs = recordingStartWallMs > 0 ? wallNowMs - recordingStartWallMs : -1;
                 // Without this, a person crossing front → right quadrant
                 // whose proximity bumped but severity stayed at ALERT
                 // would have peakBbox set to right-camera coords but
@@ -537,6 +572,54 @@ public final class ActorTracker {
             } else if (prox == peakProximity) {
                 // continue dwell
                 peakProxFrames++;
+                // DWELL BBOX REFRESH: re-point peakBbox/crop/camera/time to THIS
+                // (later) frame while the actor stays at its peak proximity tier.
+                // Previously peakBbox froze on the FIRST frame that reached this
+                // tier, so a moving actor (walking past at constant distance, or
+                // crossing the frame while still CLOSE) got a hero box pinned to
+                // where they WERE on first touch — the "delayed + wrong position"
+                // bug. This only re-points the latch to a fresher frame at the
+                // SAME threat tier; it never raises severity and never changes
+                // hero SELECTION (the ThumbnailBuffer score is unchanged). Pairs
+                // with the dwell-refresh recapture in ThumbnailBuffer.observe so
+                // the hero's rgb and bbox stay from the SAME frame (coherent).
+                //
+                // QUALITY GATE — adaptive floor, NOT ">= peakConfidence". The old
+                // ">= peak" gate NEVER re-pointed when the peak latched on the
+                // actor's highest-confidence frame (the common case: a person is
+                // most confidently detected on first clear sight, e.g. 0.90, then
+                // YOLO confidence naturally decays as they turn/recede — 0.84,
+                // 0.77, 0.76). Every later frame failed `conf >= 0.90`, so the box
+                // froze at first-touch while the person walked on — the EXACT
+                // on-car bug (hero box on empty ground, person already metres
+                // away). Instead, advance the bbox on any frame that is still a
+                // SOLID detection: at least DWELL_REFRESH_CONF_FRAC of the peak
+                // AND an absolute floor. That tracks the natural-decay case while
+                // still rejecting a degenerate exit frame (bbox clipped at the
+                // frame edge collapses confidence toward the YOLO threshold).
+                //
+                // peakConfidence stays the running MAX (Math.max), NOT this
+                // frame's value: it is the cross-actor hero SCORE tiebreaker
+                // (ThumbnailBuffer.score) and the anchor this very gate measures
+                // against. Lowering it would (a) let the actor lose hero selection
+                // to another mid-dwell and (b) move the goalposts so a slow
+                // confidence slide ratchets the floor down frame by frame. Holding
+                // the max keeps the score stable so ThumbnailBuffer's equal-score
+                // dwell-refresh branch fires and re-pairs THIS frame's rgb with the
+                // freshened bbox (coherent hero), while peakSeverityWallMs advances
+                // to mark the fresher frame.
+                float dwellFloor = Math.max(
+                        peakConfidence * DWELL_REFRESH_CONF_FRAC,
+                        DWELL_REFRESH_CONF_ABS_MIN);
+                if (d.getConfidence() >= dwellFloor) {
+                    peakBboxX = x; peakBboxY = y; peakBboxW = w; peakBboxH = h;
+                    peakBboxQuadW = quadW;
+                    peakBboxQuadH = quadH;
+                    peakCamera = newQuadrant;
+                    peakConfidence = Math.max(peakConfidence, d.getConfidence());
+                    peakSeverityWallMs = wallNowMs;
+                    peakSeverityRelMs = recordingStartWallMs > 0 ? wallNowMs - recordingStartWallMs : -1;
+                }
             } else {
                 // moved further; reset dwell
                 peakProxStartWallMs = wallNowMs;
@@ -715,6 +798,21 @@ public final class ActorTracker {
                     cameraMask,
                     peakProximity, lastProx,
                     trend, isStatic, isStaticForTimeline,
+                    // everMovedTested requires >=2 test frames, NOT >=1: the
+                    // everMoved area-growth latch needs areaOverBandFrames>=2
+                    // (two consecutive over-band mosaic frames), so after only
+                    // ONE test frame everMoved provably cannot have latched yet —
+                    // asserting "stillness measured" then would let the
+                    // isLowConfFarNotice gate suppress a head-on approacher seen on
+                    // exactly 2 mosaic frames (anchor + 1 test) whose area latch
+                    // hadn't fired. Requiring 2 test frames means both the centroid
+                    // and the 2-frame area paths have had their chance before we
+                    // trust !everMoved. Still fails OPEN for foveated-only / single-
+                    // test-frame tracks. (The sibling isStaticForTimeline uses
+                    // everMovedTestFrames>=1 directly but is additionally gated by
+                    // historyCount>=MIN_ESCALATION_FRAMES, so it never trusted a
+                    // 2-frame track; the new gates have no such floor.)
+                    everMoved, everMovedTestFrames >= 2,
                     historyCount >= MIN_ESCALATION_FRAMES,
                     effSeverity, peakSeverityWallMs, peakSeverityRelMs,
                     peakConfidence,

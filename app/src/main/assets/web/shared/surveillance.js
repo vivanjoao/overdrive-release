@@ -20,9 +20,18 @@ BYD.surveillance = {
         detectAnimal: false,
         preRecordSeconds: 5,
         postRecordSeconds: 10,
-        // Single recording quality tier (replaces legacy recordingBitrate
-        // LOW/MEDIUM/HIGH). Server rebuilds the encoder live on change.
-        recordingQuality: 'STANDARD',
+        // ACC-off SURVEILLANCE quality tier — INDEPENDENT of the ACC-on
+        // dashcam recordingQuality. This page's picker drives the parked
+        // sentry bitrate only. Persisted to recording.surveillanceQuality;
+        // the server live-applies it to a running parked recording with no
+        // encoder reinit. Seeded from the ACC-on tier server-side so it starts
+        // matching the old shared value until the user changes it.
+        surveillanceQuality: 'STANDARD',
+        // Surveillance camera fps — independent of the ACC-on targetFps.
+        // Persisted to camera.surveillanceTargetFps.
+        surveillanceCameraFps: 15,
+        // Codec is SHARED across both axes (a device-compat choice, not a
+        // per-mode quality knob), so it stays on the recordingCodec key.
         recordingCodec: 'H264',
         // Server-supplied for UI (filled by load):
         recordingQualityOptions: {},
@@ -80,7 +89,14 @@ BYD.surveillance = {
         // Clip segment length in minutes (2/5/10). SAME shared key as the
         // recording page (recording.segmentDurationMinutes) — one control
         // governs both axes, so changing it here changes it there too.
-        segmentDurationMinutes: 2
+        segmentDurationMinutes: 2,
+        // HV-battery SoC cutoff (%) for parked surveillance. Saved to
+        // power.lowSocCutoffPercent (NOT the surveillance section) — that's the
+        // key SocCutoffMonitor reads to self-shut-down at/below this level.
+        // 0 = Off. Immediate-save on drag end (like screenDeterrentDuration),
+        // so it stays OUT of the Apply-button tab field map. Default 10 here so
+        // the dirty-diff baseline is a real number before loadConfig() lands.
+        lowSocCutoffPercent: 10
     },
     storageInfo: {
         sdCardAvailable: false,
@@ -329,6 +345,42 @@ BYD.surveillance = {
                     });
                 }
             }
+            // ACC-off surveillance tier — SIBLING re-sync so a change made on
+            // another device / tab reflects on visibility refresh (the surv page
+            // now owns recording.surveillanceQuality; /api/surveillance/config
+            // does NOT surface it, so re-read it from unified config here — same
+            // pattern as the rectify + clip-duration blocks above). Falls back to
+            // the ACC-on recordingQuality when the surveillance key is absent, so
+            // a pre-split config shows the seeded value. Guarded on
+            // !hasUnsavedChanges to protect a mid-flight tier pick.
+            if (!this.hasUnsavedChanges &&
+                uData.success && uData.config && uData.config.recording) {
+                var sqRefresh = uData.config.recording.surveillanceQuality
+                    || uData.config.recording.recordingQuality;
+                if (sqRefresh && sqRefresh !== this.config.surveillanceQuality) {
+                    this.config.surveillanceQuality = sqRefresh;
+                    if (this.savedConfig) this.savedConfig.surveillanceQuality = sqRefresh;
+                    document.querySelectorAll('#survQualityBtns .btn-toggle').forEach(function (btn) {
+                        btn.classList.toggle('active', btn.dataset.value === sqRefresh);
+                    });
+                    this.renderActiveEstimate();
+                }
+            }
+            // ACC-off surveillance fps — SIBLING re-sync (camera.surveillanceTargetFps),
+            // falling back to camera.targetFps when unset. Same guard/pattern.
+            if (!this.hasUnsavedChanges &&
+                uData.success && uData.config && uData.config.camera) {
+                var sfRefresh = (typeof uData.config.camera.surveillanceTargetFps === 'number')
+                    ? uData.config.camera.surveillanceTargetFps
+                    : uData.config.camera.targetFps;
+                if (typeof sfRefresh === 'number' && sfRefresh !== this.config.surveillanceCameraFps) {
+                    this.config.surveillanceCameraFps = sfRefresh;
+                    if (this.savedConfig) this.savedConfig.surveillanceCameraFps = sfRefresh;
+                    document.querySelectorAll('#survFpsBtns .btn-toggle').forEach(function (btn) {
+                        btn.classList.toggle('active', btn.dataset.value === String(sfRefresh));
+                    });
+                }
+            }
         } catch (_) {}
     },
 
@@ -467,25 +519,31 @@ BYD.surveillance = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
-                this.config.cameraFps = data.cameraFps || 15;
+                // Surveillance-specific fps + tier (fall back to the shared
+                // ACC-on value the server sends when the surveillance key is
+                // unset, so a fresh install shows the seeded default).
+                this.config.surveillanceCameraFps =
+                    data.surveillanceCameraFps || data.cameraFps || 15;
                 this.config.cameraFpsActual = data.cameraFpsActual || null;
                 this.config.cameraFpsClampNote = data.cameraFpsClampNote || null;
                 // Pull tier + render data so the picker can show live
                 // size estimates without waiting for the next reload.
-                if (data.recordingQuality) {
-                    this.config.recordingQuality = data.recordingQuality;
+                if (data.surveillanceQuality) {
+                    this.config.surveillanceQuality = data.surveillanceQuality;
+                } else if (data.recordingQuality) {
+                    this.config.surveillanceQuality = data.recordingQuality;
                 }
                 this.config.recordingQualityOptions = data.recordingQualityOptions || {};
                 this.config.activeRecordingEstimate = data.activeRecordingEstimate || null;
             }
         } catch (e) {
             console.warn('Failed to load camera FPS:', e);
-            this.config.cameraFps = 15;
+            this.config.surveillanceCameraFps = 15;
         }
     },
-    
+
     setFps(fps) {
-        this.config.cameraFps = parseInt(fps, 10);
+        this.config.surveillanceCameraFps = parseInt(fps, 10);
         document.querySelectorAll('#survFpsBtns .btn-toggle').forEach(btn =>
             btn.classList.toggle('active', btn.dataset.value === String(fps)));
         // FPS shifts the per-tier qualityEquivalent labels — re-render so
@@ -1091,15 +1149,16 @@ BYD.surveillance = {
         const timelinePost = document.getElementById('timelinePost');
         if (timelinePost) timelinePost.style.flex = this.config.postRecordSeconds / 20;
 
-        // New tier picker (replaces #bitrateBtns).
+        // Surveillance tier picker — bound to the ACC-off surveillanceQuality
+        // key (independent of the dashcam page's recordingQuality picker).
         document.querySelectorAll('#survQualityBtns .btn-toggle').forEach(btn =>
-            btn.classList.toggle('active', btn.dataset.value === this.config.recordingQuality));
+            btn.classList.toggle('active', btn.dataset.value === this.config.surveillanceQuality));
         document.querySelectorAll('#codecBtns .btn-toggle').forEach(btn =>
             btn.classList.toggle('active', btn.dataset.value === this.config.recordingCodec));
 
-        // Camera FPS buttons
+        // Surveillance camera FPS buttons — bound to surveillanceCameraFps.
         document.querySelectorAll('#survFpsBtns .btn-toggle').forEach(btn =>
-            btn.classList.toggle('active', btn.dataset.value === String(this.config.cameraFps || 15)));
+            btn.classList.toggle('active', btn.dataset.value === String(this.config.surveillanceCameraFps || 15)));
 
         // Clip duration buttons (shared across recording + surveillance).
         document.querySelectorAll('#survClipDurationBtns .btn-toggle').forEach(btn =>
@@ -1263,7 +1322,7 @@ BYD.surveillance = {
     },
 
     setRecordingQuality(tier) {
-        this.config.recordingQuality = tier;
+        this.config.surveillanceQuality = tier;
         document.querySelectorAll('#survQualityBtns .btn-toggle').forEach(btn =>
             btn.classList.toggle('active', btn.dataset.value === tier));
         this.renderActiveEstimate();
@@ -1299,8 +1358,8 @@ BYD.surveillance = {
             // Compute locally from the user's *current* selection, not the
             // server's stale activeRecordingEstimate. Show "saved → pending"
             // diff when the user has changed the tier without applying yet.
-            const currentTier = this.config.recordingQuality;
-            const savedTier = this.savedConfig ? this.savedConfig.recordingQuality : currentTier;
+            const currentTier = this.config.surveillanceQuality;
+            const savedTier = this.savedConfig ? this.savedConfig.surveillanceQuality : currentTier;
             const currentEst = this.estimateForTier(currentTier);
             const savedEst = this.estimateForTier(savedTier);
             if (currentTier === savedTier || !savedEst) {
@@ -2312,6 +2371,17 @@ BYD.surveillance = {
         // Reflect the "recording to Internal because USB power is off" notice.
         this.updateUsbPowerStorageNotice();
 
+        // Low-battery (HV SoC) cutoff slider. 0 renders as "Off".
+        const socCutoff = document.getElementById('lowSocCutoffSlider');
+        let socVal = parseInt(this.config.lowSocCutoffPercent, 10);
+        if (!isFinite(socVal)) socVal = 10;
+        if (socVal < 0) socVal = 0; if (socVal > 30) socVal = 30;
+        if (socCutoff) socCutoff.value = socVal;
+        const socCutoffLabel = document.getElementById('lowSocCutoffValue');
+        if (socCutoffLabel) socCutoffLabel.textContent = (socVal === 0)
+            ? (BYD.i18n.t('surveillance.low_soc_cutoff_off') || 'Off')
+            : socVal + '%';
+
         // Environment preset — check if current values match the saved preset
         // If user customized sliders after selecting a preset, don't highlight any preset
         const savedPreset = this.config.environmentPreset;
@@ -2530,19 +2600,18 @@ BYD.surveillance = {
             'discardEmptyBrightMotionEvents'
         ],
         recording: [
-            // Backend reads these EXACT names — preRecordSeconds (no "ing"),
-            // recordingQuality / recordingCodec (with the "recording" prefix).
-            // recordingQuality is the consolidated tier (ECONOMY..MAX) that
-            // replaces the legacy recordingBitrate (LOW/MEDIUM/HIGH).
-            // cameraFps now flows through Apply too — branch in applySettings()
-            // POSTs the trio (recordingQuality + recordingCodec + cameraFps)
-            // to /api/settings/quality before merging the rest into
-            // /api/surveillance/config.
-            // rectifyStrength is shared with the recording page; saving here
-            // also drives ACC-on dashcam dewarp via the unified config key
-            // (recording.rectifyStrength).
+            // Backend reads these EXACT names — preRecordSeconds (no "ing").
+            // This page's quality/fps pickers drive the ACC-off SURVEILLANCE
+            // knobs (surveillanceQuality + surveillanceCameraFps), INDEPENDENT
+            // of the dashcam page's ACC-on recordingQuality/cameraFps. The
+            // applySettings() recording branch POSTs them to
+            // /api/settings/quality, which persists + live-applies to a running
+            // parked recording with no encoder reinit.
+            // recordingCodec is SHARED (device-compat, not a per-mode knob) and
+            // stays on the shared key. rectifyStrength + segmentDurationMinutes
+            // are likewise shared with the dashcam page (one slider each).
             'preRecordSeconds', 'postRecordSeconds',
-            'recordingQuality', 'recordingCodec', 'cameraFps',
+            'surveillanceQuality', 'recordingCodec', 'surveillanceCameraFps',
             'rectifyStrength',
             // Shared clip duration — same recording.segmentDurationMinutes key
             // the dashcam page writes; saving here also changes that axis.
@@ -2686,7 +2755,7 @@ BYD.surveillance = {
                 // changes". Without this, parallel posts could promote
                 // savedConfig optimistically and leave divergent state
                 // with no recovery short of a full reload.
-                const qualityKeys = ['recordingQuality', 'recordingCodec', 'cameraFps',
+                const qualityKeys = ['surveillanceQuality', 'recordingCodec', 'surveillanceCameraFps',
                     'segmentDurationMinutes'];
                 const survKeys = ['preRecordSeconds', 'postRecordSeconds'];
                 const committed = {};
@@ -2697,9 +2766,13 @@ BYD.surveillance = {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            recordingQuality: this.config.recordingQuality,
+                            // ACC-off surveillance knobs — server persists to
+                            // recording.surveillanceQuality / camera.surveillanceTargetFps
+                            // and live-applies to a running parked recording.
+                            surveillanceQuality: this.config.surveillanceQuality,
+                            surveillanceCameraFps: this.config.surveillanceCameraFps,
+                            // Shared with the dashcam page (device-compat + clip length).
                             recordingCodec: this.config.recordingCodec,
-                            cameraFps: this.config.cameraFps,
                             segmentDurationMinutes: this.config.segmentDurationMinutes
                         })
                     });
@@ -3020,6 +3093,47 @@ BYD.surveillance = {
         if (!isFinite(v)) return;
         var label = document.getElementById('screenDeterrentDurationValue');
         if (label) label.textContent = v + 's';
+    },
+
+    /**
+     * Low-battery (HV SoC) cutoff — label-only preview while dragging. The real
+     * save fires on `onchange` (drag end) via updateLowSocCutoff so a drag
+     * doesn't POST per pointer-move. 0 renders as "Off".
+     */
+    previewLowSocCutoff: function(value) {
+        var v = parseInt(value, 10);
+        if (!isFinite(v)) return;
+        var label = document.getElementById('lowSocCutoffValue');
+        if (label) label.textContent = (v === 0)
+            ? (BYD.i18n.t('surveillance.low_soc_cutoff_off') || 'Off')
+            : v + '%';
+    },
+
+    /**
+     * Persist the low-battery cutoff. Saves to power.lowSocCutoffPercent (the
+     * key SocCutoffMonitor reads), NOT the surveillance section — the handler
+     * routes it. Immediate-save + savedConfig mirror so it stays clean against
+     * the Apply-button dirty diff, mirroring updateScreenDeterrent('duration').
+     */
+    updateLowSocCutoff: function(value) {
+        var v = parseInt(value, 10);
+        if (!isFinite(v) || v < 0) v = 0;
+        if (v > 30) v = 30;
+        this.config.lowSocCutoffPercent = v;
+        if (this.savedConfig) this.savedConfig.lowSocCutoffPercent = v;
+        var label = document.getElementById('lowSocCutoffValue');
+        if (label) label.textContent = (v === 0)
+            ? (BYD.i18n.t('surveillance.low_soc_cutoff_off') || 'Off')
+            : v + '%';
+        fetch('/api/surveillance/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lowSocCutoffPercent: v })
+        }).then(function() {
+            if (BYD.surveillance.markChanged) BYD.surveillance.markChanged();
+        }).catch(function(e) {
+            console.warn('Failed to save low-SoC cutoff:', e);
+        });
     },
 
     queueScreenDeterrentMessage: function(value) {

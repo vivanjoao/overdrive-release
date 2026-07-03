@@ -11,6 +11,7 @@ import com.overdrive.app.logging.LogConfig
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.server.LocaleManager
 import com.overdrive.app.services.DaemonKeepaliveService
+// import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.ui.util.PreferencesManager
 
 /**
@@ -44,10 +45,11 @@ class OverdriveApplication : Application() {
         // is created so the first paint matches the user's choice.
         AppCompatDelegate.setDefaultNightMode(PreferencesManager.getThemeMode())
         
-        // Privileged shell (UID 1000) DISABLED — it caused the BYD default
-        // dashcam to show "no signal" by elevating the app's camera priority via
-        // accmodemanager. All daemons now run via ADB shell (UID 2000), which is
-        // sufficient.
+        // Privileged shell (UID 1000) DISABLED — causes BYD default dashcam
+        // to show "no signal" by elevating app's camera priority via accmodemanager.
+        // All daemons now run via ADB shell (UID 2000) which is sufficient.
+        // PrivilegedShellSetup.init(this)
+        // PrivilegedShellSetup.setup(...)
 
         // Start DaemonKeepaliveService - handles:
         // - Foreground service with START_STICKY
