@@ -75,9 +75,8 @@ public class NotificationAction extends BaseAction {
      */
     public void trigger(AutomationAction automationAction) {
         NotificationEvent.Severity severity = NotificationEvent.Severity.INFO;
-        // TODO: Change category to an automation specific one
         NotificationEvent event = new NotificationEvent(
-                "surveillance.motion",
+                "automation.action",
                 severity,
                 "Automation triggered",
                 automationAction.getVariables().get("message").toString(),
