@@ -498,8 +498,16 @@ public class MqttConnectionManager {
                 payload.put("power", 0);
             }
 
-            // speed
-            if (vd != null && !Double.isNaN(vd.speedKmh)) {
+            // speed — the bus speed signal freezes at its last sample when ACC is off
+            // (BydDataCollector drops to a 90s poll and the speed listener stops firing), so a
+            // stale non-zero value would keep publishing after parking and HA would think the car
+            // is still moving. The car is parked when ACC is off, so force 0 — same handling as
+            // power above. GPS stays a driving-only fallback for a momentary NaN bus speed.
+            boolean accOnSpeed = false;
+            try { accOnSpeed = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
+            if (!accOnSpeed) {
+                payload.put("speed", 0);
+            } else if (vd != null && !Double.isNaN(vd.speedKmh)) {
                 payload.put("speed", vd.speedKmh);
             } else if (gpsMonitor.hasLocation()) {
                 payload.put("speed", gpsMonitor.getSpeed() * 3.6);
@@ -623,11 +631,21 @@ public class MqttConnectionManager {
             }
 
             // gear (extra field not in ABRP — useful for MQTT consumers)
-            // Prefer the 5Hz GearMonitor poller (fresh within ~200ms) over the 5s/90s
-            // collector snapshot: via the snapshot a P→D shift took 10-14s to reach HA,
-            // and the gearbox SDK listener can't be used (crashes as uid 2000). The
-            // snapshot stays as the fallback when the monitor isn't running.
-            if (gearMonitor.isActive()) {
+            // ACC off → force P: the bus gear signal (and GearMonitor's poll) FREEZES at
+            // the last driven gear when the car powers off (e.g. R after backing into a
+            // spot), but the car physically auto-shifts to P at shutdown — it cannot sit
+            // powered-off in R. Same stale-signal handling as speed→0 and power→0 above;
+            // the ACC-edge flush ships the P within a couple of seconds of key-off.
+            // While ACC is on: prefer the 5Hz GearMonitor poller (fresh within ~200ms)
+            // over the 5s/90s collector snapshot — via the snapshot a P→D shift took
+            // 10-14s to reach HA, and the gearbox SDK listener can't be used (crashes
+            // as uid 2000). The snapshot stays as the fallback when the monitor isn't
+            // running.
+            boolean accOnGear = false;
+            try { accOnGear = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
+            if (!accOnGear) {
+                payload.put("gear", GearMonitor.gearToString(GearMonitor.GEAR_P));
+            } else if (gearMonitor.isActive()) {
                 payload.put("gear", GearMonitor.gearToString(gearMonitor.getCurrentGear()));
             } else if (vd != null && vd.gearMode != BydVehicleData.UNAVAILABLE) {
                 payload.put("gear", GearMonitor.gearToString(vd.gearMode));
