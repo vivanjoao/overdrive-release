@@ -1,0 +1,41 @@
+name: overdrive_flutter
+description: "OverDrive - Remote client for BYD vehicle Sentry Mode."
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^3.0.0
+
+  # Routing
+  go_router: ^16.0.0
+
+  # Networking
+  dio: ^5.7.0
+
+  # Local persistence (connection config, prefs)
+  shared_preferences: ^2.3.2
+
+  # Video playback for recordings / live camera clips
+  video_player: ^2.9.2
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  custom_lint: ^0.8.1
+  riverpod_lint: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true

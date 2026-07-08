@@ -1,0 +1,18 @@
+{
+  "@@locale": "en",
+  "appName": "OverDrive",
+  "@appName": {
+    "description": "Application name"
+  },
+  "dashboardTitle": "Dashboard",
+  "@dashboardTitle": {
+    "description": "Title shown on the dashboard page"
+  },
+  "navDashboard": "Dashboard",
+  "navLiveView": "Live View",
+  "navSurveillance": "Surveillance",
+  "navRecordings": "Recordings",
+  "navVehicleControl": "Vehicle",
+  "navTrips": "Trips",
+  "navSettings": "Settings"
+}
